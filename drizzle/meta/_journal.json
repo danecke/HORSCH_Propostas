@@ -15,6 +15,13 @@
       "when": 1785514193748,
       "tag": "0001_smiling_nuke",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1785517643659,
+      "tag": "0002_broken_blur",
+      "breakpoints": true
     }
   ]
 }

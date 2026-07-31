@@ -1,5 +1,6 @@
-import { chatGPTSignInPath, getChatGPTUser } from "./chatgpt-auth";
+import { getAuthenticatedUser } from "../lib/auth";
 import { Dashboard } from "./dashboard";
+import { LoginForm } from "./login-form";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +21,7 @@ function BrandMark({ className = "" }: { className?: string }) {
 }
 
 export default async function Home() {
-  const user = await getChatGPTUser();
+  const user = await getAuthenticatedUser();
 
   if (!user) {
     return (
@@ -47,28 +48,12 @@ export default async function Home() {
         </section>
 
         <section className="login-access-panel">
-          <div className="login-card">
+          <div className="login-card-wrap">
             <div className="login-mobile-brand">
               <BrandMark className="login-mobile-mark" />
               <span>HORSCH</span>
             </div>
-            <span className="eyebrow">Portal comercial</span>
-            <h2>Acesse sua gestão de propostas</h2>
-            <p>
-              Entre com sua conta corporativa para acessar informações
-              comerciais protegidas.
-            </p>
-            <a className="login-button" href={chatGPTSignInPath("/")}>
-              Entrar com segurança
-              <span aria-hidden="true">→</span>
-            </a>
-            <div className="login-security">
-              <span className="security-icon" aria-hidden="true">✓</span>
-              <div>
-                <strong>Acesso protegido</strong>
-                <small>Identidade verificada e dados restritos à sua equipe.</small>
-              </div>
-            </div>
+            <LoginForm />
           </div>
           <small className="login-footer">HORSCH do Brasil · Uso comercial interno</small>
         </section>

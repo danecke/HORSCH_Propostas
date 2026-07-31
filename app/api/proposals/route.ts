@@ -157,6 +157,7 @@ export async function GET() {
         roleLabel: roleLabel(record.role as AccessProfile["role"]),
         dealershipId: record.dealershipId,
         active: record.active,
+        credentialReady: Boolean(record.passwordHash),
         createdAt: record.createdAt,
       })),
       me: {
@@ -167,6 +168,8 @@ export async function GET() {
           createProposal: canCreateProposal(profile),
           manageAllAccess: profile.role === "admin",
           decideProposal: profile.role === "dealer_manager",
+          deleteAnyProposal: profile.role === "admin",
+          deleteOwnDraft: profile.role === "factory_manager",
         },
       },
     });
@@ -350,6 +353,53 @@ export async function PATCH(request: Request) {
         updatedAt: new Date().toISOString(),
       })
       .where(eq(proposals.id, payload.id));
+    return Response.json({ ok: true });
+  } catch (error) {
+    return Response.json({ error: apiError(error) }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: Request) {
+  const profile = await getAccessProfile();
+  if (!profile) return forbidden();
+
+  try {
+    const payload = (await request.json()) as { id?: string };
+    if (!payload.id) {
+      return Response.json({ error: "Informe a proposta." }, { status: 400 });
+    }
+
+    const db = await getDb();
+    const [record] = await db
+      .select({ proposal: proposals, dealer: dealerships })
+      .from(proposals)
+      .innerJoin(dealerships, eq(proposals.dealershipId, dealerships.id))
+      .where(eq(proposals.id, payload.id))
+      .limit(1);
+    if (!record) {
+      return Response.json({ error: "Proposta não encontrada." }, { status: 404 });
+    }
+    if (!dealerIsVisible(profile, record.dealer)) return forbidden();
+
+    const canDelete =
+      profile.role === "admin" ||
+      (profile.role === "factory_manager" &&
+        record.proposal.status === "draft" &&
+        record.proposal.createdByEmail.toLowerCase() === profile.email);
+    if (!canDelete) {
+      return Response.json(
+        {
+          error:
+            "Somente o ADM pode excluir propostas enviadas. O Gestor Fábrica pode excluir apenas os próprios rascunhos.",
+        },
+        { status: 403 },
+      );
+    }
+
+    await db.batch([
+      db.delete(proposalItems).where(eq(proposalItems.proposalId, payload.id)),
+      db.delete(proposals).where(eq(proposals.id, payload.id)),
+    ]);
     return Response.json({ ok: true });
   } catch (error) {
     return Response.json({ error: apiError(error) }, { status: 500 });

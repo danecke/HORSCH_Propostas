@@ -60,6 +60,9 @@ export const users = sqliteTable(
       onDelete: "set null",
     }),
     active: integer("active", { mode: "boolean" }).notNull().default(true),
+    passwordHash: text("password_hash").notNull().default(""),
+    passwordSalt: text("password_salt").notNull().default(""),
+    passwordIterations: integer("password_iterations").notNull().default(0),
     createdByEmail: text("created_by_email").notNull().default(""),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -67,6 +70,22 @@ export const users = sqliteTable(
   (table) => [
     index("users_role_idx").on(table.role),
     index("users_dealership_idx").on(table.dealershipId),
+  ],
+);
+
+export const sessions = sqliteTable(
+  "sessions",
+  {
+    tokenHash: text("token_hash").primaryKey(),
+    userEmail: text("user_email")
+      .notNull()
+      .references(() => users.email, { onDelete: "cascade" }),
+    expiresAt: text("expires_at").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("sessions_user_idx").on(table.userEmail),
+    index("sessions_expires_idx").on(table.expiresAt),
   ],
 );
 

@@ -2,6 +2,10 @@ import { eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { dealerships, users } from "../../../db/schema";
 import { getAccessProfile, ROLES, type UserRole } from "../../../lib/access";
+import {
+  createPasswordCredential,
+  validatePassword,
+} from "../../../lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +15,7 @@ type AccessInput = {
   role?: UserRole;
   dealershipId?: number | null;
   active?: boolean;
+  password?: string;
 };
 
 function forbidden(message = "Você não tem permissão para gerenciar este acesso.") {
@@ -51,6 +56,10 @@ export async function POST(request: Request) {
     if (role === "dealer_manager" && dealershipId === null) {
       return Response.json({ error: "Selecione a concessionária deste acesso." }, { status: 400 });
     }
+    const passwordError = validatePassword(payload.password ?? "");
+    if (passwordError) {
+      return Response.json({ error: passwordError }, { status: 400 });
+    }
     if (!(await canManage(actor, role, dealershipId))) return forbidden();
 
     const db = await getDb();
@@ -65,6 +74,7 @@ export async function POST(request: Request) {
       dealershipId,
       active: true,
       createdByEmail: actor.email,
+      ...(await createPasswordCredential(payload.password!)),
     });
     return Response.json({ ok: true }, { status: 201 });
   } catch (error) {
@@ -109,6 +119,16 @@ export async function PATCH(request: Request) {
       }
     }
 
+    if (payload.password) {
+      const passwordError = validatePassword(payload.password);
+      if (passwordError) {
+        return Response.json({ error: passwordError }, { status: 400 });
+      }
+    }
+    const passwordPatch = payload.password
+      ? await createPasswordCredential(payload.password)
+      : {};
+
     await db
       .update(users)
       .set({
@@ -116,6 +136,7 @@ export async function PATCH(request: Request) {
         role,
         dealershipId,
         active: payload.active ?? target.active,
+        ...passwordPatch,
         updatedAt: new Date().toISOString(),
       })
       .where(eq(users.email, email));

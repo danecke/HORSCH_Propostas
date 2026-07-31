@@ -2,7 +2,8 @@
 
 import type { FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ChatGPTUser } from "./chatgpt-auth";
+import Link from "next/link";
+import type { AppUser } from "../lib/auth";
 
 type UserRole = "admin" | "factory_manager" | "dealer_manager";
 type ProposalStatus =
@@ -68,6 +69,7 @@ type AccessUser = {
   roleLabel: string;
   dealershipId: number | null;
   active: boolean;
+  credentialReady: boolean;
   createdAt: string;
 };
 
@@ -83,6 +85,8 @@ type CurrentAccess = {
     createProposal: boolean;
     manageAllAccess: boolean;
     decideProposal: boolean;
+    deleteAnyProposal: boolean;
+    deleteOwnDraft: boolean;
   };
 };
 
@@ -126,6 +130,8 @@ type IconName =
   | "clock"
   | "money"
   | "print"
+  | "key"
+  | "trash"
   | "close";
 
 function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
@@ -142,6 +148,8 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
     clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
     money: <><circle cx="12" cy="12" r="9" /><path d="M16 8.5c-.8-.6-2-.9-3.1-.9-1.7 0-2.9.8-2.9 2s1 1.8 3 2.2c2 .4 3 1.1 3 2.3s-1.2 2.2-3 2.2c-1.3 0-2.6-.4-3.5-1.1M13 5v14" /></>,
     print: <><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><path d="M6 14h12v7H6z" /></>,
+    key: <><circle cx="8" cy="15" r="4" /><path d="m11 12 9-9M17 6l3 3M14 9l3 3" /></>,
+    trash: <><path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14M10 11v6M14 11v6" /></>,
     close: <path d="m6 6 12 12M18 6 6 18" />,
   };
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
@@ -151,7 +159,7 @@ function BrandMark({ className = "" }: { className?: string }) {
   return <svg className={className} viewBox="0 0 73 74" aria-hidden="true"><path fill="currentColor" d="M36.5 1.5C16.9 1.5 1.1 17.4 1.1 37s15.9 35.4 35.4 35.4S71.9 56.5 71.9 37C72 17.4 56.1 1.5 36.5 1.5Zm-.3 38.6-11.9 0c-.6 0-1.1.4-1.2.9l-2.9 10.6c-.3 1-1.2 1.7-2.2 1.7l-2.5 0c-1.2 0-2-1.1-1.7-2.2l3-11.1 1.8-6.4 3.2-11.8c.2-.8 1-1.4 1.9-1.4h3.2c.9 0 1.6.9 1.4 1.8l-2.8 10.4c-.1.5.2 1 .8 1h11.4c.9 0 1.6.9 1.4 1.8l-.8 3.1c-.2 1-.9 1.6-1.8 1.6Zm25.9-4.6-.8 3.1c-.2.9-1 1.5-1.9 1.5H48c-.6 0-1.5.4-1.7.9l-2.9 10.6c-.3 1-1.2 1.7-2.2 1.7h-2.5c-1.2 0-2-1.1-1.7-2.2l3-11.1 1.8-6.4L45 21.8c.2-.8 1-1.4 1.9-1.4h3.2c.9 0 1.6.9 1.4 1.8l-2.8 10.4c-.1.5.2 1 .8 1h11.4c.8.1 1.5 1 1.2 1.9Z" /></svg>;
 }
 
-export function Dashboard({ user }: { user: ChatGPTUser }) {
+export function Dashboard({ user }: { user: AppUser }) {
   const [view, setView] = useState<View>("overview");
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -160,6 +168,7 @@ export function Dashboard({ user }: { user: ChatGPTUser }) {
   const [statusFilter, setStatusFilter] = useState<"all" | ProposalStatus>("all");
   const [showNewProposal, setShowNewProposal] = useState(false);
   const [showNewAccess, setShowNewAccess] = useState(false);
+  const [showChangePassword, setShowChangePassword] = useState(false);
   const [preview, setPreview] = useState<Proposal | null>(null);
   const [notice, setNotice] = useState("");
 
@@ -195,6 +204,10 @@ export function Dashboard({ user }: { user: ChatGPTUser }) {
   const canCreate = data.me.permissions.createProposal;
   const factoryManagers = data.users.filter((item) => item.role === "factory_manager" && item.active);
   async function refreshed(message: string) { setNotice(message); await loadData(); }
+  async function signOut() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    window.location.assign("/");
+  }
 
   return (
     <main className="app-shell">
@@ -208,7 +221,8 @@ export function Dashboard({ user }: { user: ChatGPTUser }) {
           <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>
         </nav>
         {canCreate && <button className="sidebar-new" onClick={() => setShowNewProposal(true)}><Icon name="plus" size={17} />Nova proposta</button>}
-        <div className="sidebar-footer"><div className="user-avatar">{initials(user.displayName)}</div><div className="user-copy"><strong>{user.displayName}</strong><span>{user.email}</span></div><a className="signout-link" href="/signout-with-chatgpt?return_to=/" title="Sair">↗</a></div>
+        <div className="sidebar-account-actions"><button type="button" onClick={() => setShowChangePassword(true)}><Icon name="key" size={15} />Alterar senha</button></div>
+        <div className="sidebar-footer"><div className="user-avatar">{initials(user.displayName)}</div><div className="user-copy"><strong>{user.displayName}</strong><span>{user.email}</span></div><button className="signout-link" type="button" onClick={() => void signOut()} title="Sair" aria-label="Sair">↗</button></div>
       </aside>
 
       <section className="workspace">
@@ -233,7 +247,8 @@ export function Dashboard({ user }: { user: ChatGPTUser }) {
 
       {showNewProposal && <NewProposalModal userName={data.me.name} role={data.me.role} factoryManagers={factoryManagers} onClose={() => setShowNewProposal(false)} onSaved={async () => { setShowNewProposal(false); await refreshed("Proposta salva com sucesso."); }} />}
       {showNewAccess && <NewAccessModal me={data.me} dealerships={data.dealerships} onClose={() => setShowNewAccess(false)} onSaved={async () => { setShowNewAccess(false); await refreshed("Novo acesso criado com sucesso."); }} />}
-      {preview && <ProposalPreview proposal={preview} me={data.me} onClose={() => setPreview(null)} onUpdated={async (status, counterofferCents) => { setPreview({ ...preview, status, counterofferCents: counterofferCents ?? null }); await refreshed("Proposta atualizada com sucesso."); }} />}
+      {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} onSaved={() => { setShowChangePassword(false); setNotice("Senha alterada com sucesso."); }} />}
+      {preview && <ProposalPreview proposal={preview} me={data.me} onClose={() => setPreview(null)} onDeleted={async () => { setPreview(null); await refreshed("Proposta excluída com sucesso."); }} onUpdated={async (status, counterofferCents) => { setPreview({ ...preview, status, counterofferCents: counterofferCents ?? null }); await refreshed("Proposta atualizada com sucesso."); }} />}
     </main>
   );
 }
@@ -325,22 +340,288 @@ function NewProposalModal({ userName, role, factoryManagers, onClose, onSaved }:
 
 function NewAccessModal({ me, dealerships, onClose, onSaved }: { me: CurrentAccess; dealerships: Dealership[]; onClose: () => void; onSaved: () => Promise<void> }) {
   const allowedRoles: UserRole[] = me.role === "admin" ? ["admin", "factory_manager", "dealer_manager"] : ["dealer_manager"];
-  const [name, setName] = useState(""); const [email, setEmail] = useState(""); const [role, setRole] = useState<UserRole>(allowedRoles[0]); const [dealershipId, setDealershipId] = useState<number | null>(me.role === "dealer_manager" ? me.dealershipId : dealerships[0]?.id ?? null); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
-  async function submit(event: FormEvent) { event.preventDefault(); setSaving(true); setError(""); const response = await fetch("/api/access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, email, role, dealershipId }) }); const payload = (await response.json()) as { error?: string }; if (!response.ok) { setError(payload.error || "Não foi possível criar o acesso."); setSaving(false); return; } await onSaved(); }
-  return <div className="modal-backdrop" role="dialog" aria-modal="true"><form className="access-modal" onSubmit={(event) => void submit(event)}><header className="modal-header"><div><span className="eyebrow">Novo usuário</span><h2>Criar acesso</h2><p>O usuário entrará com a conta corporativa informada.</p></div><button type="button" className="icon-button" onClick={onClose}><Icon name="close" /></button></header><div className="form-scroll"><div className="access-form-grid"><label className="field"><span>Nome completo</span><input value={name} onChange={(event) => setName(event.target.value)} required /></label><label className="field"><span>E-mail corporativo</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label><label className="field"><span>Perfil de permissão</span><select value={role} onChange={(event) => setRole(event.target.value as UserRole)}>{allowedRoles.map((item) => <option key={item} value={item}>{roleName(item)}</option>)}</select></label>{role === "dealer_manager" && <label className="field"><span>Concessionária</span><select value={dealershipId ?? ""} onChange={(event) => setDealershipId(Number(event.target.value) || null)} required disabled={me.role === "dealer_manager"}><option value="">Selecione</option>{dealerships.map((dealer) => <option key={dealer.id} value={dealer.id}>{dealer.name}</option>)}</select></label>}</div><div className="access-note"><strong>{roleName(role)}</strong><p>{roleExplanation(role)}</p></div>{error && <p className="form-error">{error}</p>}</div><footer className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button type="submit" className="primary-button" disabled={saving}>{saving ? "Criando..." : "Criar acesso"}</button></footer></form></div>;
+  const [name, setName] = useState(""); const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [role, setRole] = useState<UserRole>(allowedRoles[0]); const [dealershipId, setDealershipId] = useState<number | null>(me.role === "dealer_manager" ? me.dealershipId : dealerships[0]?.id ?? null); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
+  async function submit(event: FormEvent) { event.preventDefault(); setSaving(true); setError(""); const response = await fetch("/api/access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, email, password, role, dealershipId }) }); const payload = (await response.json()) as { error?: string }; if (!response.ok) { setError(payload.error || "Não foi possível criar o acesso."); setSaving(false); return; } await onSaved(); }
+  return <div className="modal-backdrop" role="dialog" aria-modal="true"><form className="access-modal" onSubmit={(event) => void submit(event)}><header className="modal-header"><div><span className="eyebrow">Novo usuário</span><h2>Criar acesso</h2><p>O usuário entrará diretamente no portal com e-mail e senha próprios.</p></div><button type="button" className="icon-button" onClick={onClose}><Icon name="close" /></button></header><div className="form-scroll"><div className="access-form-grid"><label className="field"><span>Nome completo</span><input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} required /></label><label className="field"><span>E-mail corporativo</span><input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label><label className="field"><span>Senha inicial</span><input type="password" minLength={10} maxLength={128} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label><label className="field"><span>Perfil de permissão</span><select value={role} onChange={(event) => setRole(event.target.value as UserRole)}>{allowedRoles.map((item) => <option key={item} value={item}>{roleName(item)}</option>)}</select></label>{role === "dealer_manager" && <label className="field"><span>Concessionária</span><select value={dealershipId ?? ""} onChange={(event) => setDealershipId(Number(event.target.value) || null)} required disabled={me.role === "dealer_manager"}><option value="">Selecione</option>{dealerships.map((dealer) => <option key={dealer.id} value={dealer.id}>{dealer.name}</option>)}</select></label>}</div><div className="access-note"><strong>{roleName(role)}</strong><p>{roleExplanation(role)} A senha pode ser alterada pelo próprio usuário após entrar.</p></div>{error && <p className="form-error">{error}</p>}</div><footer className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button type="submit" className="primary-button" disabled={saving}>{saving ? "Criando..." : "Criar acesso"}</button></footer></form></div>;
 }
 
-function ProposalPreview({ proposal, me, onClose, onUpdated }: { proposal: Proposal; me: CurrentAccess; onClose: () => void; onUpdated: (status: ProposalStatus, counterofferCents?: number | null) => Promise<void> }) {
+function ChangePasswordModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (newPassword !== confirmation) {
+      setError("A confirmação da nova senha não confere.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    const response = await fetch("/api/auth/password", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+    const payload = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      setError(payload.error || "Não foi possível alterar a senha.");
+      setSaving(false);
+      return;
+    }
+    onSaved();
+  }
+
+  return <div className="modal-backdrop" role="dialog" aria-modal="true"><form className="access-modal password-modal" onSubmit={(event) => void submit(event)}><header className="modal-header"><div><span className="eyebrow">Segurança da conta</span><h2>Alterar senha</h2><p>Use pelo menos 10 caracteres e não compartilhe sua senha.</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Fechar"><Icon name="close" /></button></header><div className="form-scroll"><div className="password-form-grid"><label className="field"><span>Senha atual</span><input type="password" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} required /></label><label className="field"><span>Nova senha</span><input type="password" minLength={10} maxLength={128} autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required /></label><label className="field"><span>Confirme a nova senha</span><input type="password" minLength={10} maxLength={128} autoComplete="new-password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} required /></label></div>{error && <p className="form-error">{error}</p>}</div><footer className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button type="submit" className="primary-button" disabled={saving}>{saving ? "Salvando..." : "Salvar nova senha"}</button></footer></form></div>;
+}
+
+/* eslint-disable @typescript-eslint/no-unused-vars */
+function ProposalPreviewLegacy({ proposal, me, onClose, onUpdated, onDeleted }: { proposal: Proposal; me: CurrentAccess; onClose: () => void; onUpdated: (status: ProposalStatus, counterofferCents?: number | null) => Promise<void>; onDeleted: () => Promise<void> }) {
   const [status, setStatus] = useState<ProposalStatus>(proposal.status); const [counteroffer, setCounteroffer] = useState(proposal.counterofferCents ? formatMoneyInput(String(proposal.counterofferCents / 100).replace(".", ",")) : ""); const [note, setNote] = useState(proposal.decisionNote); const [updating, setUpdating] = useState(false); const [error, setError] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false); const [deleting, setDeleting] = useState(false);
   async function updateStatus(nextStatus: ProposalStatus) { setUpdating(true); setError(""); const cents = nextStatus === "counteroffer" ? parseMoneyToCents(counteroffer) : null; const response = await fetch("/api/proposals", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: proposal.id, status: nextStatus, counterofferCents: cents, decisionNote: note }) }); const payload = (await response.json()) as { error?: string }; if (!response.ok) { setError(payload.error || "Não foi possível atualizar a proposta."); setUpdating(false); return; } setStatus(nextStatus); await onUpdated(nextStatus, cents); setUpdating(false); }
+  async function deleteProposal() { setDeleting(true); setError(""); const response = await fetch("/api/proposals", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: proposal.id }) }); const payload = (await response.json()) as { error?: string }; if (!response.ok) { setError(payload.error || "Não foi possível excluir a proposta."); setDeleting(false); return; } await onDeleted(); }
   const decisionOpen = me.role === "dealer_manager" && ["sent", "counteroffer"].includes(proposal.status);
+  const canDelete = me.permissions.deleteAnyProposal || (me.permissions.deleteOwnDraft && proposal.status === "draft" && proposal.createdByEmail === me.email);
   const managerStatuses = STATUS_ORDER.filter((item) => item !== "counteroffer" || proposal.status === "counteroffer");
   return <div className="modal-backdrop preview-backdrop print-overlay" role="dialog" aria-modal="true"><div className="preview-shell"><header className="preview-toolbar no-print"><div><strong>{proposal.id}</strong><span>{me.role === "dealer_manager" ? "Análise da concessionária" : "Visualização da proposta"}</span></div><div className="preview-actions">{me.role !== "dealer_manager" && <label>Status<select value={status} disabled={updating} onChange={(event) => void updateStatus(event.target.value as ProposalStatus)}>{managerStatuses.map((item) => <option value={item} key={item}>{STATUS_LABELS[item]}</option>)}</select></label>}<button className="outline-button dark" onClick={() => window.print()}><Icon name="print" size={16} />Imprimir / PDF</button><button className="icon-button dark" onClick={onClose}><Icon name="close" /></button></div></header>{decisionOpen && <section className="decision-panel no-print"><div><span className="eyebrow">Decisão da concessionária</span><h2>Analise e responda à proposta</h2><p>O retorno ficará registrado no histórico comercial.</p></div><label className="field"><span>Observação</span><input value={note} onChange={(event) => setNote(event.target.value)} placeholder="Comentário opcional" /></label><label className="field"><span>Valor da contraproposta</span><input value={counteroffer} onChange={(event) => setCounteroffer(event.target.value)} onBlur={(event) => setCounteroffer(formatMoneyInput(event.target.value))} placeholder="0,00" /></label><div className="decision-actions"><button className="decision-button reject" disabled={updating} onClick={() => void updateStatus("rejected")}>Recusar</button><button className="decision-button counter" disabled={updating} onClick={() => void updateStatus("counteroffer")}>Enviar contraproposta</button><button className="decision-button accept" disabled={updating} onClick={() => void updateStatus("approved")}>Aceitar proposta</button></div>{error && <p className="form-error">{error}</p>}</section>}<article className="proposal-paper"><header className="document-header"><BrandMark className="document-mark" /><div className="document-type"><span>Peças</span><strong>Proposta para concessionária</strong></div><div className="document-title"><h1>Proposta comercial</h1><p>Fornecimento de peças</p></div></header><section className="document-stats"><div><span>Número da proposta</span><strong>{proposal.id}</strong></div><div><span>Data de emissão</span><strong>{formatDate(proposal.issueDate)}</strong></div><div><span>Válida até</span><strong>{formatDate(proposal.validUntil)}</strong></div></section><section className="document-customer"><div><span>Responsável da concessionária</span><strong>{proposal.contactName || "—"}</strong></div><div><span>Concessionária</span><strong>{proposal.dealership}</strong></div></section><p className="document-intro">Apresentamos nossa proposta comercial para o fornecimento dos itens abaixo. Valores e condições permanecem válidos até a data indicada.</p><div className="document-section-title"><h2>Itens da proposta</h2><span>Valores líquidos em reais</span></div><table className="document-items"><thead><tr><th>PN</th><th>VT</th><th>Origem</th><th>NCM</th><th>Quantidade</th><th>Net Price (R$)</th></tr></thead><tbody>{proposal.items.map((item) => <tr key={item.id}><td>{item.partNumber || "—"}</td><td>{item.description || "—"}</td><td>{item.origin || "—"}</td><td>{item.ncm || "—"}</td><td>{item.quantity}</td><td>{formatBRL(item.unitPriceCents)}</td></tr>)}</tbody></table><div className="document-total"><span>Valor total da proposta</span><strong>{formatBRL(proposal.totalCents)}</strong></div>{proposal.counterofferCents && <section className="document-counteroffer"><span>Contraproposta da concessionária</span><strong>{formatBRL(proposal.counterofferCents)}</strong>{proposal.decisionNote && <p>{proposal.decisionNote}</p>}</section>}<section className="document-terms"><strong>Condições comerciais</strong><p>Valores líquidos em reais, sujeitos à disponibilidade de estoque. Tributos e frete seguem as condições vigentes acordadas com a concessionária.</p></section><section className="document-signatures"><div><span className="signature-name">{proposal.commercialOwner}</span><small>Responsável Comercial HORSCH</small></div><div><span /><small>Responsável / Concessionária</small></div></section><footer className="document-footer"><span>HORSCH do Brasil<br />Curitiba · Paraná · Brasil</span><span>Documento confidencial<br />Uso comercial</span></footer></article></div></div>;
+}
+/* eslint-enable @typescript-eslint/no-unused-vars */
+
+function ProposalPreview({ proposal, me, onClose, onUpdated, onDeleted }: { proposal: Proposal; me: CurrentAccess; onClose: () => void; onUpdated: (status: ProposalStatus, counterofferCents?: number | null) => Promise<void>; onDeleted: () => Promise<void> }) {
+  const [status, setStatus] = useState<ProposalStatus>(proposal.status);
+  const [counteroffer, setCounteroffer] = useState(
+    proposal.counterofferCents
+      ? formatMoneyInput(String(proposal.counterofferCents / 100).replace(".", ","))
+      : "",
+  );
+  const [note, setNote] = useState(proposal.decisionNote);
+  const [updating, setUpdating] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState("");
+
+  const decisionOpen =
+    me.role === "dealer_manager" &&
+    ["sent", "counteroffer"].includes(proposal.status);
+  const managerStatuses = STATUS_ORDER.filter(
+    (item) => item !== "counteroffer" || proposal.status === "counteroffer",
+  );
+  const canDelete =
+    me.permissions.deleteAnyProposal ||
+    (me.permissions.deleteOwnDraft &&
+      proposal.status === "draft" &&
+      proposal.createdByEmail === me.email);
+
+  async function updateStatus(nextStatus: ProposalStatus) {
+    setUpdating(true);
+    setError("");
+    const cents =
+      nextStatus === "counteroffer" ? parseMoneyToCents(counteroffer) : null;
+    const response = await fetch("/api/proposals", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: proposal.id,
+        status: nextStatus,
+        counterofferCents: cents,
+        decisionNote: note,
+      }),
+    });
+    const payload = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      setError(payload.error || "Não foi possível atualizar a proposta.");
+      setUpdating(false);
+      return;
+    }
+    setStatus(nextStatus);
+    await onUpdated(nextStatus, cents);
+    setUpdating(false);
+  }
+
+  async function deleteProposal() {
+    setDeleting(true);
+    setError("");
+    const response = await fetch("/api/proposals", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: proposal.id }),
+    });
+    const payload = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      setError(payload.error || "Não foi possível excluir a proposta.");
+      setDeleting(false);
+      return;
+    }
+    await onDeleted();
+  }
+
+  return (
+    <div className="modal-backdrop preview-backdrop print-overlay" role="dialog" aria-modal="true">
+      <div className="preview-shell">
+        <header className="preview-toolbar no-print">
+          <div>
+            <strong>{proposal.id}</strong>
+            <span>
+              {me.role === "dealer_manager"
+                ? "Análise da concessionária"
+                : "Visualização da proposta"}
+            </span>
+          </div>
+          <div className="preview-actions">
+            {me.role !== "dealer_manager" && (
+              <label>
+                Status
+                <select
+                  value={status}
+                  disabled={updating}
+                  onChange={(event) =>
+                    void updateStatus(event.target.value as ProposalStatus)
+                  }
+                >
+                  {managerStatuses.map((item) => (
+                    <option value={item} key={item}>{STATUS_LABELS[item]}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {canDelete && (
+              <button
+                type="button"
+                className="outline-button danger-dark"
+                onClick={() => setConfirmDelete(true)}
+              >
+                <Icon name="trash" size={16} />
+                Excluir
+              </button>
+            )}
+            <button type="button" className="outline-button dark" onClick={() => window.print()}>
+              <Icon name="print" size={16} />
+              Imprimir / PDF
+            </button>
+            <button type="button" className="icon-button dark" onClick={onClose} aria-label="Fechar">
+              <Icon name="close" />
+            </button>
+          </div>
+        </header>
+
+        {confirmDelete && (
+          <section className="delete-confirmation no-print" role="alertdialog" aria-labelledby="delete-title">
+            <div>
+              <span className="eyebrow">Ação irreversível</span>
+              <h2 id="delete-title">Excluir a proposta {proposal.id}?</h2>
+              <p>A proposta e todos os seus itens serão removidos definitivamente do painel.</p>
+              {error && <p className="form-error">{error}</p>}
+            </div>
+            <div className="delete-confirmation-actions">
+              <button
+                type="button"
+                className="outline-button"
+                disabled={deleting}
+                onClick={() => {
+                  setConfirmDelete(false);
+                  setError("");
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="danger-button"
+                disabled={deleting}
+                onClick={() => void deleteProposal()}
+              >
+                {deleting ? "Excluindo..." : "Excluir definitivamente"}
+              </button>
+            </div>
+          </section>
+        )}
+
+        {error && !confirmDelete && !decisionOpen && (
+          <p className="preview-error no-print">{error}</p>
+        )}
+
+        {decisionOpen && (
+          <section className="decision-panel no-print">
+            <div>
+              <span className="eyebrow">Decisão da concessionária</span>
+              <h2>Analise e responda à proposta</h2>
+              <p>O retorno ficará registrado no histórico comercial.</p>
+            </div>
+            <label className="field">
+              <span>Observação</span>
+              <input value={note} onChange={(event) => setNote(event.target.value)} placeholder="Comentário opcional" />
+            </label>
+            <label className="field">
+              <span>Valor da contraproposta</span>
+              <input value={counteroffer} onChange={(event) => setCounteroffer(event.target.value)} onBlur={(event) => setCounteroffer(formatMoneyInput(event.target.value))} placeholder="0,00" />
+            </label>
+            <div className="decision-actions">
+              <button className="decision-button reject" disabled={updating} onClick={() => void updateStatus("rejected")}>Recusar</button>
+              <button className="decision-button counter" disabled={updating} onClick={() => void updateStatus("counteroffer")}>Enviar contraproposta</button>
+              <button className="decision-button accept" disabled={updating} onClick={() => void updateStatus("approved")}>Aceitar proposta</button>
+            </div>
+            {error && <p className="form-error">{error}</p>}
+          </section>
+        )}
+
+        <article className="proposal-paper">
+          <header className="document-header">
+            <BrandMark className="document-mark" />
+            <div className="document-type"><span>Peças</span><strong>Proposta para concessionária</strong></div>
+            <div className="document-title"><h1>Proposta comercial</h1><p>Fornecimento de peças</p></div>
+          </header>
+          <section className="document-stats">
+            <div><span>Número da proposta</span><strong>{proposal.id}</strong></div>
+            <div><span>Data de emissão</span><strong>{formatDate(proposal.issueDate)}</strong></div>
+            <div><span>Válida até</span><strong>{formatDate(proposal.validUntil)}</strong></div>
+          </section>
+          <section className="document-customer">
+            <div><span>Responsável da concessionária</span><strong>{proposal.contactName || "—"}</strong></div>
+            <div><span>Concessionária</span><strong>{proposal.dealership}</strong></div>
+          </section>
+          <p className="document-intro">Apresentamos nossa proposta comercial para o fornecimento dos itens abaixo. Valores e condições permanecem válidos até a data indicada.</p>
+          <div className="document-section-title"><h2>Itens da proposta</h2><span>Valores líquidos em reais</span></div>
+          <table className="document-items">
+            <thead><tr><th>PN</th><th>VT</th><th>Origem</th><th>NCM</th><th>Quantidade</th><th>Net Price (R$)</th></tr></thead>
+            <tbody>
+              {proposal.items.map((item) => (
+                <tr key={item.id}>
+                  <td>{item.partNumber || "—"}</td>
+                  <td>{item.description || "—"}</td>
+                  <td>{item.origin || "—"}</td>
+                  <td>{item.ncm || "—"}</td>
+                  <td>{item.quantity}</td>
+                  <td>{formatBRL(item.unitPriceCents)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="document-total"><span>Valor total da proposta</span><strong>{formatBRL(proposal.totalCents)}</strong></div>
+          {proposal.counterofferCents && (
+            <section className="document-counteroffer">
+              <span>Contraproposta da concessionária</span>
+              <strong>{formatBRL(proposal.counterofferCents)}</strong>
+              {proposal.decisionNote && <p>{proposal.decisionNote}</p>}
+            </section>
+          )}
+          <section className="document-terms"><strong>Condições comerciais</strong><p>Valores líquidos em reais, sujeitos à disponibilidade de estoque. Tributos e frete seguem as condições vigentes acordadas com a concessionária.</p></section>
+          <section className="document-signatures">
+            <div><span className="signature-name">{proposal.commercialOwner}</span><small>Responsável Comercial HORSCH</small></div>
+            <div><span /><small>Responsável / Concessionária</small></div>
+          </section>
+          <footer className="document-footer"><span>HORSCH do Brasil<br />Curitiba · Paraná · Brasil</span><span>Documento confidencial<br />Uso comercial</span></footer>
+        </article>
+      </div>
+    </div>
+  );
 }
 
 function StatusBadge({ status }: { status: ProposalStatus }) { return <span className={`status-badge ${status}`}><i />{STATUS_LABELS[status]}</span>; }
 function LoadingState() { return <div className="center-state"><span className="state-mark">H</span><h1>Preparando o portal comercial</h1><p>Carregando seu perfil e as informações autorizadas.</p></div>; }
-function ErrorState({ message, retry }: { message: string; retry: () => Promise<void> }) { return <div className="center-state"><span className="state-mark">!</span><h1>Acesso não disponível</h1><p>{message}</p><div className="state-actions"><button className="primary-button" onClick={() => void retry()}>Tentar novamente</button><a className="outline-button" href="/signout-with-chatgpt?return_to=/">Trocar de conta</a></div></div>; }
+function ErrorState({ message, retry }: { message: string; retry: () => Promise<void> }) { return <div className="center-state"><span className="state-mark">!</span><h1>Acesso não disponível</h1><p>{message}</p><div className="state-actions"><button className="primary-button" onClick={() => void retry()}>Tentar novamente</button><Link className="outline-button" href="/">Voltar ao login</Link></div></div>; }
 function EmptyState({ title, text }: { title: string; text: string }) { return <div className="empty-state"><span><Icon name="file" size={24} /></span><h3>{title}</h3><p>{text}</p></div>; }
 function EmptyMini({ text }: { text: string }) { return <div className="empty-mini">{text}</div>; }
 function formatBRL(cents: number) { return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 2 }).format(cents / 100); }
