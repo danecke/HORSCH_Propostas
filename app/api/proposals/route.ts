@@ -57,7 +57,7 @@ export async function GET() {
   if (!user) return Response.json({ error: "Não autenticado" }, { status: 401 });
 
   try {
-    const db = getDb();
+    const db = await getDb();
     const rows = await db
       .select({
         id: proposals.id,
@@ -186,7 +186,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const db = getDb();
+    const db = await getDb();
     const [existingDealer] = await db
       .select()
       .from(dealerships)
@@ -261,7 +261,7 @@ export async function PATCH(request: Request) {
         { status: 400 },
       );
     }
-    const db = getDb();
+    const db = await getDb();
     const updated = await db
       .update(proposals)
       .set({ status: payload.status!, updatedAt: new Date().toISOString() })
@@ -281,7 +281,7 @@ export async function DELETE() {
   if (!user) return Response.json({ error: "Não autenticado" }, { status: 401 });
 
   try {
-    const db = getDb();
+    const db = await getDb();
     const demoRows = await db
       .select({ id: proposals.id })
       .from(proposals)
