@@ -130,6 +130,7 @@ button { cursor: pointer; }
 .pipeline-fill { display: block; height: 100%; background: #82858a; transition: width .4s ease; }
 .pipeline-fill.sent { background: #d59a2e; }
 .pipeline-fill.negotiation { background: #4770aa; }
+.pipeline-fill.counteroffer { background: #4770aa; }
 .pipeline-fill.approved { background: var(--green); }
 .pipeline-row small { color: var(--muted); font-size: 11px; text-align: right; }
 .dealer-ranking { display: grid; }
