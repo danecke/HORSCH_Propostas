@@ -16,6 +16,7 @@ export const dealerships = sqliteTable(
     state: text("state").notNull().default(""),
     contactName: text("contact_name").notNull().default(""),
     contactEmail: text("contact_email").notNull().default(""),
+    factoryManagerEmail: text("factory_manager_email").notNull().default(""),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => [uniqueIndex("dealerships_name_idx").on(table.name)],
@@ -34,6 +35,9 @@ export const proposals = sqliteTable(
     issueDate: text("issue_date").notNull(),
     validUntil: text("valid_until").notNull(),
     totalCents: integer("total_cents").notNull().default(0),
+    counterofferCents: integer("counteroffer_cents"),
+    decisionNote: text("decision_note").notNull().default(""),
+    decidedByEmail: text("decided_by_email").notNull().default(""),
     createdByEmail: text("created_by_email").notNull(),
     createdByName: text("created_by_name").notNull().default(""),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -43,6 +47,26 @@ export const proposals = sqliteTable(
     index("proposals_dealership_idx").on(table.dealershipId),
     index("proposals_status_idx").on(table.status),
     index("proposals_created_at_idx").on(table.createdAt),
+  ],
+);
+
+export const users = sqliteTable(
+  "users",
+  {
+    email: text("email").primaryKey(),
+    name: text("name").notNull().default(""),
+    role: text("role").notNull(),
+    dealershipId: integer("dealership_id").references(() => dealerships.id, {
+      onDelete: "set null",
+    }),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    createdByEmail: text("created_by_email").notNull().default(""),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("users_role_idx").on(table.role),
+    index("users_dealership_idx").on(table.dealershipId),
   ],
 );
 
