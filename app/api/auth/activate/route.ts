@@ -4,6 +4,7 @@ import { users } from "../../../../db/schema";
 import {
   createPasswordCredential,
   createSession,
+  isPasswordCredentialSupported,
   normalizeEmail,
   safeSecretEqual,
   sessionCookie,
@@ -55,7 +56,14 @@ export async function POST(request: Request) {
     const credential = await createPasswordCredential(password);
 
     if (record) {
-      if (record.role !== "admin" || record.passwordHash) {
+      if (
+        record.role !== "admin" ||
+        isPasswordCredentialSupported({
+          passwordHash: record.passwordHash,
+          passwordSalt: record.passwordSalt,
+          passwordIterations: record.passwordIterations,
+        })
+      ) {
         return Response.json(
           { error: "Este acesso não está disponível para ativação inicial." },
           { status: 409 },

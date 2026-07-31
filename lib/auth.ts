@@ -5,7 +5,8 @@ import { sessions, users } from "../db/schema";
 
 export const SESSION_COOKIE = "horsch_portal_session";
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
-export const PASSWORD_ITERATIONS = 210_000;
+// Cloudflare Workers currently caps PBKDF2 at 100,000 iterations.
+export const PASSWORD_ITERATIONS = 100_000;
 
 export type AppUser = {
   displayName: string;
@@ -44,11 +45,7 @@ export async function verifyPassword(
   password: string,
   credential: PasswordCredential,
 ) {
-  if (
-    !credential.passwordHash ||
-    !credential.passwordSalt ||
-    credential.passwordIterations < 100_000
-  ) {
+  if (!isPasswordCredentialSupported(credential)) {
     return false;
   }
 
@@ -63,6 +60,17 @@ export async function verifyPassword(
   } catch {
     return false;
   }
+}
+
+export function isPasswordCredentialSupported(
+  credential: PasswordCredential,
+) {
+  return Boolean(
+    credential.passwordHash &&
+      credential.passwordSalt &&
+      credential.passwordIterations >= PASSWORD_ITERATIONS &&
+      credential.passwordIterations <= PASSWORD_ITERATIONS,
+  );
 }
 
 export async function createSession(userEmail: string) {
