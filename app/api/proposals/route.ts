@@ -47,6 +47,12 @@ type ProposalInput = {
   items?: ItemInput[];
 };
 
+type CounterofferItemInput = {
+  id?: number;
+  quantity?: number;
+  unitPriceCents?: number;
+};
+
 function apiError(error: unknown) {
   const message = error instanceof Error ? error.message : "Erro inesperado";
   const detail =
@@ -162,6 +168,13 @@ export async function GET() {
         counterofferCents: proposals.counterofferCents,
         decisionNote: proposals.decisionNote,
         decidedByEmail: proposals.decidedByEmail,
+        counterofferPaymentTerms: proposals.counterofferPaymentTerms,
+        counterofferFreightTerms: proposals.counterofferFreightTerms,
+        counterofferDeliveryTerms: proposals.counterofferDeliveryTerms,
+        counterofferSubmittedAt: proposals.counterofferSubmittedAt,
+        counterofferReviewedAt: proposals.counterofferReviewedAt,
+        counterofferReviewedByEmail: proposals.counterofferReviewedByEmail,
+        counterofferReviewNote: proposals.counterofferReviewNote,
         emailStatus: proposals.emailStatus,
         emailSentAt: proposals.emailSentAt,
         emailError: proposals.emailError,
@@ -447,10 +460,15 @@ export async function PATCH(request: Request) {
   try {
     const payload = (await request.json()) as {
       id?: string;
-      action?: "send";
+      action?: "send" | "accept_counteroffer" | "return_counteroffer";
       status?: string;
       counterofferCents?: number;
       decisionNote?: string;
+      counterofferItems?: CounterofferItemInput[];
+      counterofferPaymentTerms?: string;
+      counterofferFreightTerms?: string;
+      counterofferDeliveryTerms?: string;
+      counterofferReviewNote?: string;
     };
     if (!payload.id) {
       return Response.json({ error: "Informe a proposta." }, { status: 400 });
@@ -505,6 +523,38 @@ export async function PATCH(request: Request) {
       });
     }
 
+    if (
+      payload.action === "accept_counteroffer" ||
+      payload.action === "return_counteroffer"
+    ) {
+      if (!["admin", "factory_manager"].includes(profile.role)) return forbidden();
+      if (record.proposal.status !== "counteroffer" || !record.proposal.counterofferCents) {
+        return Response.json(
+          { error: "Esta proposta não possui contraproposta aguardando análise." },
+          { status: 409 },
+        );
+      }
+      const accepted = payload.action === "accept_counteroffer";
+      await db
+        .update(proposals)
+        .set({
+          status: accepted ? "approved" : "sent",
+          totalCents: accepted
+            ? record.proposal.counterofferCents
+            : record.proposal.totalCents,
+          counterofferReviewedAt: new Date().toISOString(),
+          counterofferReviewedByEmail: profile.email,
+          counterofferReviewNote: payload.counterofferReviewNote?.trim() ?? "",
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(proposals.id, payload.id));
+      return Response.json({
+        ok: true,
+        status: accepted ? "approved" : "sent",
+        counterofferCents: record.proposal.counterofferCents,
+      });
+    }
+
     if (!VALID_STATUSES.has(payload.status ?? "")) {
       return Response.json({ error: "Status inválido." }, { status: 400 });
     }
@@ -529,15 +579,94 @@ export async function PATCH(request: Request) {
         );
       }
     }
-    const counterofferCents =
-      nextStatus === "counteroffer"
-        ? Math.max(0, Math.trunc(Number(payload.counterofferCents) || 0))
-        : null;
-    if (nextStatus === "counteroffer" && !counterofferCents) {
-      return Response.json(
-        { error: "Informe o valor da contraproposta." },
-        { status: 400 },
+    let counterofferCents = record.proposal.counterofferCents;
+    if (nextStatus === "counteroffer") {
+      const note = payload.decisionNote?.trim() ?? "";
+      const paymentTerms = payload.counterofferPaymentTerms?.trim() ?? "";
+      const freightTerms = payload.counterofferFreightTerms?.trim() ?? "";
+      const deliveryTerms = payload.counterofferDeliveryTerms?.trim() ?? "";
+      if (!note) {
+        return Response.json(
+          { error: "Informe a justificativa da contraproposta." },
+          { status: 400 },
+        );
+      }
+      if (!paymentTerms || !freightTerms || !deliveryTerms) {
+        return Response.json(
+          { error: "Informe pagamento, frete e prazo de entrega da contraproposta." },
+          { status: 400 },
+        );
+      }
+
+      const currentItems = await db
+        .select()
+        .from(proposalItems)
+        .where(eq(proposalItems.proposalId, payload.id));
+      const submittedItems = payload.counterofferItems ?? [];
+      const submittedById = new Map(
+        submittedItems.map((item) => [Math.trunc(Number(item.id) || 0), item]),
       );
+      if (
+        submittedItems.length !== currentItems.length ||
+        currentItems.some((item) => !submittedById.has(item.id))
+      ) {
+        return Response.json(
+          { error: "Revise todos os itens antes de enviar a contraproposta." },
+          { status: 400 },
+        );
+      }
+
+      const normalizedCounterItems = currentItems.map((item) => {
+        const submitted = submittedById.get(item.id)!;
+        return {
+          id: item.id,
+          quantity: Math.max(1, Math.trunc(Number(submitted.quantity) || 0)),
+          unitPriceCents: Math.max(
+            0,
+            Math.trunc(Number(submitted.unitPriceCents) || 0),
+          ),
+        };
+      });
+      if (normalizedCounterItems.some((item) => !item.unitPriceCents)) {
+        return Response.json(
+          { error: "Informe quantidade e net price propostos para todos os itens." },
+          { status: 400 },
+        );
+      }
+
+      counterofferCents = normalizedCounterItems.reduce(
+        (sum, item) => sum + item.quantity * item.unitPriceCents,
+        0,
+      );
+      await Promise.all(
+        normalizedCounterItems.map((item) =>
+          db
+            .update(proposalItems)
+            .set({
+              counterofferQuantity: item.quantity,
+              counterofferUnitPriceCents: item.unitPriceCents,
+            })
+            .where(eq(proposalItems.id, item.id)),
+        ),
+      );
+      await db
+        .update(proposals)
+        .set({
+          status: "counteroffer",
+          counterofferCents,
+          decisionNote: note,
+          decidedByEmail: profile.email,
+          counterofferPaymentTerms: paymentTerms,
+          counterofferFreightTerms: freightTerms,
+          counterofferDeliveryTerms: deliveryTerms,
+          counterofferSubmittedAt: new Date().toISOString(),
+          counterofferReviewedAt: null,
+          counterofferReviewedByEmail: "",
+          counterofferReviewNote: "",
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(proposals.id, payload.id));
+      return Response.json({ ok: true, status: "counteroffer", counterofferCents });
     }
 
     await db
@@ -545,7 +674,10 @@ export async function PATCH(request: Request) {
       .set({
         status: nextStatus,
         counterofferCents,
-        decisionNote: payload.decisionNote?.trim() ?? "",
+        decisionNote:
+          profile.role === "dealer_manager"
+            ? payload.decisionNote?.trim() ?? ""
+            : record.proposal.decisionNote,
         decidedByEmail: profile.role === "dealer_manager" ? profile.email : "",
         updatedAt: new Date().toISOString(),
       })

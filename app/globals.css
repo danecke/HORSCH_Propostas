@@ -128,6 +128,21 @@ button { cursor: pointer; }
 .metric-card > span { display: block; max-width: 75%; color: var(--muted); font-size: 12px; font-weight: 700; }
 .metric-card > strong { display: block; margin-top: 17px; overflow: hidden; font-size: clamp(22px, 2vw, 30px); letter-spacing: -.035em; text-overflow: ellipsis; white-space: nowrap; }
 .metric-card > small { display: block; margin-top: 10px; color: #96999d; font-size: 11px; }
+.counteroffer-inbox { margin-top: 16px; overflow: hidden; border: 1px solid #b7c9df; background: #f4f8fd; box-shadow: 0 6px 18px rgb(47 84 127 / 8%); }
+.counteroffer-inbox > header { min-height: 94px; padding: 20px 24px; display: flex; align-items: center; justify-content: space-between; gap: 20px; border-bottom: 1px solid #ccd9e8; }
+.counteroffer-inbox h2 { margin: 0; color: #244a75; font-size: 20px; }
+.counteroffer-inbox header p { margin: 6px 0 0; color: #667b94; font-size: 11px; }
+.counteroffer-count { width: 44px; height: 44px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 50%; color: white; background: #4770aa; font-size: 18px; }
+.counteroffer-inbox-list { display: grid; }
+.counteroffer-inbox-list button { min-height: 69px; padding: 11px 20px 11px 24px; display: grid; grid-template-columns: minmax(180px, 1.3fr) minmax(130px, 1fr) minmax(150px, 1fr) 72px 24px; gap: 14px; align-items: center; border: 0; border-top: 1px solid #dbe4ee; color: var(--ink); background: white; text-align: left; }
+.counteroffer-inbox-list button:first-child { border-top: 0; }
+.counteroffer-inbox-list button:hover { background: #f8fbff; }
+.counteroffer-inbox-list span strong, .counteroffer-inbox-list span small { display: block; }
+.counteroffer-inbox-list span strong { font-size: 11px; }
+.counteroffer-inbox-list span small { margin-bottom: 4px; color: var(--muted); font-size: 9px; }
+.counteroffer-inbox-list .favorable, .counteroffer-inbox-list .unfavorable { font-size: 11px; font-weight: 900; text-align: right; }
+.counteroffer-inbox-list .favorable { color: var(--green); }
+.counteroffer-inbox-list .unfavorable { color: var(--red); }
 .dashboard-grid { margin-top: 16px; display: grid; grid-template-columns: 1.35fr .9fr; gap: 16px; }
 .panel { border: 1px solid var(--line); background: white; box-shadow: 0 4px 14px rgb(27 31 35 / 3%); }
 .pipeline-panel, .dealers-panel { min-height: 355px; padding: 24px; }
@@ -358,6 +373,24 @@ button { cursor: pointer; }
 .document-counteroffer span { color: #4c6282; font-size: 7pt; font-weight: 800; text-transform: uppercase; }
 .document-counteroffer strong { margin-top: 2mm; color: #23466f; font-size: 13pt; }
 .document-counteroffer p { margin: 2mm 0 0; color: #4f6076; font-size: 7.5pt; line-height: 1.4; }
+.document-counteroffer-detail { margin-top: 5mm; padding: 4mm; border: 1px solid #9eb4d2; background: #f5f8fc; break-inside: avoid; }
+.document-counteroffer-detail .document-section-title { margin-bottom: 2.5mm; }
+.document-counteroffer-detail .document-section-title h2 { color: #23466f; }
+.document-counteroffer-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.document-counteroffer-table th { padding: 2mm 1.5mm; color: white; background: #4770aa; font-size: 6.5pt; text-align: left; text-transform: uppercase; }
+.document-counteroffer-table td { padding: 2mm 1.5mm; border-bottom: 1px solid #d4dfeb; font-size: 7pt; }
+.document-counteroffer-summary { margin: 3mm 0 0 auto; width: 85mm; display: grid; grid-template-columns: 1fr 1fr; }
+.document-counteroffer-summary div { padding: 3mm; border: 1px solid #b9c9dc; background: white; }
+.document-counteroffer-summary div + div { color: white; border-color: #4770aa; background: #4770aa; }
+.document-counteroffer-summary span, .document-counteroffer-summary strong { display: block; }
+.document-counteroffer-summary span { font-size: 6.5pt; font-weight: 800; text-transform: uppercase; }
+.document-counteroffer-summary strong { margin-top: 1mm; font-size: 10pt; }
+.document-counteroffer-terms { margin: 3mm 0 0; display: grid; grid-template-columns: 1fr 1fr; gap: 2mm 4mm; }
+.document-counteroffer-terms div { padding-top: 2mm; border-top: 1px solid #d4dfeb; }
+.document-counteroffer-terms dt { color: #5d7189; font-size: 6.5pt; font-weight: 800; text-transform: uppercase; }
+.document-counteroffer-terms dd { margin: 1mm 0 0; color: #344a63; font-size: 7pt; line-height: 1.35; }
+.document-counteroffer-owner, .document-counteroffer-review { margin: 2.5mm 0 0; color: #5b6f86; font-size: 6.5pt; }
+.document-counteroffer-review { padding-top: 2mm; border-top: 1px solid #d4dfeb; }
 .document-terms { margin-top: 7mm; padding: 4mm; border-left: 1.3mm solid var(--red); background: #f7f7f7; font-size: 8pt; }
 .document-terms p { margin: 2mm 0 0; color: #55575a; line-height: 1.45; }
 .document-signatures { margin-top: 15mm; display: grid; grid-template-columns: 1fr 1fr; gap: 15mm; text-align: center; }
@@ -366,15 +399,39 @@ button { cursor: pointer; }
 .document-signatures small { display: block; margin-top: 2mm; color: #5d5d60; font-size: 7.5pt; }
 .document-footer { position: absolute; left: 14mm; right: 14mm; bottom: 10mm; padding-top: 3mm; display: flex; justify-content: space-between; border-top: 1px solid #d0d2d4; color: #77797c; font-size: 7pt; line-height: 1.5; }
 .document-footer span:last-child { text-align: right; }
-.decision-panel { margin: 18px auto 0; padding: 22px; display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 16px; color: var(--ink); background: white; box-shadow: 0 12px 35px rgb(0 0 0 / 22%); }
+.decision-panel { margin: 18px auto 0; padding: 22px; display: grid; gap: 18px; color: var(--ink); background: white; box-shadow: 0 12px 35px rgb(0 0 0 / 22%); }
 .decision-panel h2 { margin: 0; font-size: 18px; }
 .decision-panel > div:first-child p { margin: 7px 0 0; color: var(--muted); font-size: 10px; }
+.counteroffer-form-heading { display: flex; align-items: center; justify-content: space-between; gap: 22px; }
+.counteroffer-form-heading p { margin: 7px 0 0; color: var(--muted); font-size: 10px; }
+.counteroffer-live-total { min-width: 210px; padding: 14px 17px; color: white; background: var(--graphite); text-align: right; }
+.counteroffer-live-total span, .counteroffer-live-total strong, .counteroffer-live-total small { display: block; }
+.counteroffer-live-total span { color: #c6c9cc; font-size: 8px; font-weight: 800; text-transform: uppercase; }
+.counteroffer-live-total strong { margin-top: 5px; font-size: 19px; }
+.counteroffer-live-total small { margin-top: 4px; color: #bfc2c6; font-size: 9px; }
+.counteroffer-editor-wrap { overflow-x: auto; border: 1px solid var(--line); }
+.counteroffer-editor { width: 100%; min-width: 880px; border-collapse: collapse; }
+.counteroffer-editor th { height: 36px; padding: 0 10px; color: #777b80; background: #f2f3f4; font-size: 8px; text-align: left; text-transform: uppercase; }
+.counteroffer-editor td { padding: 8px 10px; border-top: 1px solid var(--line); font-size: 10px; }
+.counteroffer-editor td strong, .counteroffer-editor td small { display: block; }
+.counteroffer-editor td small { max-width: 220px; margin-top: 3px; overflow: hidden; color: var(--muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.counteroffer-editor input { width: 120px; height: 36px; padding: 0 9px; border: 1px solid #ccd1d6; font-size: 10px; }
+.counteroffer-editor td:nth-child(3) input { width: 74px; }
+.counteroffer-conditions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 13px; }
+.counteroffer-note { grid-column: 1 / -1; }
+.counteroffer-conditions .field input, .counteroffer-conditions .field select { width: 100%; height: 41px; padding: 0 11px; border: 1px solid #d7dade; color: var(--ink); background: white; font-size: 11px; }
 .decision-actions { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
 .decision-button { min-height: 43px; border: 1px solid transparent; font-size: 11px; font-weight: 800; }
 .decision-button.reject { color: #942333; border-color: #e7b3ba; background: #fff6f7; }
 .decision-button.counter { color: #315a88; border-color: #b8cbe2; background: #f0f5fb; }
 .decision-button.accept { color: white; background: var(--green); }
 .decision-button:disabled { opacity: .55; cursor: wait; }
+.counteroffer-review-panel { margin: 18px auto 0; padding: 22px; display: grid; grid-template-columns: 1.1fr 1fr auto; gap: 18px; align-items: end; color: var(--ink); border-left: 5px solid #4770aa; background: white; box-shadow: 0 12px 35px rgb(0 0 0 / 22%); }
+.counteroffer-review-panel h2 { margin: 0; font-size: 19px; }
+.counteroffer-review-panel p { margin: 7px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.counteroffer-review-actions { display: flex; gap: 9px; }
+.approve-counteroffer { background: var(--green); border-color: var(--green); }
+.counteroffer-review-panel .form-error { grid-column: 1 / -1; }
 .state-actions { display: flex; gap: 10px; }
 .state-actions a { text-decoration: none; }
 .mobile-role { padding: 6px 8px; color: #fff; background: var(--red); font-size: 9px; font-weight: 800; }
@@ -396,6 +453,8 @@ button { cursor: pointer; }
   .dealership-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .preview-backdrop { place-items: start; }
   .permission-summary { grid-template-columns: 1fr; }
+  .counteroffer-review-panel { grid-template-columns: 1fr 1fr; }
+  .counteroffer-review-actions { grid-column: 1 / -1; }
 }
 
 @media (max-width: 780px) {
@@ -421,6 +480,8 @@ button { cursor: pointer; }
   .metric-card { min-height: 142px; padding: 16px; }
   .metric-icon { width: 32px; height: 32px; top: 14px; right: 14px; }
   .metric-card > strong { margin-top: 18px; font-size: 21px; }
+  .counteroffer-inbox-list button { grid-template-columns: 1fr 1fr 24px; }
+  .counteroffer-inbox-list button > span:nth-child(2), .counteroffer-inbox-list button > span:nth-child(4) { display: none; }
   .pipeline-panel, .dealers-panel { padding: 18px; }
   .pipeline-row { grid-template-columns: 85px 1fr; }
   .pipeline-row small { grid-column: 2; }
@@ -446,6 +507,12 @@ button { cursor: pointer; }
   .preview-shell { min-width: 780px; }
   .preview-toolbar { top: 0; }
   .decision-panel { width: 780px; margin-top: 0; }
+  .counteroffer-form-heading { align-items: stretch; flex-direction: column; }
+  .counteroffer-live-total { width: 100%; text-align: left; }
+  .counteroffer-conditions { grid-template-columns: 1fr; }
+  .counteroffer-note { grid-column: auto; }
+  .counteroffer-review-panel { width: 780px; margin-top: 0; grid-template-columns: 1fr; }
+  .counteroffer-review-actions { grid-column: auto; }
   .delete-confirmation { width: 780px; margin-top: 0; }
   .proposal-paper { margin-top: 16px; }
   .toast { left: 16px; right: 16px; top: 72px; }

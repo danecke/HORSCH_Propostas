@@ -24,6 +24,8 @@ type ProposalItem = {
   ncm: string;
   quantity: number;
   unitPriceCents: number;
+  counterofferQuantity: number | null;
+  counterofferUnitPriceCents: number | null;
 };
 
 type Proposal = {
@@ -43,6 +45,13 @@ type Proposal = {
   counterofferCents: number | null;
   decisionNote: string;
   decidedByEmail: string;
+  counterofferPaymentTerms: string;
+  counterofferFreightTerms: string;
+  counterofferDeliveryTerms: string;
+  counterofferSubmittedAt: string | null;
+  counterofferReviewedAt: string | null;
+  counterofferReviewedByEmail: string;
+  counterofferReviewNote: string;
   emailStatus: "not_requested" | "processing" | "sent" | "pending_configuration" | "failed";
   emailSentAt: string | null;
   emailError: string;
@@ -281,6 +290,7 @@ function Overview({ data, onNew, onOpen, onAll }: { data: DashboardData; onNew: 
   const decided = data.proposals.filter((proposal) => ["approved", "rejected"].includes(proposal.status)).length;
   const approvalRate = decided ? Math.round((approved / decided) * 100) : 0;
   const pending = data.proposals.filter((proposal) => ["sent", "counteroffer"].includes(proposal.status)).length;
+  const counteroffers = data.proposals.filter((proposal) => proposal.status === "counteroffer");
   return <div className="content-frame">
     <header className="page-heading overview-heading"><div><span className="eyebrow">{data.me.roleLabel}</span><h1>Olá, {firstName(data.me.name)}.</h1><p>{scopeDescription(data.me)}</p></div>{data.me.permissions.createProposal && <button className="primary-button" onClick={onNew}><Icon name="plus" size={18} />Nova proposta</button>}</header>
     <section className="metric-grid" aria-label="Indicadores comerciais">
@@ -289,12 +299,53 @@ function Overview({ data, onNew, onOpen, onAll }: { data: DashboardData; onNew: 
       <MetricCard label="Taxa de aceite" value={`${approvalRate}%`} meta={`${approved} propostas aceitas`} icon="trend" tone="green" />
       <MetricCard label="Concessionárias" value={String(data.dealerships.length)} meta="Dentro do seu escopo" icon="building" tone="dark" />
     </section>
+    {counteroffers.length > 0 && data.me.role !== "dealer_manager" && (
+      <CounterofferInbox proposals={counteroffers} onOpen={onOpen} />
+    )}
     <section className="dashboard-grid">
       <article className="panel pipeline-panel"><PanelHeader title="Fluxo de propostas" subtitle="Distribuição por decisão comercial" /><Pipeline proposals={data.proposals} /></article>
       <article className="panel dealers-panel"><PanelHeader title="Carteira de concessionárias" subtitle="Maior valor acumulado" /><div className="dealer-ranking">{data.dealerships.slice(0, 4).map((dealer, index) => <div className="ranking-row" key={dealer.id}><span className="ranking-index">{String(index + 1).padStart(2, "0")}</span><span className="dealer-monogram">{initials(dealer.name)}</span><div><strong>{dealer.name}</strong><small>{dealer.city}{dealer.state ? ` · ${dealer.state}` : ""}</small></div><span className="ranking-value">{formatBRL(dealer.totalCents)}</span></div>)}{!data.dealerships.length && <EmptyMini text="Nenhuma concessionária vinculada." />}</div></article>
     </section>
     <article className="panel proposals-panel"><PanelHeader title="Propostas recentes" subtitle="Últimas movimentações no seu escopo" action={<button className="text-button" onClick={onAll}>Ver todas <Icon name="arrow" size={15} /></button>} /><ProposalTable proposals={data.proposals.slice(0, 7)} onOpen={onOpen} /></article>
   </div>;
+}
+
+function CounterofferInbox({ proposals, onOpen }: { proposals: Proposal[]; onOpen: (proposal: Proposal) => void }) {
+  return (
+    <section className="counteroffer-inbox" aria-label="Contrapropostas aguardando análise">
+      <header>
+        <div>
+          <span className="eyebrow">Ação necessária</span>
+          <h2>Contrapropostas aguardando sua análise</h2>
+          <p>Compare os valores enviados pela concessionária antes de decidir.</p>
+        </div>
+        <strong className="counteroffer-count">{proposals.length}</strong>
+      </header>
+      <div className="counteroffer-inbox-list">
+        {proposals.slice(0, 4).map((proposal) => {
+          const originalTotal = proposal.items.reduce(
+            (sum, item) => sum + item.quantity * item.unitPriceCents,
+            0,
+          );
+          const proposedTotal = proposal.counterofferCents ?? originalTotal;
+          const variation = originalTotal
+            ? ((proposedTotal - originalTotal) / originalTotal) * 100
+            : 0;
+          return (
+            <button key={proposal.id} type="button" onClick={() => onOpen(proposal)}>
+              <span><strong>{proposal.id}</strong><small>{proposal.dealership}</small></span>
+              <span><small>Original</small><strong>{formatBRL(originalTotal)}</strong></span>
+              <span><small>Contraproposta</small><strong>{formatBRL(proposedTotal)}</strong></span>
+              <span className={variation <= 0 ? "favorable" : "unfavorable"}>
+                {variation > 0 ? "+" : ""}{variation.toFixed(1).replace(".", ",")}%
+              </span>
+              <Icon name="arrow" size={17} />
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
 }
 
 function MetricCard({ label, value, meta, icon, tone }: { label: string; value: string; meta: string; icon: IconName; tone: string }) {
@@ -322,7 +373,7 @@ function ProposalsView({ proposals, allCount, search, onSearch, status, onStatus
 
 function ProposalTable({ proposals, onOpen }: { proposals: Proposal[]; onOpen: (proposal: Proposal) => void }) {
   if (!proposals.length) return <EmptyState title="Nenhuma proposta encontrada" text="Não há propostas neste escopo ou com os filtros selecionados." />;
-  return <div className="table-scroll"><table className="data-table"><thead><tr><th>Proposta</th><th>Concessionária</th><th>Emissão</th><th>Responsável</th><th>Status</th><th className="align-right">Valor</th><th aria-label="Abrir" /></tr></thead><tbody>{proposals.map((proposal) => <tr key={proposal.id} onClick={() => onOpen(proposal)}><td><strong className="proposal-id">{proposal.id}</strong><small>{proposal.items.length} {proposal.items.length === 1 ? "item" : "itens"}</small></td><td><strong>{proposal.dealership}</strong><small>{proposal.city}{proposal.state ? ` · ${proposal.state}` : ""}</small></td><td>{formatDate(proposal.issueDate)}</td><td>{proposal.commercialOwner}</td><td><StatusBadge status={proposal.status} /></td><td className="align-right value-cell">{formatBRL(proposal.totalCents)}</td><td><button className="row-action" onClick={(event) => { event.stopPropagation(); onOpen(proposal); }} aria-label={`Abrir ${proposal.id}`}><Icon name="arrow" size={16} /></button></td></tr>)}</tbody></table></div>;
+  return <div className="table-scroll"><table className="data-table"><thead><tr><th>Proposta</th><th>Concessionária</th><th>Emissão</th><th>Responsável</th><th>Status</th><th className="align-right">Valor</th><th aria-label="Abrir" /></tr></thead><tbody>{proposals.map((proposal) => <tr key={proposal.id} onClick={() => onOpen(proposal)}><td><strong className="proposal-id">{proposal.id}</strong><small>{proposal.items.length} {proposal.items.length === 1 ? "item" : "itens"}</small></td><td><strong>{proposal.dealership}</strong><small>{proposal.city}{proposal.state ? ` · ${proposal.state}` : ""}</small></td><td>{formatDate(proposal.issueDate)}</td><td>{proposal.commercialOwner}</td><td><StatusBadge status={proposal.status} /></td><td className="align-right value-cell"><strong>{formatBRL(proposal.totalCents)}</strong>{proposal.status === "counteroffer" && proposal.counterofferCents && <small>Proposto: {formatBRL(proposal.counterofferCents)}</small>}</td><td><button className="row-action" onClick={(event) => { event.stopPropagation(); onOpen(proposal); }} aria-label={`Abrir ${proposal.id}`}><Icon name="arrow" size={16} /></button></td></tr>)}</tbody></table></div>;
 }
 
 function DealershipsView({ dealerships, proposals, onOpen }: { dealerships: Dealership[]; proposals: Proposal[]; onOpen: (proposal: Proposal) => void }) {
@@ -736,12 +787,20 @@ function ProposalPreviewLegacy({ proposal, me, onClose, onUpdated, onDeleted }: 
 
 function ProposalPreview({ proposal, me, onClose, onUpdated, onDeleted }: { proposal: Proposal; me: CurrentAccess; onClose: () => void; onUpdated: (status: ProposalStatus, counterofferCents?: number | null) => Promise<void>; onDeleted: () => Promise<void> }) {
   const [status, setStatus] = useState<ProposalStatus>(proposal.status);
-  const [counteroffer, setCounteroffer] = useState(
-    proposal.counterofferCents
-      ? formatMoneyInput(String(proposal.counterofferCents / 100).replace(".", ","))
-      : "",
+  const [counterItems, setCounterItems] = useState(() =>
+    proposal.items.map((item) => ({
+      id: item.id,
+      quantity: item.counterofferQuantity ?? item.quantity,
+      price: formatMoneyInput(
+        String((item.counterofferUnitPriceCents ?? item.unitPriceCents) / 100).replace(".", ","),
+      ),
+    })),
   );
   const [note, setNote] = useState(proposal.decisionNote);
+  const [paymentTerms, setPaymentTerms] = useState(proposal.counterofferPaymentTerms);
+  const [freightTerms, setFreightTerms] = useState(proposal.counterofferFreightTerms);
+  const [deliveryTerms, setDeliveryTerms] = useState(proposal.counterofferDeliveryTerms);
+  const [reviewNote, setReviewNote] = useState(proposal.counterofferReviewNote);
   const [updating, setUpdating] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -750,17 +809,35 @@ function ProposalPreview({ proposal, me, onClose, onUpdated, onDeleted }: { prop
   const [error, setError] = useState("");
 
   const decisionOpen =
-    me.role === "dealer_manager" &&
-    ["sent", "counteroffer"].includes(proposal.status);
+    me.role === "dealer_manager" && ["sent", "counteroffer"].includes(status);
+  const canReviewCounteroffer =
+    ["admin", "factory_manager"].includes(me.role) && status === "counteroffer";
+  const counterofferTotal = counterItems.reduce(
+    (sum, item) => sum + item.quantity * parseMoneyToCents(item.price),
+    0,
+  );
+  const originalTotal = proposal.items.reduce(
+    (sum, item) => sum + item.quantity * item.unitPriceCents,
+    0,
+  );
   const managerStatuses = STATUS_ORDER.filter((item) => {
     if (item === "sent" && status !== "sent") return false;
-    return item !== "counteroffer" || proposal.status === "counteroffer";
+    return item !== "counteroffer" || status === "counteroffer";
   });
   const canDelete =
     me.permissions.deleteAnyProposal ||
     (me.permissions.deleteOwnDraft &&
-      proposal.status === "draft" &&
+      status === "draft" &&
       proposal.createdByEmail === me.email);
+
+  function updateCounterItem(
+    id: number,
+    patch: Partial<{ quantity: number; price: string }>,
+  ) {
+    setCounterItems((current) =>
+      current.map((item) => (item.id === id ? { ...item, ...patch } : item)),
+    );
+  }
 
   async function sendByEmail() {
     setSendingEmail(true);
@@ -797,8 +874,7 @@ function ProposalPreview({ proposal, me, onClose, onUpdated, onDeleted }: { prop
   async function updateStatus(nextStatus: ProposalStatus) {
     setUpdating(true);
     setError("");
-    const cents =
-      nextStatus === "counteroffer" ? parseMoneyToCents(counteroffer) : null;
+    const cents = nextStatus === "counteroffer" ? counterofferTotal : null;
     const response = await fetch("/api/proposals", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -807,6 +883,17 @@ function ProposalPreview({ proposal, me, onClose, onUpdated, onDeleted }: { prop
         status: nextStatus,
         counterofferCents: cents,
         decisionNote: note,
+        counterofferItems:
+          nextStatus === "counteroffer"
+            ? counterItems.map((item) => ({
+                id: item.id,
+                quantity: item.quantity,
+                unitPriceCents: parseMoneyToCents(item.price),
+              }))
+            : undefined,
+        counterofferPaymentTerms: paymentTerms,
+        counterofferFreightTerms: freightTerms,
+        counterofferDeliveryTerms: deliveryTerms,
       }),
     });
     const payload = (await response.json()) as { error?: string };
@@ -817,6 +904,35 @@ function ProposalPreview({ proposal, me, onClose, onUpdated, onDeleted }: { prop
     }
     setStatus(nextStatus);
     await onUpdated(nextStatus, cents);
+    setUpdating(false);
+  }
+
+  async function reviewCounteroffer(
+    action: "accept_counteroffer" | "return_counteroffer",
+  ) {
+    setUpdating(true);
+    setError("");
+    const response = await fetch("/api/proposals", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: proposal.id,
+        action,
+        counterofferReviewNote: reviewNote,
+      }),
+    });
+    const payload = (await response.json()) as {
+      error?: string;
+      status?: ProposalStatus;
+      counterofferCents?: number;
+    };
+    if (!response.ok || !payload.status) {
+      setError(payload.error || "Não foi possível concluir a análise.");
+      setUpdating(false);
+      return;
+    }
+    setStatus(payload.status);
+    await onUpdated(payload.status, payload.counterofferCents ?? proposal.counterofferCents);
     setUpdating(false);
   }
 
@@ -935,23 +1051,70 @@ function ProposalPreview({ proposal, me, onClose, onUpdated, onDeleted }: { prop
 
         {decisionOpen && (
           <section className="decision-panel no-print">
-            <div>
-              <span className="eyebrow">Decisão da concessionária</span>
-              <h2>Analise e responda à proposta</h2>
-              <p>O retorno ficará registrado no histórico comercial.</p>
+            <header className="counteroffer-form-heading">
+              <div>
+                <span className="eyebrow">Decisão da concessionária</span>
+                <h2>Monte a contraproposta</h2>
+                <p>Altere somente quantidade e net price. PN e dados fiscais permanecem protegidos.</p>
+              </div>
+              <div className="counteroffer-live-total">
+                <span>Total proposto</span>
+                <strong>{formatBRL(counterofferTotal)}</strong>
+                <small>Original: {formatBRL(originalTotal)}</small>
+              </div>
+            </header>
+            <div className="counteroffer-editor-wrap">
+              <table className="counteroffer-editor">
+                <thead>
+                  <tr><th>PN / descrição</th><th>Qtd. original</th><th>Qtd. proposta</th><th>Net price original</th><th>Net price proposto</th><th>Total proposto</th></tr>
+                </thead>
+                <tbody>
+                  {proposal.items.map((item) => {
+                    const counterItem = counterItems.find((record) => record.id === item.id)!;
+                    const proposedPrice = parseMoneyToCents(counterItem.price);
+                    return (
+                      <tr key={item.id}>
+                        <td><strong>{item.partNumber}</strong><small>{item.description}</small></td>
+                        <td>{item.quantity}</td>
+                        <td><input type="number" min={1} value={counterItem.quantity} onChange={(event) => updateCounterItem(item.id, { quantity: Math.max(1, Number(event.target.value) || 1) })} aria-label={`Quantidade proposta para ${item.partNumber}`} /></td>
+                        <td>{formatBRL(item.unitPriceCents)}</td>
+                        <td><input inputMode="decimal" value={counterItem.price} onChange={(event) => updateCounterItem(item.id, { price: event.target.value })} onBlur={(event) => updateCounterItem(item.id, { price: formatMoneyInput(event.target.value) })} aria-label={`Net price proposto para ${item.partNumber}`} /></td>
+                        <td>{formatBRL(counterItem.quantity * proposedPrice)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-            <label className="field">
-              <span>Observação</span>
-              <input value={note} onChange={(event) => setNote(event.target.value)} placeholder="Comentário opcional" />
-            </label>
-            <label className="field">
-              <span>Valor da contraproposta</span>
-              <input value={counteroffer} onChange={(event) => setCounteroffer(event.target.value)} onBlur={(event) => setCounteroffer(formatMoneyInput(event.target.value))} placeholder="0,00" />
-            </label>
+            <div className="counteroffer-conditions">
+              <label className="field"><span>Condição de pagamento</span><input value={paymentTerms} onChange={(event) => setPaymentTerms(event.target.value)} placeholder="Ex.: 30/60/90 dias" required /></label>
+              <label className="field"><span>Condição de frete</span><select value={freightTerms} onChange={(event) => setFreightTerms(event.target.value)} required><option value="">Selecione</option><option value="Manter condição original">Manter condição original</option><option value="CIF - HORSCH responsável pelo frete">CIF — HORSCH</option><option value="FOB - concessionária responsável pelo frete">FOB — Concessionária</option></select></label>
+              <label className="field"><span>Prazo de entrega solicitado</span><input value={deliveryTerms} onChange={(event) => setDeliveryTerms(event.target.value)} placeholder="Ex.: até 15 dias após o pedido" required /></label>
+              <label className="field counteroffer-note"><span>Justificativa obrigatória</span><input value={note} onChange={(event) => setNote(event.target.value)} placeholder="Explique o motivo comercial da contraproposta" required /></label>
+            </div>
             <div className="decision-actions">
               <button className="decision-button reject" disabled={updating} onClick={() => void updateStatus("rejected")}>Recusar</button>
-              <button className="decision-button counter" disabled={updating} onClick={() => void updateStatus("counteroffer")}>Enviar contraproposta</button>
+              <button className="decision-button counter" disabled={updating || !counterofferTotal || !note.trim() || !paymentTerms.trim() || !freightTerms.trim() || !deliveryTerms.trim()} onClick={() => void updateStatus("counteroffer")}>{updating ? "Enviando..." : status === "counteroffer" ? "Atualizar contraproposta" : "Enviar contraproposta"}</button>
               <button className="decision-button accept" disabled={updating} onClick={() => void updateStatus("approved")}>Aceitar proposta</button>
+            </div>
+            {error && <p className="form-error">{error}</p>}
+          </section>
+        )}
+
+        {canReviewCounteroffer && (
+          <section className="counteroffer-review-panel no-print">
+            <div>
+              <span className="eyebrow">Análise da fábrica</span>
+              <h2>Contraproposta recebida</h2>
+              <p>Revise a comparação abaixo. Ao devolver, a proposta volta para a concessionária como aberta.</p>
+            </div>
+            <label className="field">
+              <span>Comentário da análise</span>
+              <input value={reviewNote} onChange={(event) => setReviewNote(event.target.value)} placeholder="Opcional para aceite; recomendado ao devolver" />
+            </label>
+            <div className="counteroffer-review-actions">
+              <button type="button" className="outline-button" disabled={updating} onClick={() => void reviewCounteroffer("return_counteroffer")}>Devolver para ajuste</button>
+              <button type="button" className="primary-button approve-counteroffer" disabled={updating} onClick={() => void reviewCounteroffer("accept_counteroffer")}>{updating ? "Salvando..." : "Aceitar contraproposta"}</button>
             </div>
             {error && <p className="form-error">{error}</p>}
           </section>
@@ -992,11 +1155,38 @@ function ProposalPreview({ proposal, me, onClose, onUpdated, onDeleted }: { prop
             </tbody>
           </table>
           <div className="document-total"><span>Valor total da proposta</span><strong>{formatBRL(proposal.totalCents)}</strong></div>
-          {proposal.counterofferCents && (
-            <section className="document-counteroffer">
-              <span>Contraproposta da concessionária</span>
-              <strong>{formatBRL(proposal.counterofferCents)}</strong>
-              {proposal.decisionNote && <p>{proposal.decisionNote}</p>}
+          {(proposal.counterofferCents || status === "counteroffer") && (
+            <section className="document-counteroffer-detail">
+              <div className="document-section-title">
+                <h2>Contraproposta da concessionária</h2>
+                <span>{proposal.counterofferSubmittedAt ? `Enviada em ${formatDateTime(proposal.counterofferSubmittedAt)}` : "Em edição"}</span>
+              </div>
+              <table className="document-counteroffer-table">
+                <thead><tr><th>PN</th><th>Qtd. original</th><th>Qtd. proposta</th><th>Net original</th><th>Net proposto</th><th>Variação</th></tr></thead>
+                <tbody>
+                  {proposal.items.map((item) => {
+                    const edited = counterItems.find((record) => record.id === item.id);
+                    const proposedQuantity = edited?.quantity ?? item.counterofferQuantity ?? item.quantity;
+                    const proposedPrice = edited ? parseMoneyToCents(edited.price) : item.counterofferUnitPriceCents ?? item.unitPriceCents;
+                    const variation = item.unitPriceCents ? ((proposedPrice - item.unitPriceCents) / item.unitPriceCents) * 100 : 0;
+                    return <tr key={item.id}><td>{item.partNumber}</td><td>{item.quantity}</td><td>{proposedQuantity}</td><td>{formatBRL(item.unitPriceCents)}</td><td>{formatBRL(proposedPrice)}</td><td>{variation > 0 ? "+" : ""}{variation.toFixed(1).replace(".", ",")}%</td></tr>;
+                  })}
+                </tbody>
+              </table>
+              <div className="document-counteroffer-summary">
+                <div><span>Original</span><strong>{formatBRL(originalTotal)}</strong></div>
+                <div><span>Contraproposta</span><strong>{formatBRL(counterofferTotal || proposal.counterofferCents || 0)}</strong></div>
+              </div>
+              <dl className="document-counteroffer-terms">
+                <div><dt>Pagamento</dt><dd>{paymentTerms || "—"}</dd></div>
+                <div><dt>Frete</dt><dd>{freightTerms || "—"}</dd></div>
+                <div><dt>Entrega</dt><dd>{deliveryTerms || "—"}</dd></div>
+                <div><dt>Justificativa</dt><dd>{note || "—"}</dd></div>
+              </dl>
+              <p className="document-counteroffer-owner">Enviada por {proposal.decidedByEmail || me.email}</p>
+              {proposal.counterofferReviewedAt && (
+                <p className="document-counteroffer-review">Analisada por {proposal.counterofferReviewedByEmail} em {formatDateTime(proposal.counterofferReviewedAt)}{proposal.counterofferReviewNote ? ` · ${proposal.counterofferReviewNote}` : ""}</p>
+              )}
             </section>
           )}
           <section className="document-terms"><strong>Condições comerciais</strong><p>Valores líquidos em reais, sujeitos à disponibilidade de estoque. Tributos e frete seguem as condições vigentes acordadas com a concessionária.</p></section>
@@ -1029,6 +1219,7 @@ function EmptyState({ title, text }: { title: string; text: string }) { return <
 function EmptyMini({ text }: { text: string }) { return <div className="empty-mini">{text}</div>; }
 function formatBRL(cents: number) { return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 2 }).format(cents / 100); }
 function formatDate(value: string) { if (!value) return "—"; const date = value.length === 10 ? new Date(`${value}T12:00:00`) : new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("pt-BR"); }
+function formatDateTime(value: string) { if (!value) return "—"; const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }); }
 function initials(value: string) { return value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part.charAt(0)).join("").toUpperCase() || "HB"; }
 function firstName(value: string) { const name = value.trim().split(/\s+/)[0]; return name && !name.includes("@") ? name : "bem-vindo"; }
 function defaultValidity() { const date = new Date(); date.setDate(date.getDate() + 30); return date.toISOString().slice(0, 10); }
