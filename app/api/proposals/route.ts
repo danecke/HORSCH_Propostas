@@ -4,6 +4,7 @@ import { dealerships, proposalItems, proposals, users } from "../../../db/schema
 import {
   canCreateProposal,
   getAccessProfile,
+  normalizeUserRole,
   roleLabel,
   type AccessProfile,
 } from "../../../lib/access";
@@ -150,16 +151,19 @@ export async function GET() {
     return Response.json({
       proposals: proposalData,
       dealerships: dealershipData.sort((a, b) => b.totalCents - a.totalCents),
-      users: visibleUsers.map((record) => ({
-        email: record.email,
-        name: record.name,
-        role: record.role,
-        roleLabel: roleLabel(record.role as AccessProfile["role"]),
-        dealershipId: record.dealershipId,
-        active: record.active,
-        credentialReady: Boolean(record.passwordHash),
-        createdAt: record.createdAt,
-      })),
+      users: visibleUsers.map((record) => {
+        const role = normalizeUserRole(record.email, record.role) ?? "user";
+        return {
+          email: record.email,
+          name: record.name,
+          role,
+          roleLabel: roleLabel(role),
+          dealershipId: record.dealershipId,
+          active: record.active,
+          credentialReady: Boolean(record.passwordHash),
+          createdAt: record.createdAt,
+        };
+      }),
       me: {
         ...profile,
         roleLabel: roleLabel(profile.role),

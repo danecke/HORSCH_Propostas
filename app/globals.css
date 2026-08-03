@@ -164,6 +164,7 @@ button { cursor: pointer; }
 .data-table th:first-child, .data-table td:first-child { padding-left: 24px; }
 .data-table th:last-child, .data-table td:last-child { padding-right: 20px; }
 .data-table td { height: 65px; padding: 10px 15px; border-top: 1px solid #eceef0; color: #55585d; font-size: 11px; vertical-align: middle; }
+.access-table select { width: 100%; min-width: 150px; min-height: 36px; padding: 0 30px 0 9px; border: 1px solid #d8dade; color: var(--ink); background: white; font-size: 10px; }
 .data-table tbody tr { transition: background .15s ease; cursor: pointer; }
 .data-table tbody tr:hover { background: #fbfbfc; }
 .data-table td strong, .data-table td small { display: block; }

@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { AppUser } from "../lib/auth";
 
-type UserRole = "admin" | "factory_manager" | "dealer_manager";
+type UserRole = "admin" | "factory_manager" | "dealer_manager" | "user";
 type ProposalStatus =
   | "draft"
   | "sent"
@@ -200,6 +200,17 @@ export function Dashboard({ user }: { user: AppUser }) {
 
   if (loading) return <LoadingState />;
   if (error || !data) return <ErrorState message={error || "Acesso não disponível."} retry={loadData} />;
+  if (data.me.role === "user") {
+    return (
+      <PendingAssignment
+        user={user}
+        onSignOut={async () => {
+          await fetch("/api/auth/logout", { method: "POST" });
+          window.location.assign("/");
+        }}
+      />
+    );
+  }
 
   const canCreate = data.me.permissions.createProposal;
   const factoryManagers = data.users.filter((item) => item.role === "factory_manager" && item.active);
@@ -313,14 +324,89 @@ function DealershipsView({ dealerships, proposals, onOpen }: { dealerships: Deal
 
 function AccessView({ data, onNew, onChanged }: { data: DashboardData; onNew: () => void; onChanged: () => Promise<void> }) {
   const [busy, setBusy] = useState("");
-  async function toggleAccess(record: AccessUser) {
+  const isAdmin = data.me.role === "admin";
+
+  async function updateAccess(record: AccessUser, patch: Partial<Pick<AccessUser, "role" | "dealershipId" | "active">>) {
     setBusy(record.email);
-    const response = await fetch("/api/access", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: record.email, active: !record.active }) });
+    const response = await fetch("/api/access", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: record.email, ...patch }),
+    });
     const payload = (await response.json()) as { error?: string };
-    if (!response.ok) window.alert(payload.error || "Não foi possível atualizar o acesso."); else await onChanged();
+    if (!response.ok) window.alert(payload.error || "Não foi possível atualizar o acesso.");
+    else await onChanged();
     setBusy("");
   }
-  return <div className="content-frame"><header className="page-heading"><div><span className="eyebrow">Segurança e governança</span><h1>Gestão de acessos</h1><p>{accessDescription(data.me.role)}</p></div><button className="primary-button" onClick={onNew}><Icon name="plus" size={18} />Criar acesso</button></header><section className="permission-summary"><PermissionCard title="ADM" text="Visão total, todos os lançamentos e gestão completa de acessos." active={data.me.role === "admin"} /><PermissionCard title="Gestor Fábrica" text="Carteira atribuída, propostas e acessos das concessionárias atendidas." active={data.me.role === "factory_manager"} /><PermissionCard title="Gestor Concessionária" text="Propostas da própria empresa, decisões e acessos internos." active={data.me.role === "dealer_manager"} /></section><article className="panel access-panel"><PanelHeader title="Usuários no seu escopo" subtitle={`${data.users.length} acessos cadastrados`} /><div className="table-scroll"><table className="data-table access-table"><thead><tr><th>Usuário</th><th>Perfil</th><th>Concessionária</th><th>Status</th><th className="align-right">Ação</th></tr></thead><tbody>{data.users.map((record) => { const dealer = data.dealerships.find((item) => item.id === record.dealershipId); return <tr key={record.email}><td><strong>{record.name}</strong><small>{record.email}</small></td><td><span className="role-badge">{record.roleLabel}</span></td><td>{dealer?.name || "—"}</td><td><span className={`access-status ${record.active ? "active" : "inactive"}`}>{record.active ? "Ativo" : "Inativo"}</span></td><td className="align-right"><button className="outline-button compact" disabled={busy === record.email || record.email === data.me.email} onClick={() => void toggleAccess(record)}>{record.email === data.me.email ? "Seu acesso" : record.active ? "Desativar" : "Ativar"}</button></td></tr>; })}</tbody></table></div></article></div>;
+
+  return (
+    <div className="content-frame">
+      <header className="page-heading">
+        <div><span className="eyebrow">Segurança e governança</span><h1>Gestão de acessos</h1><p>{accessDescription(data.me.role)}</p></div>
+        <button className="primary-button" onClick={onNew}><Icon name="plus" size={18} />Criar usuário comum</button>
+      </header>
+      <section className="permission-summary">
+        <PermissionCard title="ADM" text="Exclusivo de Mateus Mazieiro, com visão e gestão total." active={data.me.role === "admin"} />
+        <PermissionCard title="Gestor Fábrica" text="Carteira atribuída, propostas e acessos das concessionárias atendidas." active={data.me.role === "factory_manager"} />
+        <PermissionCard title="Gestor Concessionária" text="Propostas da própria empresa, decisões e acessos internos." active={data.me.role === "dealer_manager"} />
+      </section>
+      <article className="panel access-panel">
+        <PanelHeader title="Usuários no seu escopo" subtitle={`${data.users.length} acessos cadastrados`} />
+        <div className="table-scroll">
+          <table className="data-table access-table">
+            <thead><tr><th>Usuário</th><th>Posição</th><th>Concessionária</th><th>Status</th><th className="align-right">Ação</th></tr></thead>
+            <tbody>
+              {data.users.map((record) => {
+                const isPrimaryAdmin = record.email === "mateus.mazieiro@horsch.com";
+                return (
+                  <tr key={record.email}>
+                    <td><strong>{record.name}</strong><small>{record.email}</small></td>
+                    <td>
+                      {isAdmin && !isPrimaryAdmin ? (
+                        <select
+                          value={record.role}
+                          disabled={busy === record.email}
+                          onChange={(event) => void updateAccess(record, { role: event.target.value as UserRole })}
+                          aria-label={`Posição de ${record.name}`}
+                        >
+                          <option value="user">Usuário comum</option>
+                          <option value="factory_manager">Gestor Fábrica</option>
+                          <option value="dealer_manager">Gestor Concessionária</option>
+                        </select>
+                      ) : <span className="role-badge">{record.roleLabel}</span>}
+                    </td>
+                    <td>
+                      {isAdmin && !isPrimaryAdmin ? (
+                        <select
+                          value={record.dealershipId ?? ""}
+                          disabled={busy === record.email}
+                          onChange={(event) => void updateAccess(record, { dealershipId: Number(event.target.value) || null })}
+                          aria-label={`Concessionária de ${record.name}`}
+                        >
+                          <option value="">Sem vínculo</option>
+                          {data.dealerships.map((dealer) => <option key={dealer.id} value={dealer.id}>{dealer.name}</option>)}
+                        </select>
+                      ) : data.dealerships.find((item) => item.id === record.dealershipId)?.name || "—"}
+                    </td>
+                    <td><span className={`access-status ${record.active ? "active" : "inactive"}`}>{record.active ? "Ativo" : "Inativo"}</span></td>
+                    <td className="align-right">
+                      <button
+                        className="outline-button compact"
+                        disabled={busy === record.email || record.email === data.me.email}
+                        onClick={() => void updateAccess(record, { active: !record.active })}
+                      >
+                        {record.email === data.me.email ? "Seu acesso" : record.active ? "Desativar" : "Ativar"}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </article>
+    </div>
+  );
 }
 
 function PermissionCard({ title, text, active }: { title: string; text: string; active: boolean }) {
@@ -339,10 +425,9 @@ function NewProposalModal({ userName, role, factoryManagers, onClose, onSaved }:
 }
 
 function NewAccessModal({ me, dealerships, onClose, onSaved }: { me: CurrentAccess; dealerships: Dealership[]; onClose: () => void; onSaved: () => Promise<void> }) {
-  const allowedRoles: UserRole[] = me.role === "admin" ? ["admin", "factory_manager", "dealer_manager"] : ["dealer_manager"];
-  const [name, setName] = useState(""); const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [role, setRole] = useState<UserRole>(allowedRoles[0]); const [dealershipId, setDealershipId] = useState<number | null>(me.role === "dealer_manager" ? me.dealershipId : dealerships[0]?.id ?? null); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
-  async function submit(event: FormEvent) { event.preventDefault(); setSaving(true); setError(""); const response = await fetch("/api/access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, email, password, role, dealershipId }) }); const payload = (await response.json()) as { error?: string }; if (!response.ok) { setError(payload.error || "Não foi possível criar o acesso."); setSaving(false); return; } await onSaved(); }
-  return <div className="modal-backdrop" role="dialog" aria-modal="true"><form className="access-modal" onSubmit={(event) => void submit(event)}><header className="modal-header"><div><span className="eyebrow">Novo usuário</span><h2>Criar acesso</h2><p>O usuário entrará diretamente no portal com e-mail e senha próprios.</p></div><button type="button" className="icon-button" onClick={onClose}><Icon name="close" /></button></header><div className="form-scroll"><div className="access-form-grid"><label className="field"><span>Nome completo</span><input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} required /></label><label className="field"><span>E-mail corporativo</span><input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label><label className="field"><span>Senha inicial</span><input type="password" minLength={10} maxLength={128} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label><label className="field"><span>Perfil de permissão</span><select value={role} onChange={(event) => setRole(event.target.value as UserRole)}>{allowedRoles.map((item) => <option key={item} value={item}>{roleName(item)}</option>)}</select></label>{role === "dealer_manager" && <label className="field"><span>Concessionária</span><select value={dealershipId ?? ""} onChange={(event) => setDealershipId(Number(event.target.value) || null)} required disabled={me.role === "dealer_manager"}><option value="">Selecione</option>{dealerships.map((dealer) => <option key={dealer.id} value={dealer.id}>{dealer.name}</option>)}</select></label>}</div><div className="access-note"><strong>{roleName(role)}</strong><p>{roleExplanation(role)} A senha pode ser alterada pelo próprio usuário após entrar.</p></div>{error && <p className="form-error">{error}</p>}</div><footer className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button type="submit" className="primary-button" disabled={saving}>{saving ? "Criando..." : "Criar acesso"}</button></footer></form></div>;
+  const [name, setName] = useState(""); const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [dealershipId, setDealershipId] = useState<number | null>(me.role === "dealer_manager" ? me.dealershipId : null); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
+  async function submit(event: FormEvent) { event.preventDefault(); setSaving(true); setError(""); const response = await fetch("/api/access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, email, password, dealershipId }) }); const payload = (await response.json()) as { error?: string }; if (!response.ok) { setError(payload.error || "Não foi possível criar o acesso."); setSaving(false); return; } await onSaved(); }
+  return <div className="modal-backdrop" role="dialog" aria-modal="true"><form className="access-modal" onSubmit={(event) => void submit(event)}><header className="modal-header"><div><span className="eyebrow">Novo usuário</span><h2>Criar usuário comum</h2><p>A posição será atribuída posteriormente pelo ADM.</p></div><button type="button" className="icon-button" onClick={onClose}><Icon name="close" /></button></header><div className="form-scroll"><div className="access-form-grid"><label className="field"><span>Nome completo</span><input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} required /></label><label className="field"><span>E-mail corporativo</span><input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label><label className="field"><span>Senha inicial</span><input type="password" minLength={10} maxLength={128} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>{me.role !== "dealer_manager" && <label className="field"><span>Concessionária inicial (opcional)</span><select value={dealershipId ?? ""} onChange={(event) => setDealershipId(Number(event.target.value) || null)}><option value="">Sem vínculo</option>{dealerships.map((dealer) => <option key={dealer.id} value={dealer.id}>{dealer.name}</option>)}</select></label>}</div><div className="access-note"><strong>Usuário comum</strong><p>O acesso nasce sem permissão operacional. Somente o ADM poderá atribuir a posição posteriormente.</p></div>{error && <p className="form-error">{error}</p>}</div><footer className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button type="submit" className="primary-button" disabled={saving}>{saving ? "Criando..." : "Criar usuário"}</button></footer></form></div>;
 }
 
 function ChangePasswordModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
@@ -620,6 +705,17 @@ function ProposalPreview({ proposal, me, onClose, onUpdated, onDeleted }: { prop
 }
 
 function StatusBadge({ status }: { status: ProposalStatus }) { return <span className={`status-badge ${status}`}><i />{STATUS_LABELS[status]}</span>; }
+function PendingAssignment({ user, onSignOut }: { user: AppUser; onSignOut: () => Promise<void> }) {
+  return (
+    <main className="center-state">
+      <span className="state-mark">H</span>
+      <span className="eyebrow">Acesso criado</span>
+      <h1>Seu usuário aguarda uma posição</h1>
+      <p>{user.email} está ativo como usuário comum. O ADM precisa atribuir uma posição antes de liberar as funções operacionais.</p>
+      <div className="state-actions"><button className="outline-button" onClick={() => void onSignOut()}>Sair</button></div>
+    </main>
+  );
+}
 function LoadingState() { return <div className="center-state"><span className="state-mark">H</span><h1>Preparando o portal comercial</h1><p>Carregando seu perfil e as informações autorizadas.</p></div>; }
 function ErrorState({ message, retry }: { message: string; retry: () => Promise<void> }) { return <div className="center-state"><span className="state-mark">!</span><h1>Acesso não disponível</h1><p>{message}</p><div className="state-actions"><button className="primary-button" onClick={() => void retry()}>Tentar novamente</button><Link className="outline-button" href="/">Voltar ao login</Link></div></div>; }
 function EmptyState({ title, text }: { title: string; text: string }) { return <div className="empty-state"><span><Icon name="file" size={24} /></span><h3>{title}</h3><p>{text}</p></div>; }
@@ -631,7 +727,7 @@ function firstName(value: string) { const name = value.trim().split(/\s+/)[0]; r
 function defaultValidity() { const date = new Date(); date.setDate(date.getDate() + 30); return date.toISOString().slice(0, 10); }
 function parseMoneyToCents(value: string) { const cleaned = String(value).replace(/[^\d,.-]/g, ""); const normalized = cleaned.includes(",") ? cleaned.replace(/\./g, "").replace(",", ".") : cleaned; return Math.max(0, Math.round((Number(normalized) || 0) * 100)); }
 function formatMoneyInput(value: string) { const cents = parseMoneyToCents(value); if (!value.trim() && !cents) return ""; return (cents / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-function roleName(role: UserRole) { return role === "admin" ? "ADM" : role === "factory_manager" ? "Gestor Fábrica" : "Gestor Concessionária"; }
-function roleExplanation(role: UserRole) { return role === "admin" ? "Acesso total a propostas, concessionárias e usuários." : role === "factory_manager" ? "Acesso à carteira atribuída, criação de propostas e gestão dos acessos das concessionárias atendidas." : "Acesso apenas à concessionária vinculada, com decisão sobre propostas e criação de acessos internos."; }
-function scopeDescription(me: CurrentAccess) { return me.role === "admin" ? "Visão consolidada de toda a operação e de todos os acessos." : me.role === "factory_manager" ? "Carteira atribuída, propostas e acessos das concessionárias sob sua gestão." : "Propostas e usuários vinculados exclusivamente à sua concessionária."; }
-function accessDescription(role: UserRole) { return role === "admin" ? "Crie e gerencie qualquer nível de permissão." : role === "factory_manager" ? "Gerencie acessos das concessionárias da sua carteira." : "Crie e gerencie acessos internos da sua concessionária."; }
+function roleName(role: UserRole) { return role === "admin" ? "ADM" : role === "factory_manager" ? "Gestor Fábrica" : role === "dealer_manager" ? "Gestor Concessionária" : "Usuário comum"; }
+function roleExplanation(role: UserRole) { return role === "admin" ? "Acesso total a propostas, concessionárias e usuários." : role === "factory_manager" ? "Acesso à carteira atribuída, criação de propostas e gestão dos acessos das concessionárias atendidas." : role === "dealer_manager" ? "Acesso apenas à concessionária vinculada, com decisão sobre propostas e criação de acessos internos." : "Acesso sem função operacional até receber uma posição do ADM."; }
+function scopeDescription(me: CurrentAccess) { return me.role === "admin" ? "Visão consolidada de toda a operação e de todos os acessos." : me.role === "factory_manager" ? "Carteira atribuída, propostas e acessos das concessionárias sob sua gestão." : me.role === "dealer_manager" ? "Propostas e usuários vinculados exclusivamente à sua concessionária." : "Aguardando atribuição de posição pelo ADM."; }
+function accessDescription(role: UserRole) { return role === "admin" ? "Cadastre usuários comuns e atribua suas posições posteriormente." : role === "factory_manager" ? "Cadastre usuários comuns para as concessionárias da sua carteira." : role === "dealer_manager" ? "Cadastre usuários comuns vinculados à sua concessionária." : "Aguardando atribuição de posição."; }

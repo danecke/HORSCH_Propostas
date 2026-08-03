@@ -3,7 +3,8 @@ import { getDb } from "../db";
 import { users } from "../db/schema";
 import { getAuthenticatedUser } from "./auth";
 
-export const ROLES = ["admin", "factory_manager", "dealer_manager"] as const;
+export const MASTER_ADMIN_EMAIL = "mateus.mazieiro@horsch.com";
+export const ROLES = ["admin", "factory_manager", "dealer_manager", "user"] as const;
 export type UserRole = (typeof ROLES)[number];
 
 export type AccessProfile = {
@@ -22,14 +23,15 @@ export async function getAccessProfile(): Promise<AccessProfile | null> {
   const email = identity.email.trim().toLowerCase();
   const [record] = await db.select().from(users).where(eq(users.email, email)).limit(1);
 
-  if (!record || !record.active || !ROLES.includes(record.role as UserRole)) {
+  const role = record ? normalizeUserRole(record.email, record.role) : null;
+  if (!record || !record.active || !role) {
     return null;
   }
 
   return {
     email: record.email,
     name: record.name || identity.displayName,
-    role: record.role as UserRole,
+    role,
     dealershipId: record.dealershipId ?? null,
     active: record.active,
   };
@@ -42,5 +44,13 @@ export function canCreateProposal(profile: AccessProfile) {
 export function roleLabel(role: UserRole) {
   if (role === "admin") return "ADM";
   if (role === "factory_manager") return "Gestor Fábrica";
-  return "Gestor Concessionária";
+  if (role === "dealer_manager") return "Gestor Concessionária";
+  return "Usuário comum";
+}
+
+export function normalizeUserRole(email: string, role: string): UserRole | null {
+  const normalizedEmail = email.trim().toLowerCase();
+  if (normalizedEmail === MASTER_ADMIN_EMAIL) return "admin";
+  if (role === "admin") return "user";
+  return ROLES.includes(role as UserRole) ? (role as UserRole) : null;
 }

@@ -1,7 +1,13 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { dealerships, users } from "../../../db/schema";
-import { getAccessProfile, ROLES, type UserRole } from "../../../lib/access";
+import {
+  getAccessProfile,
+  MASTER_ADMIN_EMAIL,
+  normalizeUserRole,
+  ROLES,
+  type UserRole,
+} from "../../../lib/access";
 import {
   createPasswordCredential,
   validatePassword,
@@ -28,8 +34,9 @@ async function canManage(
   dealershipId: number | null,
 ) {
   if (actor.role === "admin") return true;
-  if (role !== "dealer_manager" || dealershipId === null) return false;
+  if (!["dealer_manager", "user"].includes(role) || dealershipId === null) return false;
   if (actor.role === "dealer_manager") return actor.dealershipId === dealershipId;
+  if (actor.role !== "factory_manager") return false;
 
   const db = await getDb();
   const [dealer] = await db
@@ -48,13 +55,19 @@ export async function POST(request: Request) {
     const payload = (await request.json()) as AccessInput;
     const email = payload.email?.trim().toLowerCase() ?? "";
     const name = payload.name?.trim() ?? "";
-    const role = payload.role;
-    const dealershipId = role === "dealer_manager" ? Number(payload.dealershipId) || null : null;
-    if (!email || !email.includes("@") || !name || !role || !ROLES.includes(role)) {
-      return Response.json({ error: "Preencha nome, e-mail e perfil corretamente." }, { status: 400 });
+    const role: UserRole = "user";
+    const dealershipId =
+      actor.role === "dealer_manager"
+        ? actor.dealershipId
+        : Number(payload.dealershipId) || null;
+    if (!email || !email.includes("@") || !name) {
+      return Response.json({ error: "Preencha nome e e-mail corretamente." }, { status: 400 });
     }
-    if (role === "dealer_manager" && dealershipId === null) {
-      return Response.json({ error: "Selecione a concessionária deste acesso." }, { status: 400 });
+    if (email === MASTER_ADMIN_EMAIL) {
+      return Response.json({ error: "O acesso do ADM principal já é administrado pelo sistema." }, { status: 409 });
+    }
+    if (actor.role !== "admin" && dealershipId === null) {
+      return Response.json({ error: "Selecione a concessionária deste usuário." }, { status: 400 });
     }
     const passwordError = validatePassword(payload.password ?? "");
     if (passwordError) {
@@ -97,26 +110,33 @@ export async function PATCH(request: Request) {
     const [target] = await db.select().from(users).where(eq(users.email, email)).limit(1);
     if (!target) return Response.json({ error: "Acesso não encontrado." }, { status: 404 });
 
-    const role = payload.role && ROLES.includes(payload.role) ? payload.role : (target.role as UserRole);
+    const currentRole = normalizeUserRole(target.email, target.role) ?? "user";
+    const role = payload.role && ROLES.includes(payload.role) ? payload.role : currentRole;
     const dealershipId =
       role === "dealer_manager"
         ? Number(payload.dealershipId ?? target.dealershipId) || null
-        : null;
-    if (!(await canManage(actor, target.role as UserRole, target.dealershipId ?? null))) {
+        : Number(payload.dealershipId ?? target.dealershipId) || null;
+    const changesPosition =
+      (payload.role !== undefined && payload.role !== currentRole) ||
+      (payload.dealershipId !== undefined && dealershipId !== (target.dealershipId ?? null));
+    if (changesPosition && actor.role !== "admin") {
+      return forbidden("Somente o ADM pode atribuir ou alterar posições.");
+    }
+    if (email === MASTER_ADMIN_EMAIL && (role !== "admin" || payload.active === false)) {
+      return Response.json({ error: "O ADM principal não pode ser reclassificado ou desativado." }, { status: 409 });
+    }
+    if (email !== MASTER_ADMIN_EMAIL && role === "admin") {
+      return forbidden("Nenhum outro usuário pode receber a posição ADM.");
+    }
+    if (role === "dealer_manager" && dealershipId === null) {
+      return Response.json({ error: "Selecione a concessionária deste gestor." }, { status: 400 });
+    }
+    if (!(await canManage(actor, currentRole, target.dealershipId ?? null))) {
       return forbidden();
     }
     if (!(await canManage(actor, role, dealershipId))) return forbidden();
     if (email === actor.email && payload.active === false) {
       return Response.json({ error: "Você não pode desativar o próprio acesso." }, { status: 409 });
-    }
-
-    if (target.role === "admin" && (payload.active === false || role !== "admin")) {
-      const activeAdmins = (await db.select().from(users)).filter(
-        (record) => record.role === "admin" && record.active,
-      );
-      if (activeAdmins.length <= 1) {
-        return Response.json({ error: "O sistema precisa manter ao menos um ADM ativo." }, { status: 409 });
-      }
     }
 
     if (payload.password) {
