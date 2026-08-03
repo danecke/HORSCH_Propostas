@@ -553,3 +553,343 @@ button { cursor: pointer; }
   .document-items thead, .document-counteroffer-table thead { display: table-header-group; }
   .document-items tr, .document-counteroffer-table tr { break-inside: avoid; page-break-inside: avoid; }
 }
+
+/* Marketing pass — proposal document */
+.proposal-paper {
+  padding: 16mm 15mm 11mm;
+  color: #25272b;
+  background: #fff;
+  box-shadow: 0 20px 65px rgb(27 31 35 / 22%);
+  font-size: 9.5pt;
+}
+
+.proposal-paper::before {
+  height: 4mm;
+  background: linear-gradient(90deg, var(--red) 0 24%, #25272b 24% 100%);
+}
+
+.document-header {
+  min-height: 36mm;
+  padding: 5mm 0 8mm;
+  align-items: flex-start;
+  gap: 12mm;
+  border-bottom: .45mm solid #d8dade;
+}
+
+.document-title {
+  min-width: 0;
+  flex: 1;
+  padding-top: 1mm;
+}
+
+.document-kicker {
+  display: block;
+  margin-bottom: 3mm;
+  color: var(--red);
+  font-size: 6.1pt;
+  font-weight: 900;
+  letter-spacing: .16em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.document-title h1 {
+  color: #25272b;
+  font-size: 23pt;
+  font-weight: 900;
+  letter-spacing: -.055em;
+}
+
+.document-title p {
+  margin-top: 3.5mm;
+  gap: 2.5mm;
+  color: #555a60;
+  font-size: 7.2pt;
+  letter-spacing: .105em;
+}
+
+.document-title p::before {
+  width: 10mm;
+  height: .9mm;
+  background: var(--red);
+}
+
+.document-brand-block {
+  width: 68mm;
+  max-width: 46%;
+  display: grid;
+  align-content: center;
+  justify-items: end;
+  gap: 2.5mm;
+  color: var(--red);
+}
+
+.document-brand-block > span {
+  color: #777b80;
+  font-size: 6.1pt;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.document-brand-block .document-logo {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+}
+
+.document-stats {
+  margin-top: 5mm;
+  gap: 2mm;
+  border: 0;
+  background: transparent;
+}
+
+.document-stats div {
+  min-height: 18mm;
+  padding: 4mm 4.5mm;
+  border: 1px solid #e1e3e5;
+  border-top: 1mm solid #cfd2d5;
+  background: #f7f8f8;
+}
+
+.document-stats div:first-child {
+  padding-left: 4.5mm;
+  border: 1px solid #f1c4c9;
+  border-top: 1mm solid var(--red);
+  background: #fff8f8;
+}
+
+.document-stats span,
+.document-customer span {
+  color: #7a7e83;
+  font-size: 6.2pt;
+  letter-spacing: .075em;
+}
+
+.document-stats strong {
+  margin-top: 2mm;
+  color: #292c31;
+  font-size: 10.3pt;
+  font-weight: 900;
+}
+
+.document-stats div:first-child strong {
+  color: var(--red);
+  font-size: 11.3pt;
+}
+
+.document-customer {
+  position: relative;
+  margin-top: 4mm;
+  padding: 9mm 5mm 5mm;
+  border: 1px solid #e1e3e5;
+  border-left: 1.2mm solid var(--red);
+  background: #fff;
+}
+
+.document-customer::before {
+  position: absolute;
+  top: 3.5mm;
+  left: 5mm;
+  content: "Dados do atendimento";
+  color: var(--red);
+  font-size: 6.2pt;
+  font-weight: 900;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.document-customer > div {
+  padding: 0 5mm;
+}
+
+.document-customer > div:first-child {
+  padding-left: 1mm;
+}
+
+.document-customer strong {
+  margin-top: 2mm;
+  color: #292c31;
+  font-size: 9pt;
+  font-weight: 800;
+}
+
+.document-customer small {
+  margin-top: 1.2mm;
+  color: #777b80;
+  font-size: 6.1pt;
+}
+
+.document-intro {
+  margin: 5mm 0 6mm;
+  padding: 4mm 5mm;
+  color: #555a60;
+  border: 1px solid #f0d5d8;
+  border-left: 1.2mm solid var(--red);
+  background: #fffafa;
+  font-size: 8pt;
+  line-height: 1.55;
+}
+
+.document-intro strong {
+  display: block;
+  margin-bottom: 1.2mm;
+  color: #2e3136;
+  font-size: 8.3pt;
+  font-weight: 900;
+}
+
+.document-section-title {
+  margin-bottom: 2.5mm;
+  padding-bottom: 2.2mm;
+  border-bottom: .8mm solid var(--red);
+}
+
+.document-section-title h2 {
+  color: #292c31;
+  font-size: 9.6pt;
+  font-weight: 900;
+  letter-spacing: .08em;
+}
+
+.document-section-title span {
+  color: #777b80;
+  font-size: 6.4pt;
+  letter-spacing: .03em;
+}
+
+.document-items {
+  border-color: #d8dade;
+}
+
+.document-items th {
+  padding: 2.8mm 2mm;
+  background: #292c31;
+  font-size: 6.2pt;
+  letter-spacing: .045em;
+}
+
+.document-items td {
+  padding: 2.8mm 2mm;
+  color: #454a50;
+  font-size: 7.1pt;
+}
+
+.document-items tbody tr:nth-child(even) {
+  background: #fafafa;
+}
+
+.document-items td:first-child {
+  color: var(--red);
+  font-weight: 900;
+}
+
+.document-items td:nth-child(2) {
+  color: #30343a;
+  font-weight: 700;
+}
+
+.document-total {
+  min-height: 20mm;
+  margin-top: 5mm;
+  padding: 0 5mm;
+  width: 94mm;
+  border-left: 2.5mm solid var(--red);
+  background: #292c31;
+}
+
+.document-total span {
+  max-width: 34mm;
+  color: #d6d9dc;
+  font-size: 6.4pt;
+  letter-spacing: .065em;
+}
+
+.document-total strong {
+  color: #fff;
+  font-size: 15.5pt;
+}
+
+.document-counteroffer-detail {
+  margin-top: 5mm;
+  padding: 4mm;
+  border: 1px solid #aabfd8;
+  border-top: 1.2mm solid #4770aa;
+  background: #f5f8fc;
+}
+
+.document-terms {
+  margin-top: 6mm;
+  padding: 4.5mm 5mm;
+  border: 1px solid #e0e2e4;
+  border-left: 1.3mm solid var(--red);
+  background: #f8f8f9;
+}
+
+.document-terms strong {
+  color: #292c31;
+  font-size: 7.3pt;
+  letter-spacing: .075em;
+}
+
+.document-terms p {
+  margin-top: 2mm;
+  color: #5b5e63;
+  font-size: 7.1pt;
+  line-height: 1.5;
+}
+
+.document-signatures {
+  margin-top: 11mm;
+  gap: 17mm;
+}
+
+.document-signatures > div {
+  min-height: 21mm;
+  padding: 0 4mm 2mm;
+}
+
+.document-signatures > div > span {
+  height: 14mm;
+  border-bottom: 1px solid #777b80;
+}
+
+.document-signatures .signature-name {
+  color: #282b30;
+  font-size: 18pt;
+}
+
+.document-signatures small {
+  margin-top: 2.2mm;
+  color: #64686d;
+  font-size: 6.4pt;
+  letter-spacing: .06em;
+}
+
+.document-footer {
+  margin-top: 8mm;
+  padding-top: 3.5mm;
+  border-top: 1px solid #d0d2d4;
+  color: #777b80;
+  font-size: 6.2pt;
+}
+
+@media print {
+  .proposal-paper {
+    padding: 14mm 15mm 10mm;
+    box-shadow: none !important;
+  }
+
+  .document-header {
+    min-height: 34mm;
+  }
+
+  .document-signatures {
+    margin-top: 9mm;
+  }
+
+  .document-footer {
+    margin-top: 7mm;
+  }
+}
