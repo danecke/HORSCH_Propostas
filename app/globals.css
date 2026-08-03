@@ -341,13 +341,12 @@ button { cursor: pointer; }
 .preview-error { margin: 15px auto 0; padding: 13px 16px; color: #8e1e2c; background: #fdebed; font-size: 11px; }
 .proposal-paper { position: relative; width: 210mm; min-height: 297mm; margin: 24px auto 60px; padding: 12mm 14mm 11mm; overflow: hidden; color: #1d1d1f; background: white; box-shadow: 0 15px 45px rgb(0 0 0 / 25%); font-size: 10pt; }
 .proposal-paper::before { position: absolute; inset: 0 auto 0 0; width: 4mm; content: ""; background: var(--red); }
-.document-header { padding-bottom: 7mm; display: grid; grid-template-columns: auto 1fr auto; gap: 6mm; align-items: center; border-bottom: 1.2mm solid var(--red); }
-.document-mark { width: 13mm; color: var(--red); }
-.document-type { align-self: stretch; padding-left: 6mm; display: flex; flex-direction: column; justify-content: center; border-left: 1px solid #c5c5c7; }
-.document-type span { color: #5d5d60; font-size: 8pt; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; }
-.document-type strong { margin-top: 2px; font-size: 10pt; }
+.document-header { min-height: 23mm; padding-bottom: 7mm; display: flex; align-items: center; justify-content: space-between; gap: 12mm; border-bottom: 1.2mm solid var(--red); }
+.document-logo { min-width: 61mm; display: inline-flex; align-items: center; gap: 4mm; color: var(--red); }
+.document-mark { width: 15mm; height: 15mm; flex: 0 0 auto; color: var(--red); }
+.document-logo strong { color: #242628; font-size: 20pt; font-weight: 900; letter-spacing: .105em; line-height: 1; }
 .document-title { text-align: right; }
-.document-title h1 { margin: 0; font-size: 18pt; line-height: 1.05; text-transform: uppercase; }
+.document-title h1 { margin: 0; font-size: 18pt; line-height: 1.05; white-space: nowrap; text-transform: uppercase; }
 .document-title p { margin: 4px 0 0; color: #5d5d60; font-size: 8pt; }
 .document-stats { display: grid; grid-template-columns: repeat(3, 1fr); border-bottom: 1px solid #c5c5c7; }
 .document-stats div { padding: 5mm 4mm; border-left: 1px solid #e1e2e3; }
