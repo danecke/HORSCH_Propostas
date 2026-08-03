@@ -160,6 +160,15 @@ export async function PATCH(request: Request) {
         updatedAt: new Date().toISOString(),
       })
       .where(eq(users.email, email));
+    if (role === "dealer_manager" && dealershipId !== null) {
+      await db
+        .update(dealerships)
+        .set({
+          contactName: payload.name?.trim() || target.name,
+          contactEmail: email,
+        })
+        .where(eq(dealerships.id, dealershipId));
+    }
     return Response.json({ ok: true });
   } catch (error) {
     return Response.json(

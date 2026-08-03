@@ -29,6 +29,13 @@
       "when": 1785762000000,
       "tag": "0003_primary_admin",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1785760676879,
+      "tag": "0004_peaceful_mac_gargan",
+      "breakpoints": true
     }
   ]
 }

@@ -19,6 +19,7 @@ type ProposalItem = {
   proposalId: string;
   partNumber: string;
   description: string;
+  vt: string;
   origin: string;
   ncm: string;
   quantity: number;
@@ -42,6 +43,9 @@ type Proposal = {
   counterofferCents: number | null;
   decisionNote: string;
   decidedByEmail: string;
+  emailStatus: "not_requested" | "processing" | "sent" | "pending_configuration" | "failed";
+  emailSentAt: string | null;
+  emailError: string;
   createdByEmail: string;
   createdAt: string;
   updatedAt: string;
@@ -56,6 +60,9 @@ type Dealership = {
   contactName: string;
   contactEmail: string;
   factoryManagerEmail: string;
+  factoryManagerName: string;
+  dealerManagerName: string;
+  dealerManagerEmail: string;
   proposals: number;
   approved: number;
   totalCents: number;
@@ -256,7 +263,7 @@ export function Dashboard({ user }: { user: AppUser }) {
         </nav>
       </section>
 
-      {showNewProposal && <NewProposalModal userName={data.me.name} role={data.me.role} factoryManagers={factoryManagers} onClose={() => setShowNewProposal(false)} onSaved={async () => { setShowNewProposal(false); await refreshed("Proposta salva com sucesso."); }} />}
+      {showNewProposal && <NewProposalModal userName={data.me.name} role={data.me.role} dealerships={data.dealerships} factoryManagers={factoryManagers} onClose={() => setShowNewProposal(false)} onSaved={async (message) => { setShowNewProposal(false); await refreshed(message); }} />}
       {showNewAccess && <NewAccessModal me={data.me} dealerships={data.dealerships} onClose={() => setShowNewAccess(false)} onSaved={async () => { setShowNewAccess(false); await refreshed("Novo acesso criado com sucesso."); }} />}
       {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} onSaved={() => { setShowChangePassword(false); setNotice("Senha alterada com sucesso."); }} />}
       {preview && <ProposalPreview proposal={preview} me={data.me} onClose={() => setPreview(null)} onDeleted={async () => { setPreview(null); await refreshed("Proposta excluída com sucesso."); }} onUpdated={async (status, counterofferCents) => { setPreview({ ...preview, status, counterofferCents: counterofferCents ?? null }); await refreshed("Proposta atualizada com sucesso."); }} />}
@@ -319,7 +326,7 @@ function ProposalTable({ proposals, onOpen }: { proposals: Proposal[]; onOpen: (
 }
 
 function DealershipsView({ dealerships, proposals, onOpen }: { dealerships: Dealership[]; proposals: Proposal[]; onOpen: (proposal: Proposal) => void }) {
-  return <div className="content-frame"><header className="page-heading"><div><span className="eyebrow">Carteira comercial</span><h1>Concessionárias</h1><p>Parceiros disponíveis dentro do seu nível de permissão.</p></div></header>{!dealerships.length ? <article className="panel"><EmptyState title="Nenhuma concessionária vinculada" text="Crie uma proposta para iniciar a carteira ou solicite a vinculação ao ADM." /></article> : <section className="dealership-grid">{dealerships.map((dealer) => { const latest = proposals.find((proposal) => proposal.dealershipId === dealer.id); return <article className="dealer-card" key={dealer.id}><header><span className="dealer-large-monogram">{initials(dealer.name)}</span><div><h2>{dealer.name}</h2><p>{dealer.city}{dealer.state ? ` · ${dealer.state}` : ""}</p></div></header><dl><div><dt>Propostas</dt><dd>{dealer.proposals}</dd></div><div><dt>Aceitas</dt><dd>{dealer.approved}</dd></div><div><dt>Valor</dt><dd>{formatBRL(dealer.totalCents)}</dd></div></dl><div className="dealer-manager"><span>Gestor Fábrica</span><strong>{dealer.factoryManagerEmail || "Não atribuído"}</strong></div><footer><div><span>Contato</span><strong>{dealer.contactName || dealer.contactEmail || "Não informado"}</strong></div>{latest && <button className="text-button" onClick={() => onOpen(latest)}>Abrir última <Icon name="arrow" size={14} /></button>}</footer></article>; })}</section>}</div>;
+  return <div className="content-frame"><header className="page-heading"><div><span className="eyebrow">Carteira comercial</span><h1>Concessionárias</h1><p>Parceiros disponíveis dentro do seu nível de permissão.</p></div></header>{!dealerships.length ? <article className="panel"><EmptyState title="Nenhuma concessionária vinculada" text="Crie uma proposta para iniciar a carteira ou solicite a vinculação ao ADM." /></article> : <section className="dealership-grid">{dealerships.map((dealer) => { const latest = proposals.find((proposal) => proposal.dealershipId === dealer.id); return <article className="dealer-card" key={dealer.id}><header><span className="dealer-large-monogram">{initials(dealer.name)}</span><div><h2>{dealer.name}</h2><p>{dealer.city}{dealer.state ? ` · ${dealer.state}` : ""}</p></div></header><dl><div><dt>Propostas</dt><dd>{dealer.proposals}</dd></div><div><dt>Aceitas</dt><dd>{dealer.approved}</dd></div><div><dt>Valor</dt><dd>{formatBRL(dealer.totalCents)}</dd></div></dl><div className="dealer-manager"><span>Gestor Fábrica</span><strong>{dealer.factoryManagerName || "Não atribuído"}</strong><small>{dealer.factoryManagerEmail}</small></div><footer><div><span>Responsável da concessionária</span><strong>{dealer.dealerManagerName || "Não informado"}</strong><small>{dealer.dealerManagerEmail}</small></div>{latest && <button className="text-button" onClick={() => onOpen(latest)}>Abrir última <Icon name="arrow" size={14} /></button>}</footer></article>; })}</section>}</div>;
 }
 
 function AccessView({ data, onNew, onChanged }: { data: DashboardData; onNew: () => void; onChanged: () => Promise<void> }) {
@@ -413,15 +420,267 @@ function PermissionCard({ title, text, active }: { title: string; text: string; 
   return <article className={`permission-card ${active ? "current" : ""}`}><span>{active ? "Seu perfil" : "Nível de acesso"}</span><h2>{title}</h2><p>{text}</p></article>;
 }
 
-type FormItem = { partNumber: string; description: string; ncm: string; quantity: number; price: string };
-const blankItem = (): FormItem => ({ partNumber: "", description: "", ncm: "", quantity: 1, price: "" });
+type FormItem = {
+  partNumber: string;
+  description: string;
+  vt: string;
+  origin: string;
+  ncm: string;
+  quantity: number;
+  price: string;
+};
 
-function NewProposalModal({ userName, role, factoryManagers, onClose, onSaved }: { userName: string; role: UserRole; factoryManagers: AccessUser[]; onClose: () => void; onSaved: () => Promise<void> }) {
-  const [dealership, setDealership] = useState(""); const [city, setCity] = useState(""); const [state, setState] = useState(""); const [contactName, setContactName] = useState(""); const [contactEmail, setContactEmail] = useState(""); const [commercialOwner, setCommercialOwner] = useState(userName); const [factoryManagerEmail, setFactoryManagerEmail] = useState(factoryManagers[0]?.email ?? ""); const [validUntil, setValidUntil] = useState(defaultValidity()); const [items, setItems] = useState<FormItem[]>([blankItem()]); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
-  const totalCents = items.reduce((sum, item) => sum + item.quantity * parseMoneyToCents(item.price), 0);
-  function updateItem(index: number, patch: Partial<FormItem>) { setItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item)); }
-  async function submit(event: FormEvent, status: "draft" | "sent") { event.preventDefault(); setSaving(true); setError(""); const response = await fetch("/api/proposals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dealership, city, state, contactName, contactEmail, commercialOwner, factoryManagerEmail, validUntil, status, items: items.map((item) => ({ ...item, unitPriceCents: parseMoneyToCents(item.price) })) }) }); const payload = (await response.json()) as { error?: string }; if (!response.ok) { setError(payload.error || "Não foi possível salvar a proposta."); setSaving(false); return; } await onSaved(); }
-  return <div className="modal-backdrop" role="dialog" aria-modal="true"><form className="proposal-form-modal" onSubmit={(event) => void submit(event, "draft")}><header className="modal-header"><div><span className="eyebrow">Nova negociação</span><h2>Criar proposta comercial</h2><p>A concessionária será vinculada à carteira do gestor responsável.</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Fechar"><Icon name="close" /></button></header><div className="form-scroll"><section className="form-section"><div className="form-section-title"><span>01</span><div><h3>Concessionária</h3><p>Identificação do parceiro comercial.</p></div></div><div className="form-grid"><label className="field"><span>Concessionária</span><input value={dealership} onChange={(event) => setDealership(event.target.value)} required /></label><label className="field"><span>Cidade</span><input value={city} onChange={(event) => setCity(event.target.value)} /></label><label className="field small"><span>UF</span><input maxLength={2} value={state} onChange={(event) => setState(event.target.value.toUpperCase())} /></label><label className="field"><span>Responsável na concessionária</span><input value={contactName} onChange={(event) => setContactName(event.target.value)} /></label><label className="field"><span>E-mail do contato</span><input type="email" value={contactEmail} onChange={(event) => setContactEmail(event.target.value)} /></label></div></section><section className="form-section"><div className="form-section-title"><span>02</span><div><h3>Dados comerciais</h3><p>Responsável interno e validade.</p></div></div><div className="form-grid two-columns"><label className="field"><span>Responsável Comercial HORSCH</span><input value={commercialOwner} onChange={(event) => setCommercialOwner(event.target.value)} required /></label><label className="field"><span>Válida até</span><input type="date" value={validUntil} onChange={(event) => setValidUntil(event.target.value)} required /></label>{role === "admin" && <label className="field"><span>Gestor Fábrica responsável</span><select value={factoryManagerEmail} onChange={(event) => setFactoryManagerEmail(event.target.value)}><option value="">ADM / não atribuído</option>{factoryManagers.map((manager) => <option key={manager.email} value={manager.email}>{manager.name} · {manager.email}</option>)}</select></label>}</div></section><section className="form-section items-section"><div className="form-section-title"><span>03</span><div><h3>Itens da proposta</h3><p>Valores líquidos em reais.</p></div><button type="button" className="outline-button add-item-button" onClick={() => setItems((current) => [...current, blankItem()])}><Icon name="plus" size={15} />Adicionar item</button></div><div className="items-table-wrap"><table className="items-form-table"><thead><tr><th>PN</th><th>VT / Descrição</th><th>Origem</th><th>NCM</th><th>Qtd.</th><th>Net Price (R$)</th><th /></tr></thead><tbody>{items.map((item, index) => <tr key={index}><td><input value={item.partNumber} onChange={(event) => updateItem(index, { partNumber: event.target.value })} /></td><td><input value={item.description} onChange={(event) => updateItem(index, { description: event.target.value })} /></td><td className="origin-cell">{item.description.length >= 3 ? item.description.charAt(2) : "—"}</td><td><input value={item.ncm} onChange={(event) => updateItem(index, { ncm: event.target.value })} /></td><td><input type="number" min={1} value={item.quantity} onChange={(event) => updateItem(index, { quantity: Math.max(1, Number(event.target.value) || 1) })} /></td><td><input inputMode="decimal" value={item.price} onChange={(event) => updateItem(index, { price: event.target.value })} onBlur={(event) => updateItem(index, { price: formatMoneyInput(event.target.value) })} /></td><td><button type="button" className="remove-item" onClick={() => setItems((current) => current.length === 1 ? [blankItem()] : current.filter((_, itemIndex) => itemIndex !== index))}>×</button></td></tr>)}</tbody></table></div><div className="form-total"><span>Valor total da proposta</span><strong>{formatBRL(totalCents)}</strong></div></section>{error && <p className="form-error">{error}</p>}</div><footer className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button type="submit" className="outline-button" disabled={saving}>Salvar rascunho</button><button type="button" className="primary-button" disabled={saving} onClick={(event) => void submit(event as unknown as FormEvent, "sent")}>Salvar e enviar</button></footer></form></div>;
+const blankItem = (): FormItem => ({
+  partNumber: "",
+  description: "",
+  vt: "",
+  origin: "",
+  ncm: "",
+  quantity: 1,
+  price: "",
+});
+
+type DeliveryResponse = {
+  status: "sent" | "pending_configuration" | "failed";
+  recipientEmail: string;
+  error?: string;
+};
+
+function NewProposalModal({
+  userName,
+  role,
+  dealerships,
+  factoryManagers,
+  onClose,
+  onSaved,
+}: {
+  userName: string;
+  role: UserRole;
+  dealerships: Dealership[];
+  factoryManagers: AccessUser[];
+  onClose: () => void;
+  onSaved: (message: string) => Promise<void>;
+}) {
+  const [dealershipSelection, setDealershipSelection] = useState(
+    dealerships.length ? "" : "new",
+  );
+  const [dealership, setDealership] = useState("");
+  const [city, setCity] = useState("");
+  const [state, setState] = useState("");
+  const [contactName, setContactName] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
+  const [factoryManagerEmail, setFactoryManagerEmail] = useState(
+    role === "factory_manager" ? factoryManagers[0]?.email ?? "" : "",
+  );
+  const [validUntil, setValidUntil] = useState(defaultValidity());
+  const [items, setItems] = useState<FormItem[]>([blankItem()]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const selectedDealer = dealerships.find(
+    (record) => String(record.id) === dealershipSelection,
+  );
+  const selectedFactoryManager = factoryManagers.find(
+    (record) => record.email === factoryManagerEmail,
+  );
+  const commercialOwner =
+    selectedDealer?.factoryManagerName || selectedFactoryManager?.name || userName;
+  const isNewDealer = dealershipSelection === "new";
+  const totalCents = items.reduce(
+    (sum, item) => sum + item.quantity * parseMoneyToCents(item.price),
+    0,
+  );
+
+  function selectDealership(value: string) {
+    setDealershipSelection(value);
+    const record = dealerships.find((item) => String(item.id) === value);
+    if (!record) {
+      setDealership("");
+      setCity("");
+      setState("");
+      setContactName("");
+      setContactEmail("");
+      setFactoryManagerEmail(
+        role === "factory_manager" ? factoryManagers[0]?.email ?? "" : "",
+      );
+      return;
+    }
+    setDealership(record.name);
+    setCity(record.city);
+    setState(record.state);
+    setContactName(record.dealerManagerName || record.contactName);
+    setContactEmail(record.dealerManagerEmail || record.contactEmail);
+    setFactoryManagerEmail(record.factoryManagerEmail);
+  }
+
+  function updateItem(index: number, patch: Partial<FormItem>) {
+    setItems((current) =>
+      current.map((item, itemIndex) =>
+        itemIndex === index ? { ...item, ...patch } : item,
+      ),
+    );
+  }
+
+  async function submit(event: FormEvent, status: "draft" | "sent") {
+    event.preventDefault();
+    if (!dealershipSelection) {
+      setError("Selecione uma concessionária ou escolha cadastrar uma nova.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    const response = await fetch("/api/proposals", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dealershipId: selectedDealer?.id ?? null,
+        dealership,
+        city,
+        state,
+        contactName,
+        contactEmail,
+        factoryManagerEmail,
+        validUntil,
+        status,
+        items: items.map((item) => ({
+          ...item,
+          unitPriceCents: parseMoneyToCents(item.price),
+        })),
+      }),
+    });
+    const payload = (await response.json()) as {
+      error?: string;
+      delivery?: DeliveryResponse;
+    };
+    if (!response.ok) {
+      setError(payload.error || "Não foi possível salvar a proposta.");
+      setSaving(false);
+      return;
+    }
+    const message =
+      status === "draft"
+        ? "Proposta salva como rascunho."
+        : payload.delivery?.status === "sent"
+          ? `Proposta enviada para ${payload.delivery.recipientEmail}.`
+          : payload.delivery?.status === "pending_configuration"
+            ? "Proposta salva. O envio por e-mail aguarda a configuração aprovada pelo TI."
+            : "Proposta salva como rascunho; o serviço de e-mail não confirmou o envio.";
+    await onSaved(message);
+  }
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
+      <form
+        className="proposal-form-modal"
+        onSubmit={(event) => void submit(event, "draft")}
+      >
+        <header className="modal-header">
+          <div>
+            <span className="eyebrow">Nova negociação</span>
+            <h2>Criar proposta comercial</h2>
+            <p>Responsáveis e destinatários são definidos pela carteira selecionada.</p>
+          </div>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Fechar">
+            <Icon name="close" />
+          </button>
+        </header>
+
+        <div className="form-scroll">
+          <section className="form-section">
+            <div className="form-section-title">
+              <span>01</span>
+              <div><h3>Concessionária e responsáveis</h3><p>Selecione a carteira para preencher os responsáveis automaticamente.</p></div>
+            </div>
+            <div className="form-grid">
+              <label className="field">
+                <span>Concessionária</span>
+                <select
+                  value={dealershipSelection}
+                  onChange={(event) => selectDealership(event.target.value)}
+                  required
+                >
+                  <option value="">Selecione uma concessionária</option>
+                  {dealerships.map((dealer) => (
+                    <option key={dealer.id} value={dealer.id}>{dealer.name}</option>
+                  ))}
+                  <option value="new">+ Cadastrar nova concessionária</option>
+                </select>
+              </label>
+              {isNewDealer && (
+                <>
+                  <label className="field"><span>Nome da concessionária</span><input value={dealership} onChange={(event) => setDealership(event.target.value)} required /></label>
+                  <label className="field"><span>Cidade</span><input value={city} onChange={(event) => setCity(event.target.value)} /></label>
+                  <label className="field small"><span>UF</span><input maxLength={2} value={state} onChange={(event) => setState(event.target.value.toUpperCase())} /></label>
+                </>
+              )}
+            </div>
+
+            {(selectedDealer || isNewDealer) && (
+              <div className="responsible-grid">
+                <article className="responsible-card">
+                  <span>Responsável da concessionária</span>
+                  <label className="field"><span>Nome</span><input value={contactName} readOnly={Boolean(selectedDealer?.dealerManagerName)} onChange={(event) => setContactName(event.target.value)} required /></label>
+                  <label className="field"><span>E-mail destinatário</span><input type="email" value={contactEmail} readOnly={Boolean(selectedDealer?.dealerManagerEmail)} onChange={(event) => setContactEmail(event.target.value)} required /></label>
+                </article>
+                <article className="responsible-card">
+                  <span>Responsável HORSCH</span>
+                  {role === "admin" && (!selectedDealer || !selectedDealer.factoryManagerEmail) ? (
+                    <label className="field">
+                      <span>Gestor Fábrica</span>
+                      <select value={factoryManagerEmail} onChange={(event) => setFactoryManagerEmail(event.target.value)} required>
+                        <option value="">Selecione o gestor</option>
+                        {factoryManagers.map((manager) => (
+                          <option key={manager.email} value={manager.email}>{manager.name} · {manager.email}</option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : (
+                    <label className="field"><span>Gestor Fábrica</span><input value={commercialOwner} readOnly /></label>
+                  )}
+                  <label className="field"><span>Válida até</span><input type="date" value={validUntil} onChange={(event) => setValidUntil(event.target.value)} required /></label>
+                </article>
+              </div>
+            )}
+          </section>
+
+          <section className="form-section items-section">
+            <div className="form-section-title">
+              <span>02</span>
+              <div><h3>Itens da proposta</h3><p>Todos os campos comerciais e fiscais são obrigatórios.</p></div>
+              <button type="button" className="outline-button add-item-button" onClick={() => setItems((current) => [...current, blankItem()])}><Icon name="plus" size={15} />Adicionar item</button>
+            </div>
+            <div className="items-table-wrap">
+              <table className="items-form-table">
+                <thead><tr><th>PN</th><th>Descrição</th><th>VT</th><th>Origem</th><th>NCM</th><th>Qtd.</th><th>Net price (R$)</th><th /></tr></thead>
+                <tbody>
+                  {items.map((item, index) => (
+                    <tr key={index}>
+                      <td><input value={item.partNumber} onChange={(event) => updateItem(index, { partNumber: event.target.value })} required /></td>
+                      <td><input value={item.description} onChange={(event) => updateItem(index, { description: event.target.value })} required /></td>
+                      <td><input value={item.vt} onChange={(event) => updateItem(index, { vt: event.target.value })} required /></td>
+                      <td><input value={item.origin} onChange={(event) => updateItem(index, { origin: event.target.value })} required /></td>
+                      <td><input value={item.ncm} onChange={(event) => updateItem(index, { ncm: event.target.value })} required /></td>
+                      <td><input type="number" min={1} value={item.quantity} onChange={(event) => updateItem(index, { quantity: Math.max(1, Number(event.target.value) || 1) })} required /></td>
+                      <td><input inputMode="decimal" value={item.price} onChange={(event) => updateItem(index, { price: event.target.value })} onBlur={(event) => updateItem(index, { price: formatMoneyInput(event.target.value) })} required /></td>
+                      <td><button type="button" className="remove-item" aria-label={`Remover item ${index + 1}`} onClick={() => setItems((current) => current.length === 1 ? [blankItem()] : current.filter((_, itemIndex) => itemIndex !== index))}>×</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="form-total"><span>Valor total da proposta</span><strong>{formatBRL(totalCents)}</strong></div>
+          </section>
+          {error && <p className="form-error">{error}</p>}
+        </div>
+
+        <footer className="modal-actions">
+          <button type="button" className="ghost-button" onClick={onClose}>Cancelar</button>
+          <button type="submit" className="outline-button" disabled={saving}>{saving ? "Salvando..." : "Salvar rascunho"}</button>
+          <button type="button" className="primary-button" disabled={saving || !contactEmail} onClick={(event) => void submit(event as unknown as FormEvent, "sent")}>{saving ? "Enviando..." : "Salvar e enviar por e-mail"}</button>
+        </footer>
+      </form>
+    </div>
+  );
 }
 
 function NewAccessModal({ me, dealerships, onClose, onSaved }: { me: CurrentAccess; dealerships: Dealership[]; onClose: () => void; onSaved: () => Promise<void> }) {
@@ -486,19 +745,54 @@ function ProposalPreview({ proposal, me, onClose, onUpdated, onDeleted }: { prop
   const [updating, setUpdating] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [sendingEmail, setSendingEmail] = useState(false);
+  const [emailStatus, setEmailStatus] = useState(proposal.emailStatus);
   const [error, setError] = useState("");
 
   const decisionOpen =
     me.role === "dealer_manager" &&
     ["sent", "counteroffer"].includes(proposal.status);
-  const managerStatuses = STATUS_ORDER.filter(
-    (item) => item !== "counteroffer" || proposal.status === "counteroffer",
-  );
+  const managerStatuses = STATUS_ORDER.filter((item) => {
+    if (item === "sent" && status !== "sent") return false;
+    return item !== "counteroffer" || proposal.status === "counteroffer";
+  });
   const canDelete =
     me.permissions.deleteAnyProposal ||
     (me.permissions.deleteOwnDraft &&
       proposal.status === "draft" &&
       proposal.createdByEmail === me.email);
+
+  async function sendByEmail() {
+    setSendingEmail(true);
+    setError("");
+    const response = await fetch("/api/proposals", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: proposal.id, action: "send" }),
+    });
+    const payload = (await response.json()) as {
+      error?: string;
+      status?: ProposalStatus;
+      delivery?: DeliveryResponse;
+    };
+    if (!response.ok) {
+      setError(payload.error || "Não foi possível enviar a proposta por e-mail.");
+      setSendingEmail(false);
+      return;
+    }
+    if (payload.delivery?.status === "sent") {
+      setEmailStatus("sent");
+      setStatus("sent");
+      await onUpdated("sent");
+    } else {
+      setEmailStatus(payload.delivery?.status ?? "failed");
+      setError(
+        payload.delivery?.error ||
+          "A proposta foi mantida como rascunho porque o envio não foi confirmado.",
+      );
+    }
+    setSendingEmail(false);
+  }
 
   async function updateStatus(nextStatus: ProposalStatus) {
     setUpdating(true);
@@ -580,6 +874,17 @@ function ProposalPreview({ proposal, me, onClose, onUpdated, onDeleted }: { prop
               >
                 <Icon name="trash" size={16} />
                 Excluir
+              </button>
+            )}
+            {me.role !== "dealer_manager" && emailStatus !== "sent" && (
+              <button
+                type="button"
+                className="outline-button dark"
+                disabled={sendingEmail}
+                onClick={() => void sendByEmail()}
+              >
+                <Icon name="arrow" size={16} />
+                {sendingEmail ? "Enviando..." : "Enviar por e-mail"}
               </button>
             )}
             <button type="button" className="outline-button dark" onClick={() => window.print()}>
@@ -664,18 +969,20 @@ function ProposalPreview({ proposal, me, onClose, onUpdated, onDeleted }: { prop
             <div><span>Válida até</span><strong>{formatDate(proposal.validUntil)}</strong></div>
           </section>
           <section className="document-customer">
-            <div><span>Responsável da concessionária</span><strong>{proposal.contactName || "—"}</strong></div>
+            <div><span>Responsável da concessionária</span><strong>{proposal.contactName || "—"}</strong><small>{proposal.contactEmail || "E-mail não cadastrado"}</small></div>
             <div><span>Concessionária</span><strong>{proposal.dealership}</strong></div>
+            <div><span>Responsável HORSCH</span><strong>{proposal.commercialOwner}</strong><small>{proposal.factoryManagerEmail || proposal.createdByEmail}</small></div>
           </section>
           <p className="document-intro">Apresentamos nossa proposta comercial para o fornecimento dos itens abaixo. Valores e condições permanecem válidos até a data indicada.</p>
           <div className="document-section-title"><h2>Itens da proposta</h2><span>Valores líquidos em reais</span></div>
           <table className="document-items">
-            <thead><tr><th>PN</th><th>VT</th><th>Origem</th><th>NCM</th><th>Quantidade</th><th>Net Price (R$)</th></tr></thead>
+            <thead><tr><th>PN</th><th>Descrição</th><th>VT</th><th>Origem</th><th>NCM</th><th>Qtd.</th><th>Net price (R$)</th></tr></thead>
             <tbody>
               {proposal.items.map((item) => (
                 <tr key={item.id}>
                   <td>{item.partNumber || "—"}</td>
                   <td>{item.description || "—"}</td>
+                  <td>{item.vt || "—"}</td>
                   <td>{item.origin || "—"}</td>
                   <td>{item.ncm || "—"}</td>
                   <td>{item.quantity}</td>
@@ -727,7 +1034,5 @@ function firstName(value: string) { const name = value.trim().split(/\s+/)[0]; r
 function defaultValidity() { const date = new Date(); date.setDate(date.getDate() + 30); return date.toISOString().slice(0, 10); }
 function parseMoneyToCents(value: string) { const cleaned = String(value).replace(/[^\d,.-]/g, ""); const normalized = cleaned.includes(",") ? cleaned.replace(/\./g, "").replace(",", ".") : cleaned; return Math.max(0, Math.round((Number(normalized) || 0) * 100)); }
 function formatMoneyInput(value: string) { const cents = parseMoneyToCents(value); if (!value.trim() && !cents) return ""; return (cents / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-function roleName(role: UserRole) { return role === "admin" ? "ADM" : role === "factory_manager" ? "Gestor Fábrica" : role === "dealer_manager" ? "Gestor Concessionária" : "Usuário comum"; }
-function roleExplanation(role: UserRole) { return role === "admin" ? "Acesso total a propostas, concessionárias e usuários." : role === "factory_manager" ? "Acesso à carteira atribuída, criação de propostas e gestão dos acessos das concessionárias atendidas." : role === "dealer_manager" ? "Acesso apenas à concessionária vinculada, com decisão sobre propostas e criação de acessos internos." : "Acesso sem função operacional até receber uma posição do ADM."; }
 function scopeDescription(me: CurrentAccess) { return me.role === "admin" ? "Visão consolidada de toda a operação e de todos os acessos." : me.role === "factory_manager" ? "Carteira atribuída, propostas e acessos das concessionárias sob sua gestão." : me.role === "dealer_manager" ? "Propostas e usuários vinculados exclusivamente à sua concessionária." : "Aguardando atribuição de posição pelo ADM."; }
 function accessDescription(role: UserRole) { return role === "admin" ? "Cadastre usuários comuns e atribua suas posições posteriormente." : role === "factory_manager" ? "Cadastre usuários comuns para as concessionárias da sua carteira." : role === "dealer_manager" ? "Cadastre usuários comuns vinculados à sua concessionária." : "Aguardando atribuição de posição."; }

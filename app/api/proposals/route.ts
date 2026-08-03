@@ -8,6 +8,10 @@ import {
   roleLabel,
   type AccessProfile,
 } from "../../../lib/access";
+import {
+  sendProposalEmail,
+  type ProposalEmailResult,
+} from "../../../lib/proposal-email";
 
 export const dynamic = "force-dynamic";
 
@@ -23,18 +27,20 @@ const VALID_STATUSES = new Set([
 type ItemInput = {
   partNumber?: string;
   description?: string;
+  vt?: string;
+  origin?: string;
   ncm?: string;
   quantity?: number;
   unitPriceCents?: number;
 };
 
 type ProposalInput = {
+  dealershipId?: number | null;
   dealership?: string;
   city?: string;
   state?: string;
   contactName?: string;
   contactEmail?: string;
-  commercialOwner?: string;
   factoryManagerEmail?: string;
   validUntil?: string;
   status?: string;
@@ -66,7 +72,62 @@ function dealerIsVisible(
   if (profile.role === "factory_manager") {
     return dealer.factoryManagerEmail.toLowerCase() === profile.email;
   }
-  return dealer.id === profile.dealershipId;
+  if (profile.role === "dealer_manager") {
+    return dealer.id === profile.dealershipId;
+  }
+  return false;
+}
+
+type UserRecord = typeof users.$inferSelect;
+
+function activeUserWithRole(
+  records: UserRecord[],
+  role: "factory_manager" | "dealer_manager",
+  predicate: (record: UserRecord) => boolean,
+) {
+  return records.find(
+    (record) =>
+      record.active && normalizeUserRole(record.email, record.role) === role && predicate(record),
+  );
+}
+
+function normalizeItems(items: ItemInput[]) {
+  return items.map((item) => ({
+    partNumber: item.partNumber?.trim() ?? "",
+    description: item.description?.trim() ?? "",
+    vt: item.vt?.trim() ?? "",
+    origin: item.origin?.trim() ?? "",
+    ncm: item.ncm?.trim() ?? "",
+    quantity: Math.max(1, Math.trunc(Number(item.quantity) || 1)),
+    unitPriceCents: Math.max(0, Math.trunc(Number(item.unitPriceCents) || 0)),
+  }));
+}
+
+function itemValidationError(items: ReturnType<typeof normalizeItems>) {
+  if (!items.length) return "Adicione ao menos um item à proposta.";
+  const incomplete = items.find(
+    (item) =>
+      !item.partNumber ||
+      !item.description ||
+      !item.vt ||
+      !item.origin ||
+      !item.ncm ||
+      !item.unitPriceCents,
+  );
+  if (incomplete) {
+    return "Preencha PN, descrição, VT, origem, NCM e net price em todos os itens.";
+  }
+  return "";
+}
+
+function deliveryDatabasePatch(delivery: ProposalEmailResult) {
+  return {
+    status: delivery.status === "sent" ? "sent" : "draft",
+    emailStatus: delivery.status,
+    emailSentAt: delivery.status === "sent" ? new Date().toISOString() : null,
+    emailError: delivery.error ?? "",
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 export async function GET() {
@@ -75,7 +136,10 @@ export async function GET() {
 
   try {
     const db = await getDb();
-    const allDealers = await db.select().from(dealerships).orderBy(dealerships.name);
+    const [allDealers, allUsers] = await Promise.all([
+      db.select().from(dealerships).orderBy(dealerships.name),
+      db.select().from(users).orderBy(users.name, users.email),
+    ]);
     const visibleDealers = allDealers.filter((dealer) => dealerIsVisible(profile, dealer));
     const visibleDealerIds = new Set(visibleDealers.map((dealer) => dealer.id));
 
@@ -87,7 +151,8 @@ export async function GET() {
         city: dealerships.city,
         state: dealerships.state,
         contactName: proposals.contactName,
-        contactEmail: dealerships.contactEmail,
+        contactEmail: proposals.contactEmail,
+        dealershipContactEmail: dealerships.contactEmail,
         factoryManagerEmail: dealerships.factoryManagerEmail,
         commercialOwner: proposals.commercialOwner,
         status: proposals.status,
@@ -97,6 +162,9 @@ export async function GET() {
         counterofferCents: proposals.counterofferCents,
         decisionNote: proposals.decisionNote,
         decidedByEmail: proposals.decidedByEmail,
+        emailStatus: proposals.emailStatus,
+        emailSentAt: proposals.emailSentAt,
+        emailError: proposals.emailError,
         createdByEmail: proposals.createdByEmail,
         createdAt: proposals.createdAt,
         updatedAt: proposals.updatedAt,
@@ -119,14 +187,30 @@ export async function GET() {
       itemsByProposal.set(item.proposalId, current);
     }
 
-    const proposalData = rows.map((row) => ({
+    const proposalData = rows.map(({ dealershipContactEmail, ...row }) => ({
       ...row,
+      contactEmail: row.contactEmail || dealershipContactEmail,
       items: itemsByProposal.get(row.id) ?? [],
     }));
     const dealershipData = visibleDealers.map((dealer) => {
       const dealerProposals = rows.filter((row) => row.dealershipId === dealer.id);
+      const factoryManager = activeUserWithRole(
+        allUsers,
+        "factory_manager",
+        (record) => record.email === dealer.factoryManagerEmail.toLowerCase(),
+      );
+      const dealerManager = activeUserWithRole(
+        allUsers,
+        "dealer_manager",
+        (record) => record.dealershipId === dealer.id,
+      );
       return {
         ...dealer,
+        contactName: dealerManager?.name || dealer.contactName,
+        contactEmail: dealerManager?.email || dealer.contactEmail,
+        factoryManagerName: factoryManager?.name || "",
+        dealerManagerName: dealerManager?.name || dealer.contactName,
+        dealerManagerEmail: dealerManager?.email || dealer.contactEmail,
         proposals: dealerProposals.length,
         approved: dealerProposals.filter((row) => row.status === "approved").length,
         totalCents: dealerProposals.reduce((sum, row) => sum + row.totalCents, 0),
@@ -134,15 +218,18 @@ export async function GET() {
       };
     });
 
-    const allUsers = await db.select().from(users).orderBy(users.name, users.email);
     const visibleUsers = allUsers.filter((record) => {
+      const recordRole = normalizeUserRole(record.email, record.role) ?? "user";
       if (profile.role === "admin") return true;
       if (record.email === profile.email) return true;
       if (profile.role === "dealer_manager") {
-        return record.role === "dealer_manager" && record.dealershipId === profile.dealershipId;
+        return (
+          ["user", "dealer_manager"].includes(recordRole) &&
+          record.dealershipId === profile.dealershipId
+        );
       }
       return (
-        record.role === "dealer_manager" &&
+        ["user", "dealer_manager"].includes(recordRole) &&
         record.dealershipId !== null &&
         visibleDealerIds.has(record.dealershipId)
       );
@@ -171,6 +258,7 @@ export async function GET() {
           viewAll: profile.role === "admin",
           createProposal: canCreateProposal(profile),
           manageAllAccess: profile.role === "admin",
+          manageAccess: profile.role !== "user",
           decideProposal: profile.role === "dealer_manager",
           deleteAnyProposal: profile.role === "admin",
           deleteOwnDraft: profile.role === "factory_manager",
@@ -191,50 +279,38 @@ export async function POST(request: Request) {
 
   try {
     const payload = (await request.json()) as ProposalInput;
-    const dealershipName = payload.dealership?.trim() ?? "";
-    const commercialOwner = payload.commercialOwner?.trim() || profile.name;
     const requestedStatus = payload.status === "sent" ? "sent" : "draft";
-    const validItems = (payload.items ?? [])
-      .map((item) => ({
-        partNumber: item.partNumber?.trim() ?? "",
-        description: item.description?.trim() ?? "",
-        ncm: item.ncm?.trim() ?? "",
-        quantity: Math.max(1, Math.trunc(Number(item.quantity) || 1)),
-        unitPriceCents: Math.max(0, Math.trunc(Number(item.unitPriceCents) || 0)),
-      }))
-      .filter((item) => item.partNumber || item.description);
-
-    if (!dealershipName) {
-      return Response.json({ error: "Informe a concessionária." }, { status: 400 });
-    }
-    if (!validItems.length) {
-      return Response.json({ error: "Adicione ao menos um item à proposta." }, { status: 400 });
+    const validItems = normalizeItems(payload.items ?? []);
+    const validationError = itemValidationError(validItems);
+    if (validationError) {
+      return Response.json({ error: validationError }, { status: 400 });
     }
 
     const db = await getDb();
-    const [existingDealer] = await db
-      .select()
-      .from(dealerships)
-      .where(eq(dealerships.name, dealershipName))
-      .limit(1);
+    const dealershipIdInput = Math.trunc(Number(payload.dealershipId) || 0);
+    const dealershipName = payload.dealership?.trim() ?? "";
+    const [existingDealer] = dealershipIdInput
+      ? await db.select().from(dealerships).where(eq(dealerships.id, dealershipIdInput)).limit(1)
+      : dealershipName
+        ? await db.select().from(dealerships).where(eq(dealerships.name, dealershipName)).limit(1)
+        : [];
 
-    const assignedManager =
-      profile.role === "factory_manager"
+    if (!existingDealer && !dealershipName) {
+      return Response.json({ error: "Informe a concessionária." }, { status: 400 });
+    }
+    if (existingDealer && !dealerIsVisible(profile, existingDealer)) return forbidden();
+
+    const assignedManagerEmail = existingDealer
+      ? existingDealer.factoryManagerEmail.toLowerCase() ||
+        (profile.role === "factory_manager"
+          ? profile.email
+          : payload.factoryManagerEmail?.trim().toLowerCase() ?? "")
+      : profile.role === "factory_manager"
         ? profile.email
         : payload.factoryManagerEmail?.trim().toLowerCase() ?? "";
-    if (
-      existingDealer &&
-      profile.role === "factory_manager" &&
-      existingDealer.factoryManagerEmail.toLowerCase() !== profile.email
-    ) {
-      return Response.json(
-        { error: "Esta concessionária pertence à carteira de outro gestor." },
-        { status: 403 },
-      );
-    }
 
-    let dealershipId = existingDealer?.id;
-    if (!dealershipId) {
+    let dealer = existingDealer;
+    if (!dealer) {
       const [createdDealer] = await db
         .insert(dealerships)
         .values({
@@ -243,38 +319,81 @@ export async function POST(request: Request) {
           state: payload.state?.trim().toUpperCase().slice(0, 2) ?? "",
           contactName: payload.contactName?.trim() ?? "",
           contactEmail: payload.contactEmail?.trim().toLowerCase() ?? "",
-          factoryManagerEmail: assignedManager,
+          factoryManagerEmail: assignedManagerEmail,
         })
         .returning();
-      dealershipId = createdDealer.id;
+      dealer = createdDealer;
     } else if (
-      profile.role === "admin" &&
-      assignedManager &&
-      assignedManager !== existingDealer?.factoryManagerEmail
+      (!dealer.factoryManagerEmail && assignedManagerEmail) ||
+      (!dealer.contactName && payload.contactName?.trim()) ||
+      (!dealer.contactEmail && payload.contactEmail?.trim())
     ) {
-      await db
+      const [updatedDealer] = await db
         .update(dealerships)
-        .set({ factoryManagerEmail: assignedManager })
-        .where(eq(dealerships.id, dealershipId));
+        .set({
+          factoryManagerEmail: dealer.factoryManagerEmail || assignedManagerEmail,
+          contactName: dealer.contactName || payload.contactName?.trim() || "",
+          contactEmail:
+            dealer.contactEmail || payload.contactEmail?.trim().toLowerCase() || "",
+        })
+        .where(eq(dealerships.id, dealer.id))
+        .returning();
+      dealer = updatedDealer;
+    }
+
+    const allUsers = await db.select().from(users).orderBy(users.name, users.email);
+    const factoryManager = activeUserWithRole(
+      allUsers,
+      "factory_manager",
+      (record) => record.email === assignedManagerEmail,
+    );
+    const dealerManager = activeUserWithRole(
+      allUsers,
+      "dealer_manager",
+      (record) => record.dealershipId === dealer.id,
+    );
+    const contactName = dealerManager?.name || dealer.contactName || payload.contactName?.trim() || "";
+    const contactEmail = (
+      dealerManager?.email ||
+      dealer.contactEmail ||
+      payload.contactEmail ||
+      ""
+    )
+      .trim()
+      .toLowerCase();
+    const commercialOwner =
+      factoryManager?.name ||
+      (assignedManagerEmail === profile.email ? profile.name : "Equipe Comercial HORSCH");
+    const commercialOwnerEmail = assignedManagerEmail || profile.email;
+
+    if (requestedStatus === "sent" && !contactEmail) {
+      return Response.json(
+        { error: "Cadastre o e-mail do responsável da concessionária antes de enviar." },
+        { status: 400 },
+      );
     }
 
     const now = new Date();
     const defaultValidity = new Date(now);
     defaultValidity.setDate(defaultValidity.getDate() + 30);
     const id = proposalNumber(now);
+    const issueDate = now.toISOString().slice(0, 10);
+    const validUntil = payload.validUntil || defaultValidity.toISOString().slice(0, 10);
     const totalCents = validItems.reduce(
       (sum, item) => sum + item.quantity * item.unitPriceCents,
       0,
     );
     await db.insert(proposals).values({
       id,
-      dealershipId,
-      contactName: payload.contactName?.trim() ?? "",
+      dealershipId: dealer.id,
+      contactName,
+      contactEmail,
       commercialOwner,
-      status: requestedStatus,
-      issueDate: now.toISOString().slice(0, 10),
-      validUntil: payload.validUntil || defaultValidity.toISOString().slice(0, 10),
+      status: "draft",
+      issueDate,
+      validUntil,
       totalCents,
+      emailStatus: requestedStatus === "sent" ? "processing" : "not_requested",
       createdByEmail: profile.email,
       createdByName: profile.name,
     });
@@ -283,13 +402,39 @@ export async function POST(request: Request) {
         proposalId: id,
         partNumber: item.partNumber,
         description: item.description,
-        origin: item.description.length >= 3 ? item.description.charAt(2) : "",
+        vt: item.vt,
+        origin: item.origin,
         ncm: item.ncm,
         quantity: item.quantity,
         unitPriceCents: item.unitPriceCents,
       })),
     );
-    return Response.json({ id }, { status: 201 });
+
+    if (requestedStatus === "draft") {
+      return Response.json({ id, status: "draft" }, { status: 201 });
+    }
+
+    const delivery = await sendProposalEmail({
+      id,
+      dealership: dealer.name,
+      recipientName: contactName,
+      recipientEmail: contactEmail,
+      commercialOwner,
+      commercialOwnerEmail,
+      issueDate,
+      validUntil,
+      totalCents,
+      items: validItems,
+      portalUrl: new URL("/", request.url).toString(),
+    });
+    await db
+      .update(proposals)
+      .set(deliveryDatabasePatch(delivery))
+      .where(eq(proposals.id, id));
+    return Response.json(
+      { id, status: delivery.status === "sent" ? "sent" : "draft", delivery },
+      { status: 201 },
+    );
   } catch (error) {
     return Response.json({ error: apiError(error) }, { status: 500 });
   }
@@ -302,12 +447,13 @@ export async function PATCH(request: Request) {
   try {
     const payload = (await request.json()) as {
       id?: string;
+      action?: "send";
       status?: string;
       counterofferCents?: number;
       decisionNote?: string;
     };
-    if (!payload.id || !VALID_STATUSES.has(payload.status ?? "")) {
-      return Response.json({ error: "Proposta ou status inválido." }, { status: 400 });
+    if (!payload.id) {
+      return Response.json({ error: "Informe a proposta." }, { status: 400 });
     }
     const db = await getDb();
     const [record] = await db
@@ -321,7 +467,54 @@ export async function PATCH(request: Request) {
     }
     if (!dealerIsVisible(profile, record.dealer)) return forbidden();
 
+    if (payload.action === "send") {
+      if (!["admin", "factory_manager"].includes(profile.role)) return forbidden();
+      const recipientEmail = record.proposal.contactEmail || record.dealer.contactEmail;
+      if (!recipientEmail) {
+        return Response.json(
+          { error: "O responsável da concessionária não possui e-mail cadastrado." },
+          { status: 400 },
+        );
+      }
+      const items = await db
+        .select()
+        .from(proposalItems)
+        .where(eq(proposalItems.proposalId, payload.id));
+      const delivery = await sendProposalEmail({
+        id: record.proposal.id,
+        dealership: record.dealer.name,
+        recipientName: record.proposal.contactName || record.dealer.contactName,
+        recipientEmail,
+        commercialOwner: record.proposal.commercialOwner,
+        commercialOwnerEmail:
+          record.dealer.factoryManagerEmail || record.proposal.createdByEmail,
+        issueDate: record.proposal.issueDate,
+        validUntil: record.proposal.validUntil,
+        totalCents: record.proposal.totalCents,
+        items,
+        portalUrl: new URL("/", request.url).toString(),
+      });
+      await db
+        .update(proposals)
+        .set(deliveryDatabasePatch(delivery))
+        .where(eq(proposals.id, payload.id));
+      return Response.json({
+        ok: delivery.status === "sent",
+        status: delivery.status === "sent" ? "sent" : "draft",
+        delivery,
+      });
+    }
+
+    if (!VALID_STATUSES.has(payload.status ?? "")) {
+      return Response.json({ error: "Status inválido." }, { status: 400 });
+    }
     const nextStatus = payload.status!;
+    if (nextStatus === "sent" && record.proposal.status !== "sent") {
+      return Response.json(
+        { error: "Use a ação Enviar por e-mail para registrar o envio da proposta." },
+        { status: 409 },
+      );
+    }
     if (profile.role === "dealer_manager") {
       if (!["approved", "rejected", "counteroffer"].includes(nextStatus)) {
         return Response.json(
