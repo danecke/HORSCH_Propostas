@@ -160,6 +160,7 @@ button { cursor: pointer; }
 .pipeline-fill.negotiation { background: #4770aa; }
 .pipeline-fill.counteroffer { background: #4770aa; }
 .pipeline-fill.approved { background: var(--green); }
+.pipeline-fill.expired { background: #7b6689; }
 .pipeline-row small { color: var(--muted); font-size: 11px; text-align: right; }
 .dealer-ranking { display: grid; }
 .ranking-row { min-height: 59px; display: grid; grid-template-columns: 24px 35px minmax(0, 1fr) auto; gap: 10px; align-items: center; border-bottom: 1px solid #eceef0; }
@@ -204,6 +205,12 @@ button { cursor: pointer; }
 .status-badge.rejected i { background: var(--red); }
 .status-badge.expired { color: #685b73; background: #eeeaf1; }
 .status-badge.expired i { background: #7b6689; }
+
+.expiry-notice { min-height: 74px; padding: 15px 24px; display: flex; align-items: center; gap: 13px; color: #4f4358; border-bottom: 1px solid #d8cfde; background: #f2eef5; }
+.expiry-notice svg { flex: 0 0 auto; color: #7b6689; }
+.expiry-notice strong, .expiry-notice span { display: block; }
+.expiry-notice strong { font-size: 12px; }
+.expiry-notice span { margin-top: 4px; color: #706478; font-size: 10px; line-height: 1.45; }
 
 /* Proposals and dealerships */
 .full-list-panel { overflow: hidden; }

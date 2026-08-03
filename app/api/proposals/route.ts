@@ -1,4 +1,4 @@
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, lt } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { dealerships, proposalItems, proposals, users } from "../../../db/schema";
 import {
@@ -23,6 +23,8 @@ const VALID_STATUSES = new Set([
   "rejected",
   "expired",
 ]);
+
+const EXPIRABLE_STATUSES = ["draft", "sent", "counteroffer"];
 
 type ItemInput = {
   partNumber?: string;
@@ -136,12 +138,49 @@ function deliveryDatabasePatch(delivery: ProposalEmailResult) {
   };
 }
 
+function currentBusinessDate(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+async function expireOverdueProposals(db: Awaited<ReturnType<typeof getDb>>) {
+  const now = new Date();
+  await db
+    .update(proposals)
+    .set({
+      status: "expired",
+      updatedAt: now.toISOString(),
+    })
+    .where(
+      and(
+        inArray(proposals.status, EXPIRABLE_STATUSES),
+        lt(proposals.validUntil, currentBusinessDate(now)),
+      ),
+    );
+}
+
+function expiredProposalResponse(validUntil: string) {
+  return Response.json(
+    {
+      error: `A vigência desta proposta terminou em ${validUntil}. Propostas expiradas não podem ser movimentadas.`,
+    },
+    { status: 409 },
+  );
+}
+
 export async function GET() {
   const profile = await getAccessProfile();
   if (!profile) return forbidden();
 
   try {
     const db = await getDb();
+    await expireOverdueProposals(db);
     const [allDealers, allUsers] = await Promise.all([
       db.select().from(dealerships).orderBy(dealerships.name),
       db.select().from(users).orderBy(users.name, users.email),
@@ -387,11 +426,17 @@ export async function POST(request: Request) {
     }
 
     const now = new Date();
-    const defaultValidity = new Date(now);
-    defaultValidity.setDate(defaultValidity.getDate() + 30);
+    const issueDate = currentBusinessDate(now);
+    const defaultValidity = new Date(`${issueDate}T12:00:00Z`);
+    defaultValidity.setUTCDate(defaultValidity.getUTCDate() + 30);
     const id = proposalNumber(now);
-    const issueDate = now.toISOString().slice(0, 10);
     const validUntil = payload.validUntil || defaultValidity.toISOString().slice(0, 10);
+    if (validUntil < currentBusinessDate(now)) {
+      return Response.json(
+        { error: "A data de vigência não pode estar vencida." },
+        { status: 400 },
+      );
+    }
     const totalCents = validItems.reduce(
       (sum, item) => sum + item.quantity * item.unitPriceCents,
       0,
@@ -474,6 +519,7 @@ export async function PATCH(request: Request) {
       return Response.json({ error: "Informe a proposta." }, { status: 400 });
     }
     const db = await getDb();
+    await expireOverdueProposals(db);
     const [record] = await db
       .select({ proposal: proposals, dealer: dealerships })
       .from(proposals)
@@ -484,6 +530,9 @@ export async function PATCH(request: Request) {
       return Response.json({ error: "Proposta não encontrada." }, { status: 404 });
     }
     if (!dealerIsVisible(profile, record.dealer)) return forbidden();
+    if (record.proposal.status === "expired") {
+      return expiredProposalResponse(record.proposal.validUntil);
+    }
 
     if (payload.action === "send") {
       if (!["admin", "factory_manager"].includes(profile.role)) return forbidden();
@@ -559,6 +608,12 @@ export async function PATCH(request: Request) {
       return Response.json({ error: "Status inválido." }, { status: 400 });
     }
     const nextStatus = payload.status!;
+    if (nextStatus === "expired") {
+      return Response.json(
+        { error: "O status Expirada é definido automaticamente pela data de vigência." },
+        { status: 409 },
+      );
+    }
     if (nextStatus === "sent" && record.proposal.status !== "sent") {
       return Response.json(
         { error: "Use a ação Enviar por e-mail para registrar o envio da proposta." },
@@ -699,6 +754,7 @@ export async function DELETE(request: Request) {
     }
 
     const db = await getDb();
+    await expireOverdueProposals(db);
     const [record] = await db
       .select({ proposal: proposals, dealer: dealerships })
       .from(proposals)

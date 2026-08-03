@@ -203,6 +203,10 @@ export function Dashboard({ user }: { user: AppUser }) {
   }, []);
 
   useEffect(() => { const timer = window.setTimeout(() => void loadData(), 0); return () => window.clearTimeout(timer); }, [loadData]);
+  useEffect(() => {
+    const interval = window.setInterval(() => void loadData(), 60_000);
+    return () => window.clearInterval(interval);
+  }, [loadData]);
   useEffect(() => { if (!notice) return; const timer = window.setTimeout(() => setNotice(""), 4200); return () => window.clearTimeout(timer); }, [notice]);
 
   const filteredProposals = useMemo(() => {
@@ -362,6 +366,7 @@ function Pipeline({ proposals }: { proposals: Proposal[] }) {
     { status: "sent", label: "Enviadas" },
     { status: "counteroffer", label: "Contrapropostas" },
     { status: "approved", label: "Aceitas" },
+    { status: "expired", label: "Expiradas" },
   ];
   const max = Math.max(1, ...stages.map((stage) => proposals.filter((proposal) => proposal.status === stage.status).length));
   return <div className="pipeline-list">{stages.map((stage) => { const matches = proposals.filter((proposal) => proposal.status === stage.status); const count = matches.length; const value = matches.reduce((sum, proposal) => sum + proposal.totalCents, 0); return <div className="pipeline-row" key={stage.status}><div className="pipeline-label"><span>{stage.label}</span><strong>{count}</strong></div><div className="pipeline-track"><span className={`pipeline-fill ${stage.status}`} style={{ width: `${Math.max(count ? 10 : 0, (count / max) * 100)}%` }} /></div><small>{formatBRL(value)}</small></div>; })}</div>;
@@ -373,7 +378,7 @@ function ProposalsView({ proposals, allCount, search, onSearch, status, onStatus
 
 function ProposalTable({ proposals, onOpen }: { proposals: Proposal[]; onOpen: (proposal: Proposal) => void }) {
   if (!proposals.length) return <EmptyState title="Nenhuma proposta encontrada" text="Não há propostas neste escopo ou com os filtros selecionados." />;
-  return <div className="table-scroll"><table className="data-table"><thead><tr><th>Proposta</th><th>Concessionária</th><th>Emissão</th><th>Responsável</th><th>Status</th><th className="align-right">Valor</th><th aria-label="Abrir" /></tr></thead><tbody>{proposals.map((proposal) => <tr key={proposal.id} onClick={() => onOpen(proposal)}><td><strong className="proposal-id">{proposal.id}</strong><small>{proposal.items.length} {proposal.items.length === 1 ? "item" : "itens"}</small></td><td><strong>{proposal.dealership}</strong><small>{proposal.city}{proposal.state ? ` · ${proposal.state}` : ""}</small></td><td>{formatDate(proposal.issueDate)}</td><td>{proposal.commercialOwner}</td><td><StatusBadge status={proposal.status} /></td><td className="align-right value-cell"><strong>{formatBRL(proposal.totalCents)}</strong>{proposal.status === "counteroffer" && proposal.counterofferCents && <small>Proposto: {formatBRL(proposal.counterofferCents)}</small>}</td><td><button className="row-action" onClick={(event) => { event.stopPropagation(); onOpen(proposal); }} aria-label={`Abrir ${proposal.id}`}><Icon name="arrow" size={16} /></button></td></tr>)}</tbody></table></div>;
+  return <div className="table-scroll"><table className="data-table"><thead><tr><th>Proposta</th><th>Concessionária</th><th>Emissão</th><th>Vigência</th><th>Responsável</th><th>Status</th><th className="align-right">Valor</th><th aria-label="Abrir" /></tr></thead><tbody>{proposals.map((proposal) => <tr key={proposal.id} onClick={() => onOpen(proposal)}><td><strong className="proposal-id">{proposal.id}</strong><small>{proposal.items.length} {proposal.items.length === 1 ? "item" : "itens"}</small></td><td><strong>{proposal.dealership}</strong><small>{proposal.city}{proposal.state ? ` · ${proposal.state}` : ""}</small></td><td>{formatDate(proposal.issueDate)}</td><td><strong>{formatDate(proposal.validUntil)}</strong>{proposal.status === "expired" && <small>Expirada automaticamente</small>}</td><td>{proposal.commercialOwner}</td><td><StatusBadge status={proposal.status} /></td><td className="align-right value-cell"><strong>{formatBRL(proposal.totalCents)}</strong>{proposal.status === "counteroffer" && proposal.counterofferCents && <small>Proposto: {formatBRL(proposal.counterofferCents)}</small>}</td><td><button className="row-action" onClick={(event) => { event.stopPropagation(); onOpen(proposal); }} aria-label={`Abrir ${proposal.id}`}><Icon name="arrow" size={16} /></button></td></tr>)}</tbody></table></div>;
 }
 
 function DealershipsView({ dealerships, proposals, onOpen }: { dealerships: Dealership[]; proposals: Proposal[]; onOpen: (proposal: Proposal) => void }) {
@@ -821,6 +826,8 @@ function ProposalPreview({ proposal, me, onClose, onUpdated, onDeleted }: { prop
     0,
   );
   const managerStatuses = STATUS_ORDER.filter((item) => {
+    if (status === "expired") return item === "expired";
+    if (item === "expired") return false;
     if (item === "sent" && status !== "sent") return false;
     return item !== "counteroffer" || status === "counteroffer";
   });
@@ -971,7 +978,7 @@ function ProposalPreview({ proposal, me, onClose, onUpdated, onDeleted }: { prop
                 Status
                 <select
                   value={status}
-                  disabled={updating}
+                  disabled={updating || status === "expired"}
                   onChange={(event) =>
                     void updateStatus(event.target.value as ProposalStatus)
                   }
@@ -992,7 +999,7 @@ function ProposalPreview({ proposal, me, onClose, onUpdated, onDeleted }: { prop
                 Excluir
               </button>
             )}
-            {me.role !== "dealer_manager" && emailStatus !== "sent" && (
+            {me.role !== "dealer_manager" && status !== "expired" && emailStatus !== "sent" && (
               <button
                 type="button"
                 className="outline-button dark"
@@ -1047,6 +1054,16 @@ function ProposalPreview({ proposal, me, onClose, onUpdated, onDeleted }: { prop
 
         {error && !confirmDelete && !decisionOpen && (
           <p className="preview-error no-print">{error}</p>
+        )}
+
+        {status === "expired" && (
+          <section className="expiry-notice no-print" role="status">
+            <Icon name="clock" size={21} />
+            <div>
+              <strong>Proposta expirada automaticamente</strong>
+              <span>A vigência terminou em {formatDate(proposal.validUntil)}. O envio e as decisões comerciais foram bloqueados.</span>
+            </div>
+          </section>
         )}
 
         {decisionOpen && (
