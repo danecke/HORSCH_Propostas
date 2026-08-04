@@ -569,10 +569,10 @@ button { cursor: pointer; }
 .proposal-paper::before { height: 2.5mm; background: var(--red); }
 
 .document-header {
-  min-height: 31mm;
-  padding: 5mm 0 6mm;
+  min-height: 22mm;
+  padding: 3mm 0 4mm;
   align-items: center;
-  gap: 10mm;
+  gap: 8mm;
   border-bottom: .35mm solid #d9dbdd;
 }
 
@@ -587,12 +587,12 @@ button { cursor: pointer; }
   line-height: 1.2;
   text-transform: uppercase;
 }
-.document-title h1 { color: #25272b; font-size: 21pt; font-weight: 800; letter-spacing: -.045em; }
-.document-title p { margin-top: 3mm; gap: 2.5mm; color: #62666b; font-size: 7pt; letter-spacing: .08em; }
+.document-title h1 { color: #25272b; font-size: 18pt; font-weight: 800; letter-spacing: -.045em; }
+.document-title p { margin-top: 2mm; gap: 2.5mm; color: #62666b; font-size: 6.5pt; letter-spacing: .08em; }
 .document-title p::before { width: 8mm; height: .65mm; background: var(--red); }
 
 .document-brand-block {
-  width: 64mm;
+  width: 56mm;
   max-width: 44%;
   display: grid;
   align-content: center;
