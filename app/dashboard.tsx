@@ -1160,13 +1160,10 @@ function ProposalPreview({ proposal, me, onClose, onUpdated, onDeleted }: { prop
         <article className="proposal-paper">
           <header className="document-header">
             <div className="document-title">
-              <span className="document-kicker">HORSCH DO BRASIL · PEÇAS ORIGINAIS</span>
               <h1>Proposta comercial</h1>
-              <p>Fornecimento de peças para sua operação</p>
             </div>
             <div className="document-brand-block">
               <HorschDocumentLogo />
-              <span>Atendimento especializado</span>
             </div>
           </header>
           <section className="document-stats">
