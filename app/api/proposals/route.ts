@@ -429,7 +429,7 @@ export async function POST(request: Request) {
     const issueDate = currentBusinessDate(now);
     const defaultValidity = new Date(`${issueDate}T12:00:00Z`);
     defaultValidity.setUTCDate(defaultValidity.getUTCDate() + 30);
-    const id = proposalNumber(now);
+    const id = await proposalNumber(db);
     const validUntil = payload.validUntil || defaultValidity.toISOString().slice(0, 10);
     if (validUntil < currentBusinessDate(now)) {
       return Response.json(
@@ -791,7 +791,14 @@ export async function DELETE(request: Request) {
   }
 }
 
-function proposalNumber(date: Date) {
-  const stamp = date.toISOString().replace(/[-:T.Z]/g, "").slice(0, 12);
-  return `HBR-${stamp}-${crypto.randomUUID().slice(0, 4).toUpperCase()}`;
+async function proposalNumber(db: Awaited<ReturnType<typeof getDb>>) {
+  const existingProposals = await db
+    .select({ id: proposals.id })
+    .from(proposals);
+  const latestNumber = existingProposals.reduce((latest, proposal) => {
+    const match = /^HBR(\d+)$/i.exec(proposal.id);
+    return match ? Math.max(latest, Number(match[1])) : latest;
+  }, 0);
+
+  return `HBR${String(latestNumber + 1).padStart(3, "0")}`;
 }
