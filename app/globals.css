@@ -558,6 +558,8 @@ button { cursor: pointer; }
 /* Clean institutional pass — one grid, one hierarchy, print-safe spacing */
 .proposal-paper {
   padding: 14mm 15mm 10mm;
+  display: flex;
+  flex-direction: column;
   color: #25272b;
   background: #fff;
   box-shadow: 0 20px 65px rgb(27 31 35 / 18%);
@@ -656,11 +658,11 @@ button { cursor: pointer; }
 .document-signatures > div > span { height: 12mm; border-bottom: 1px solid #85888c; }
 .document-signatures .signature-name { color: #282b30; font-size: 17pt; }
 .document-signatures small { margin-top: 1.8mm; color: #64686d; font-size: 6.1pt; letter-spacing: .045em; }
-.document-footer { margin-top: 7mm; padding-top: 3mm; border-top: 1px solid #d0d2d4; color: #777b80; font-size: 6pt; }
+.document-footer { margin-top: auto; padding-top: 3mm; border-top: 1px solid #d0d2d4; color: #777b80; font-size: 6pt; }
 
 @media print {
   .proposal-paper { padding: 12mm 15mm 8mm; box-shadow: none !important; }
   .document-header { min-height: 29mm; }
   .document-signatures { margin-top: 8mm; }
-  .document-footer { margin-top: 6mm; }
+  .document-footer { margin-top: auto; }
 }
