@@ -119,3 +119,24 @@ export const proposalItems = sqliteTable(
   },
   (table) => [index("proposal_items_proposal_idx").on(table.proposalId)],
 );
+
+export const auditLogs = sqliteTable(
+  "audit_logs",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    proposalId: text("proposal_id"),
+    actorEmail: text("actor_email").notNull(),
+    actorName: text("actor_name").notNull().default(""),
+    action: text("action").notNull(),
+    entity: text("entity").notNull(),
+    details: text("details").notNull().default(""),
+    beforeJson: text("before_json").notNull().default(""),
+    afterJson: text("after_json").notNull().default(""),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("audit_logs_proposal_idx").on(table.proposalId),
+    index("audit_logs_created_at_idx").on(table.createdAt),
+    index("audit_logs_actor_idx").on(table.actorEmail),
+  ],
+);

@@ -43,6 +43,13 @@
       "when": 1785761776786,
       "tag": "0005_woozy_madelyne_pryor",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785868800000,
+      "tag": "0006_audit_history",
+      "breakpoints": true
     }
   ]
 }

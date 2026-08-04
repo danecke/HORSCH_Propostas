@@ -116,7 +116,8 @@ type DashboardData = {
   me: CurrentAccess;
 };
 
-type View = "overview" | "proposals" | "dealerships" | "access";
+type AuditEntry = { id: number; proposalId: string | null; actorEmail: string; actorName: string; action: string; entity: string; details: string; beforeJson: string; afterJson: string; createdAt: string };
+type View = "overview" | "proposals" | "dealerships" | "access" | "history";
 
 const STATUS_LABELS: Record<ProposalStatus, string> = {
   draft: "Rascunho",
@@ -151,7 +152,8 @@ type IconName =
   | "print"
   | "key"
   | "trash"
-  | "close";
+  | "close"
+  | "history";
 
 function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, ReactNode> = {
@@ -170,6 +172,7 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
     key: <><circle cx="8" cy="15" r="4" /><path d="m11 12 9-9M17 6l3 3M14 9l3 3" /></>,
     trash: <><path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14M10 11v6M14 11v6" /></>,
     close: <path d="m6 6 12 12M18 6 6 18" />,
+    history: <><path d="M3 12a9 9 0 1 0 3-6.7" /><path d="M3 4v5h5M12 7v5l3 2" /></>,
   };
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
@@ -208,6 +211,7 @@ export function Dashboard({ user }: { user: AppUser }) {
   const [showNewProposal, setShowNewProposal] = useState(false);
   const [showNewAccess, setShowNewAccess] = useState(false);
   const [showChangePassword, setShowChangePassword] = useState(false);
+  const [editProposal, setEditProposal] = useState<Proposal | null>(null);
   const [preview, setPreview] = useState<Proposal | null>(null);
   const [notice, setNotice] = useState("");
 
@@ -261,6 +265,8 @@ export function Dashboard({ user }: { user: AppUser }) {
           <NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton>
           <NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Concessionárias</NavButton>
           {data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}
+          {data.me.role === "general_admin" && <NavButton active={view === "history"} icon="history" onClick={() => setView("history")}>Histórico</NavButton>}
+          {data.me.role === "general_admin" && <NavButton active={view === "history"} icon="history" onClick={() => setView("history")}>Histórico</NavButton>}
         </nav>
         {canCreate && <button className="sidebar-new" onClick={() => setShowNewProposal(true)}><Icon name="plus" size={17} />Nova proposta</button>}
         <div className="sidebar-account-actions"><button type="button" onClick={() => setShowChangePassword(true)}><Icon name="key" size={15} />Alterar senha</button></div>
@@ -276,8 +282,10 @@ export function Dashboard({ user }: { user: AppUser }) {
           <ProposalsView proposals={filteredProposals} allCount={data.proposals.length} search={search} onSearch={setSearch} status={statusFilter} onStatus={setStatusFilter} canCreate={canCreate} onNew={() => setShowNewProposal(true)} onOpen={setPreview} />
         ) : view === "dealerships" ? (
           <DealershipsView dealerships={data.dealerships} proposals={data.proposals} onOpen={setPreview} />
-        ) : (
+        ) : view === "access" ? (
           <AccessView data={data} onNew={() => setShowNewAccess(true)} onChanged={() => refreshed("Acesso atualizado com segurança.")} />
+        ) : (
+          <HistoryView />
         )}
         <nav className="mobile-nav" aria-label="Navegação móvel">
           <NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão</NavButton>
@@ -290,7 +298,8 @@ export function Dashboard({ user }: { user: AppUser }) {
       {showNewProposal && <NewProposalModal userEmail={data.me.email} role={data.me.role} dealerships={data.dealerships} proposalResponsibles={proposalResponsibles} onClose={() => setShowNewProposal(false)} onSaved={async (message) => { setShowNewProposal(false); await refreshed(message); }} />}
       {showNewAccess && <NewAccessModal me={data.me} dealerships={data.dealerships} onClose={() => setShowNewAccess(false)} onSaved={async () => { setShowNewAccess(false); await refreshed("Novo acesso criado com sucesso."); }} />}
       {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} onSaved={() => { setShowChangePassword(false); setNotice("Senha alterada com sucesso."); }} />}
-      {preview && <ProposalPreview proposal={preview} me={data.me} onClose={() => setPreview(null)} onDeleted={async () => { setPreview(null); await refreshed("Proposta excluída com sucesso."); }} onUpdated={async (status, counterofferCents) => { setPreview({ ...preview, status, counterofferCents: counterofferCents ?? null }); await refreshed("Proposta atualizada com sucesso."); }} />}
+      {editProposal && <NewProposalModal userEmail={data.me.email} role={data.me.role} dealerships={data.dealerships} proposalResponsibles={proposalResponsibles} proposal={editProposal} onClose={() => setEditProposal(null)} onSaved={async (message) => { setEditProposal(null); await refreshed(message); }} />}
+      {preview && <ProposalPreview proposal={preview} me={data.me} onClose={() => setPreview(null)} onEdit={() => { setEditProposal(preview); setPreview(null); }} onDeleted={async () => { setPreview(null); await refreshed("Proposta excluída com sucesso."); }} onUpdated={async (status, counterofferCents) => { setPreview({ ...preview, status, counterofferCents: counterofferCents ?? null }); await refreshed("Proposta atualizada com sucesso."); }} />}
     </main>
   );
 }
@@ -521,6 +530,7 @@ function NewProposalModal({
   role,
   dealerships,
   proposalResponsibles,
+  proposal,
   onClose,
   onSaved,
 }: {
@@ -528,22 +538,23 @@ function NewProposalModal({
   role: UserRole;
   dealerships: Dealership[];
   proposalResponsibles: AccessUser[];
+  proposal?: Proposal;
   onClose: () => void;
   onSaved: (message: string) => Promise<void>;
 }) {
   const [dealershipSelection, setDealershipSelection] = useState(
-    dealerships.length ? "" : "new",
+    proposal ? String(proposal.dealershipId) : dealerships.length ? "" : "new",
   );
-  const [dealership, setDealership] = useState("");
-  const [city, setCity] = useState("");
-  const [state, setState] = useState("");
-  const [contactName, setContactName] = useState("");
-  const [contactEmail, setContactEmail] = useState("");
+  const [dealership, setDealership] = useState(proposal?.dealership ?? "");
+  const [city, setCity] = useState(proposal?.city ?? "");
+  const [state, setState] = useState(proposal?.state ?? "");
+  const [contactName, setContactName] = useState(proposal?.contactName ?? "");
+  const [contactEmail, setContactEmail] = useState(proposal?.contactEmail ?? "");
   const [factoryManagerEmail, setFactoryManagerEmail] = useState(
-    PROPOSAL_RESPONSIBLE_ROLES.includes(role) ? userEmail : "",
+    proposal?.factoryManagerEmail || (PROPOSAL_RESPONSIBLE_ROLES.includes(role) ? userEmail : ""),
   );
-  const [validUntil, setValidUntil] = useState(defaultValidity());
-  const [items, setItems] = useState<FormItem[]>([blankItem()]);
+  const [validUntil, setValidUntil] = useState(proposal?.validUntil ?? defaultValidity());
+  const [items, setItems] = useState<FormItem[]>(proposal ? proposal.items.map((item) => ({ partNumber: item.partNumber, description: item.description, vt: item.vt, origin: item.origin, ncm: item.ncm, quantity: item.quantity, price: formatMoneyInput(String(item.unitPriceCents / 100).replace(".", ",")) })) : [blankItem()]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -595,9 +606,10 @@ function NewProposalModal({
     setSaving(true);
     setError("");
     const response = await fetch("/api/proposals", {
-      method: "POST",
+      method: proposal ? "PATCH" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        ...(proposal ? { id: proposal.id, action: "edit" } : {}),
         dealershipId: selectedDealer?.id ?? null,
         dealership,
         city,
@@ -622,8 +634,9 @@ function NewProposalModal({
       setSaving(false);
       return;
     }
-    const message =
-      status === "draft"
+    const message = proposal
+      ? "Proposta editada e salva como rascunho. Faça um novo envio quando estiver pronta."
+      : status === "draft"
         ? "Proposta salva como rascunho."
         : payload.delivery?.status === "sent"
           ? `Proposta enviada para ${payload.delivery.recipientEmail}.`
@@ -641,9 +654,9 @@ function NewProposalModal({
       >
         <header className="modal-header">
           <div>
-            <span className="eyebrow">Nova negociação</span>
-            <h2>Criar proposta comercial</h2>
-            <p>Responsáveis e destinatários são definidos pela carteira selecionada.</p>
+            <span className="eyebrow">{proposal ? "Edição controlada" : "Nova negociação"}</span>
+            <h2>{proposal ? `Editar proposta ${proposal.id}` : "Criar proposta comercial"}</h2>
+            <p>{proposal ? "As alterações ficarão registradas no histórico e a proposta voltará para rascunho." : "Responsáveis e destinatários são definidos pela carteira selecionada."}</p>
           </div>
           <button type="button" className="icon-button" onClick={onClose} aria-label="Fechar">
             <Icon name="close" />
@@ -736,8 +749,8 @@ function NewProposalModal({
 
         <footer className="modal-actions">
           <button type="button" className="ghost-button" onClick={onClose}>Cancelar</button>
-          <button type="submit" className="outline-button" disabled={saving}>{saving ? "Salvando..." : "Salvar rascunho"}</button>
-          <button type="button" className="primary-button" disabled={saving || !contactEmail} onClick={(event) => void submit(event as unknown as FormEvent, "sent")}>{saving ? "Enviando..." : "Salvar e enviar por e-mail"}</button>
+          {!proposal && <button type="submit" className="outline-button" disabled={saving}>{saving ? "Salvando..." : "Salvar rascunho"}</button>}
+          {proposal ? <button type="submit" className="primary-button" disabled={saving}>{saving ? "Salvando..." : "Salvar alterações"}</button> : <button type="button" className="primary-button" disabled={saving || !contactEmail} onClick={(event) => void submit(event as unknown as FormEvent, "sent")}>{saving ? "Enviando..." : "Salvar e enviar por e-mail"}</button>}
         </footer>
       </form>
     </div>
@@ -796,7 +809,7 @@ function ProposalPreviewLegacy({ proposal, me, onClose, onUpdated, onDeleted }: 
 }
 /* eslint-enable @typescript-eslint/no-unused-vars */
 
-function ProposalPreview({ proposal, me, onClose, onUpdated, onDeleted }: { proposal: Proposal; me: CurrentAccess; onClose: () => void; onUpdated: (status: ProposalStatus, counterofferCents?: number | null) => Promise<void>; onDeleted: () => Promise<void> }) {
+function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }: { proposal: Proposal; me: CurrentAccess; onClose: () => void; onEdit: () => void; onUpdated: (status: ProposalStatus, counterofferCents?: number | null) => Promise<void>; onDeleted: () => Promise<void> }) {
   const [status, setStatus] = useState<ProposalStatus>(proposal.status);
   const [counterItems, setCounterItems] = useState(() =>
     proposal.items.map((item) => ({
@@ -842,6 +855,7 @@ function ProposalPreview({ proposal, me, onClose, onUpdated, onDeleted }: { prop
     (me.permissions.deleteOwnDraft &&
       status === "draft" &&
       proposal.createdByEmail === me.email);
+  const canEdit = ["general_admin", "global_management", "factory_manager"].includes(me.role) && status !== "expired";
 
   function updateCounterItem(
     id: number,
@@ -1005,6 +1019,7 @@ function ProposalPreview({ proposal, me, onClose, onUpdated, onDeleted }: { prop
                 Excluir
               </button>
             )}
+            {canEdit && <button type="button" className="outline-button dark" onClick={onEdit}>Editar proposta</button>}
             {!decisionOpen && status !== "expired" && emailStatus !== "sent" && (
               <button
                 type="button"
@@ -1227,6 +1242,15 @@ function ProposalPreview({ proposal, me, onClose, onUpdated, onDeleted }: { prop
 }
 
 function StatusBadge({ status }: { status: ProposalStatus }) { return <span className={`status-badge ${status}`}><i />{STATUS_LABELS[status]}</span>; }
+function HistoryView() {
+  const [entries, setEntries] = useState<AuditEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  useEffect(() => { let active = true; void fetch("/api/audit", { cache: "no-store" }).then(async (response) => { const payload = (await response.json()) as { entries?: AuditEntry[]; error?: string }; if (!response.ok) throw new Error(payload.error || "Não foi possível carregar o histórico."); if (active) setEntries(payload.entries ?? []); }).catch((loadError) => { if (active) setError(loadError instanceof Error ? loadError.message : "Erro ao carregar o histórico."); }).finally(() => { if (active) setLoading(false); }); return () => { active = false; }; }, []);
+  return <div className="content-frame"><header className="page-heading"><div><span className="eyebrow">Governança e segurança</span><h1>Histórico de ações</h1><p>Registro das alterações realizadas no portal.</p></div></header><section className="panel history-panel"><div className="history-intro"><div><strong>Auditoria administrativa</strong><span>Eventos com usuário, data, ação e comparação das informações.</span></div><span className="history-count">{entries.length} registros</span></div>{loading ? <EmptyMini text="Carregando histórico..." /> : error ? <div className="history-error">{error}</div> : entries.length === 0 ? <EmptyState title="Nenhuma ação registrada" text="As próximas ações aparecerão aqui." /> : <div className="history-list">{entries.map((entry) => <article className="history-row" key={entry.id}><div className="history-date"><strong>{formatDateTime(entry.createdAt)}</strong><small>{entry.actorName || entry.actorEmail}</small></div><div className="history-action"><span className={`history-action-tag ${entry.entity}`}>{entry.entity === "proposal" ? "Proposta" : "Acesso"}</span><strong>{auditActionLabel(entry.action)}</strong><small>{entry.proposalId || "Ação geral do portal"}</small></div><p>{entry.details}</p>{(entry.beforeJson || entry.afterJson) && <details className="history-details"><summary>Ver alterações</summary><div><strong>Antes</strong><code>{formatSnapshot(entry.beforeJson)}</code><strong>Depois</strong><code>{formatSnapshot(entry.afterJson)}</code></div></details>}</article>)}</div>}</section></div>;
+}
+function auditActionLabel(action: string) { const labels: Record<string, string> = { created: "Criada", edited: "Editada", sent: "Enviada", status_changed: "Status alterado", deleted: "Excluída", access_created: "Acesso criado", access_updated: "Acesso atualizado" }; return labels[action] || action; }
+function formatSnapshot(value: string) { if (!value) return "—"; try { return JSON.stringify(JSON.parse(value), null, 2); } catch { return value; } }
 function LoadingState() { return <div className="center-state"><span className="state-mark">H</span><h1>Preparando o portal comercial</h1><p>Carregando seu perfil e as informações autorizadas.</p></div>; }
 function ErrorState({ message, retry }: { message: string; retry: () => Promise<void> }) { return <div className="center-state"><span className="state-mark">!</span><h1>Acesso não disponível</h1><p>{message}</p><div className="state-actions"><button className="primary-button" onClick={() => void retry()}>Tentar novamente</button><Link className="outline-button" href="/">Voltar ao login</Link></div></div>; }
 function EmptyState({ title, text }: { title: string; text: string }) { return <div className="empty-state"><span><Icon name="file" size={24} /></span><h3>{title}</h3><p>{text}</p></div>; }

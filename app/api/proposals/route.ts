@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray, lt } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { dealerships, proposalItems, proposals, users } from "../../../db/schema";
+import { recordAudit } from "../../../lib/audit";
 import {
   canCreateProposal,
   canBeProposalResponsible,
@@ -486,6 +487,15 @@ export async function POST(request: Request) {
         unitPriceCents: item.unitPriceCents,
       })),
     );
+    await recordAudit(db, {
+      proposalId: id,
+      actorEmail: profile.email,
+      actorName: profile.name,
+      action: "created",
+      entity: "proposal",
+      details: requestedStatus === "sent" ? "Proposta criada e enviada." : "Proposta criada como rascunho.",
+      after: { id, dealershipId: dealer.id, dealership: dealer.name, commercialOwner, status: requestedStatus, validUntil, totalCents, items: validItems },
+    });
 
     if (requestedStatus === "draft") {
       return Response.json({ id, status: "draft" }, { status: 201 });
@@ -524,8 +534,14 @@ export async function PATCH(request: Request) {
   try {
     const payload = (await request.json()) as {
       id?: string;
-      action?: "send" | "accept_counteroffer" | "return_counteroffer";
+      action?: "send" | "edit" | "accept_counteroffer" | "return_counteroffer";
       status?: string;
+      dealershipId?: number | null;
+      contactName?: string;
+      contactEmail?: string;
+      factoryManagerEmail?: string;
+      validUntil?: string;
+      items?: ItemInput[];
       counterofferCents?: number;
       decisionNote?: string;
       counterofferItems?: CounterofferItemInput[];
@@ -551,6 +567,36 @@ export async function PATCH(request: Request) {
     if (!dealerIsVisible(profile, record.dealer)) return forbidden();
     if (record.proposal.status === "expired") {
       return expiredProposalResponse(record.proposal.validUntil);
+    }
+
+    if (payload.action === "edit") {
+      if (!["general_admin", "global_management", "factory_manager"].includes(profile.role)) return Response.json({ error: "Somente ADM Geral, Gestão Global ou Gestor Fábrica podem editar propostas." }, { status: 403 });
+      const editedDealershipId = Math.trunc(Number(payload.dealershipId) || record.dealer.id);
+      const [editedDealer] = await db.select().from(dealerships).where(eq(dealerships.id, editedDealershipId)).limit(1);
+      if (!editedDealer || !dealerIsVisible(profile, editedDealer)) return forbidden();
+      const allUsers = await db.select().from(users).orderBy(users.name, users.email);
+      const requestedManagerEmail = payload.factoryManagerEmail?.trim().toLowerCase() || editedDealer.factoryManagerEmail.toLowerCase();
+      const assignedManager = allUsers.find((candidate) => {
+        const role = normalizeUserRole(candidate.email, candidate.role);
+        return candidate.active && candidate.email.toLowerCase() === requestedManagerEmail && role && canBeProposalResponsible(role);
+      });
+      if (!assignedManager) return Response.json({ error: "Selecione um responsável HORSCH ativo com nível ADM Geral, Gestão Global ou Gestor Fábrica." }, { status: 400 });
+      const validItems = normalizeItems(payload.items ?? []);
+      const validationError = itemValidationError(validItems);
+      if (validationError) return Response.json({ error: validationError }, { status: 400 });
+      const validUntil = payload.validUntil?.trim() || record.proposal.validUntil;
+      if (validUntil < currentBusinessDate()) return Response.json({ error: "A data de vigência não pode estar vencida." }, { status: 400 });
+      const currentItems = await db.select().from(proposalItems).where(eq(proposalItems.proposalId, record.proposal.id));
+      const before = { id: record.proposal.id, dealershipId: record.proposal.dealershipId, dealership: record.dealer.name, contactName: record.proposal.contactName, contactEmail: record.proposal.contactEmail, commercialOwner: record.proposal.commercialOwner, status: record.proposal.status, validUntil: record.proposal.validUntil, totalCents: record.proposal.totalCents, items: currentItems };
+      const totalCents = validItems.reduce((sum, item) => sum + item.quantity * item.unitPriceCents, 0);
+      const now = new Date().toISOString();
+      await db.batch([
+        db.update(proposals).set({ dealershipId: editedDealer.id, contactName: payload.contactName?.trim() || editedDealer.contactName, contactEmail: (payload.contactEmail?.trim() || editedDealer.contactEmail).toLowerCase(), commercialOwner: assignedManager.name, status: "draft", validUntil, totalCents, counterofferCents: null, decisionNote: "", decidedByEmail: "", counterofferPaymentTerms: "", counterofferFreightTerms: "", counterofferDeliveryTerms: "", counterofferSubmittedAt: null, counterofferReviewedAt: null, counterofferReviewedByEmail: "", counterofferReviewNote: "", emailStatus: "not_requested", emailSentAt: null, emailError: "Proposta editada; reenvio necessário.", updatedAt: now }).where(eq(proposals.id, record.proposal.id)),
+        db.delete(proposalItems).where(eq(proposalItems.proposalId, record.proposal.id)),
+        db.insert(proposalItems).values(validItems.map((item) => ({ proposalId: record.proposal.id, ...item }))),
+      ]);
+      await recordAudit(db, { proposalId: record.proposal.id, actorEmail: profile.email, actorName: profile.name, action: "edited", entity: "proposal", details: "Proposta editada; voltou para rascunho e exige novo envio.", before, after: { id: record.proposal.id, dealershipId: editedDealer.id, dealership: editedDealer.name, contactName: payload.contactName?.trim() || editedDealer.contactName, contactEmail: (payload.contactEmail?.trim() || editedDealer.contactEmail).toLowerCase(), commercialOwner: assignedManager.name, status: "draft", validUntil, totalCents, items: validItems } });
+      return Response.json({ ok: true, status: "draft", totalCents });
     }
 
     if (payload.action === "send") {
@@ -584,6 +630,7 @@ export async function PATCH(request: Request) {
         .update(proposals)
         .set(deliveryDatabasePatch(delivery))
         .where(eq(proposals.id, payload.id));
+      await recordAudit(db, { proposalId: payload.id, actorEmail: profile.email, actorName: profile.name, action: "sent", entity: "proposal", details: delivery.status === "sent" ? `Proposta enviada por e-mail para ${recipientEmail}.` : "Tentativa de envio registrada; e-mail não confirmado.", before: { status: record.proposal.status, emailStatus: record.proposal.emailStatus }, after: { status: delivery.status === "sent" ? "sent" : "draft", emailStatus: delivery.status } });
       return Response.json({
         ok: delivery.status === "sent",
         status: delivery.status === "sent" ? "sent" : "draft",
@@ -756,6 +803,7 @@ export async function PATCH(request: Request) {
         updatedAt: new Date().toISOString(),
       })
       .where(eq(proposals.id, payload.id));
+    await recordAudit(db, { proposalId: payload.id, actorEmail: profile.email, actorName: profile.name, action: "status_changed", entity: "proposal", details: `Status alterado para ${nextStatus}.`, before: { status: record.proposal.status }, after: { status: nextStatus, decisionNote: payload.decisionNote?.trim() ?? record.proposal.decisionNote } });
     return Response.json({ ok: true });
   } catch (error) {
     return Response.json({ error: apiError(error) }, { status: 500 });
@@ -799,6 +847,7 @@ export async function DELETE(request: Request) {
         { status: 403 },
       );
     }
+    await recordAudit(db, { proposalId: payload.id, actorEmail: profile.email, actorName: profile.name, action: "deleted", entity: "proposal", details: "Proposta excluída definitivamente.", before: { id: record.proposal.id, status: record.proposal.status, totalCents: record.proposal.totalCents } });
 
     await db.batch([
       db.delete(proposalItems).where(eq(proposalItems.proposalId, payload.id)),

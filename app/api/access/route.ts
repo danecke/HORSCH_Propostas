@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { dealerships, users } from "../../../db/schema";
+import { recordAudit } from "../../../lib/audit";
 import {
   getAccessProfile,
   MASTER_ADMIN_EMAIL,
@@ -92,6 +93,7 @@ export async function POST(request: Request) {
       createdByEmail: actor.email,
       ...(await createPasswordCredential(payload.password!)),
     });
+    await recordAudit(db, { actorEmail: actor.email, actorName: actor.name, action: "access_created", entity: "access", details: `Acesso criado para ${name} (${role}).`, after: { email, name, role, dealershipId, active: true } });
     return Response.json({ ok: true }, { status: 201 });
   } catch (error) {
     return Response.json(
@@ -163,6 +165,7 @@ export async function PATCH(request: Request) {
         updatedAt: new Date().toISOString(),
       })
       .where(eq(users.email, email));
+    await recordAudit(db, { actorEmail: actor.email, actorName: actor.name, action: "access_updated", entity: "access", details: `Acesso atualizado para ${email}.`, before: { email: target.email, name: target.name, role: currentRole, dealershipId: target.dealershipId, active: target.active }, after: { email, name: payload.name?.trim() || target.name, role, dealershipId, active: payload.active ?? target.active } });
     if (role === "dealer_manager" && dealershipId !== null) {
       await db
         .update(dealerships)
