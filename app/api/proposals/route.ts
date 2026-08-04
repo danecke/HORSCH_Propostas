@@ -76,11 +76,11 @@ function dealerIsVisible(
   profile: AccessProfile,
   dealer: { id: number; factoryManagerEmail: string },
 ) {
-  if (profile.role === "admin") return true;
+  if (["general_admin", "global_management"].includes(profile.role)) return true;
   if (profile.role === "factory_manager") {
     return dealer.factoryManagerEmail.toLowerCase() === profile.email;
   }
-  if (profile.role === "dealer_manager") {
+  if (["dealer_manager", "concession"].includes(profile.role)) {
     return dealer.id === profile.dealershipId;
   }
   return false;
@@ -271,17 +271,17 @@ export async function GET() {
     });
 
     const visibleUsers = allUsers.filter((record) => {
-      const recordRole = normalizeUserRole(record.email, record.role) ?? "user";
-      if (profile.role === "admin") return true;
+      const recordRole = normalizeUserRole(record.email, record.role) ?? "concession";
+      if (["general_admin", "global_management"].includes(profile.role)) return true;
       if (record.email === profile.email) return true;
-      if (profile.role === "dealer_manager") {
+      if (["dealer_manager", "concession"].includes(profile.role)) {
         return (
-          ["user", "dealer_manager"].includes(recordRole) &&
+          ["concession", "dealer_manager"].includes(recordRole) &&
           record.dealershipId === profile.dealershipId
         );
       }
       return (
-        ["user", "dealer_manager"].includes(recordRole) &&
+        ["concession", "dealer_manager"].includes(recordRole) &&
         record.dealershipId !== null &&
         visibleDealerIds.has(record.dealershipId)
       );
@@ -291,7 +291,7 @@ export async function GET() {
       proposals: proposalData,
       dealerships: dealershipData.sort((a, b) => b.totalCents - a.totalCents),
       users: visibleUsers.map((record) => {
-        const role = normalizeUserRole(record.email, record.role) ?? "user";
+        const role = normalizeUserRole(record.email, record.role) ?? "concession";
         return {
           email: record.email,
           name: record.name,
@@ -307,13 +307,13 @@ export async function GET() {
         ...profile,
         roleLabel: roleLabel(profile.role),
         permissions: {
-          viewAll: profile.role === "admin",
+          viewAll: ["general_admin", "global_management"].includes(profile.role),
           createProposal: canCreateProposal(profile),
-          manageAllAccess: profile.role === "admin",
-          manageAccess: profile.role !== "user",
-          decideProposal: profile.role === "dealer_manager",
-          deleteAnyProposal: profile.role === "admin",
-          deleteOwnDraft: profile.role === "factory_manager",
+          manageAllAccess: profile.role === "general_admin",
+          manageAccess: profile.role !== "concession",
+          decideProposal: ["dealer_manager", "concession"].includes(profile.role),
+          deleteAnyProposal: profile.role === "general_admin",
+          deleteOwnDraft: ["global_management", "factory_manager"].includes(profile.role),
         },
       },
     });
@@ -535,7 +535,7 @@ export async function PATCH(request: Request) {
     }
 
     if (payload.action === "send") {
-      if (!["admin", "factory_manager"].includes(profile.role)) return forbidden();
+      if (!["general_admin", "global_management", "factory_manager"].includes(profile.role)) return forbidden();
       const recipientEmail = record.proposal.contactEmail || record.dealer.contactEmail;
       if (!recipientEmail) {
         return Response.json(
@@ -576,7 +576,7 @@ export async function PATCH(request: Request) {
       payload.action === "accept_counteroffer" ||
       payload.action === "return_counteroffer"
     ) {
-      if (!["admin", "factory_manager"].includes(profile.role)) return forbidden();
+      if (!["general_admin", "global_management", "factory_manager"].includes(profile.role)) return forbidden();
       if (record.proposal.status !== "counteroffer" || !record.proposal.counterofferCents) {
         return Response.json(
           { error: "Esta proposta não possui contraproposta aguardando análise." },
@@ -620,7 +620,7 @@ export async function PATCH(request: Request) {
         { status: 409 },
       );
     }
-    if (profile.role === "dealer_manager") {
+    if (["dealer_manager", "concession"].includes(profile.role)) {
       if (!["approved", "rejected", "counteroffer"].includes(nextStatus)) {
         return Response.json(
           { error: "A concessionária pode aceitar, recusar ou enviar contraproposta." },
@@ -730,10 +730,10 @@ export async function PATCH(request: Request) {
         status: nextStatus,
         counterofferCents,
         decisionNote:
-          profile.role === "dealer_manager"
+          ["dealer_manager", "concession"].includes(profile.role)
             ? payload.decisionNote?.trim() ?? ""
             : record.proposal.decisionNote,
-        decidedByEmail: profile.role === "dealer_manager" ? profile.email : "",
+        decidedByEmail: ["dealer_manager", "concession"].includes(profile.role) ? profile.email : "",
         updatedAt: new Date().toISOString(),
       })
       .where(eq(proposals.id, payload.id));
@@ -767,7 +767,7 @@ export async function DELETE(request: Request) {
     if (!dealerIsVisible(profile, record.dealer)) return forbidden();
 
     const canDelete =
-      profile.role === "admin" ||
+      ["general_admin", "global_management"].includes(profile.role) ||
       (profile.role === "factory_manager" &&
         record.proposal.status === "draft" &&
         record.proposal.createdByEmail.toLowerCase() === profile.email);

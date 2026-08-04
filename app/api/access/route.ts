@@ -33,8 +33,9 @@ async function canManage(
   role: UserRole,
   dealershipId: number | null,
 ) {
-  if (actor.role === "admin") return true;
-  if (!["dealer_manager", "user"].includes(role) || dealershipId === null) return false;
+  if (role === "general_admin") return actor.role === "general_admin";
+  if (["general_admin", "global_management"].includes(actor.role)) return true;
+  if (!["dealer_manager", "concession"].includes(role) || dealershipId === null) return false;
   if (actor.role === "dealer_manager") return actor.dealershipId === dealershipId;
   if (actor.role !== "factory_manager") return false;
 
@@ -55,7 +56,9 @@ export async function POST(request: Request) {
     const payload = (await request.json()) as AccessInput;
     const email = payload.email?.trim().toLowerCase() ?? "";
     const name = payload.name?.trim() ?? "";
-    const role: UserRole = "user";
+    const role: UserRole = payload.role && ROLES.includes(payload.role)
+      ? payload.role
+      : "concession";
     const dealershipId =
       actor.role === "dealer_manager"
         ? actor.dealershipId
@@ -63,10 +66,10 @@ export async function POST(request: Request) {
     if (!email || !email.includes("@") || !name) {
       return Response.json({ error: "Preencha nome e e-mail corretamente." }, { status: 400 });
     }
-    if (email === MASTER_ADMIN_EMAIL) {
+    if (email === MASTER_ADMIN_EMAIL || role === "general_admin") {
       return Response.json({ error: "O acesso do ADM principal já é administrado pelo sistema." }, { status: 409 });
     }
-    if (actor.role !== "admin" && dealershipId === null) {
+    if (!["general_admin", "global_management"].includes(actor.role) && dealershipId === null) {
       return Response.json({ error: "Selecione a concessionária deste usuário." }, { status: 400 });
     }
     const passwordError = validatePassword(payload.password ?? "");
@@ -110,7 +113,7 @@ export async function PATCH(request: Request) {
     const [target] = await db.select().from(users).where(eq(users.email, email)).limit(1);
     if (!target) return Response.json({ error: "Acesso não encontrado." }, { status: 404 });
 
-    const currentRole = normalizeUserRole(target.email, target.role) ?? "user";
+    const currentRole = normalizeUserRole(target.email, target.role) ?? "concession";
     const role = payload.role && ROLES.includes(payload.role) ? payload.role : currentRole;
     const dealershipId =
       role === "dealer_manager"
@@ -119,14 +122,14 @@ export async function PATCH(request: Request) {
     const changesPosition =
       (payload.role !== undefined && payload.role !== currentRole) ||
       (payload.dealershipId !== undefined && dealershipId !== (target.dealershipId ?? null));
-    if (changesPosition && actor.role !== "admin") {
-      return forbidden("Somente o ADM pode atribuir ou alterar posições.");
+    if (changesPosition && !["general_admin", "global_management"].includes(actor.role)) {
+      return forbidden("Somente o ADM Geral ou a Gestão Global pode atribuir ou alterar posições.");
     }
-    if (email === MASTER_ADMIN_EMAIL && (role !== "admin" || payload.active === false)) {
+    if (email === MASTER_ADMIN_EMAIL && (role !== "general_admin" || payload.active === false)) {
       return Response.json({ error: "O ADM principal não pode ser reclassificado ou desativado." }, { status: 409 });
     }
-    if (email !== MASTER_ADMIN_EMAIL && role === "admin") {
-      return forbidden("Nenhum outro usuário pode receber a posição ADM.");
+    if (email !== MASTER_ADMIN_EMAIL && role === "general_admin") {
+      return forbidden("Nenhum outro usuário pode receber a posição ADM Geral.");
     }
     if (role === "dealer_manager" && dealershipId === null) {
       return Response.json({ error: "Selecione a concessionária deste gestor." }, { status: 400 });

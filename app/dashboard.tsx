@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { AppUser } from "../lib/auth";
 
-type UserRole = "admin" | "factory_manager" | "dealer_manager" | "user";
+type UserRole = "general_admin" | "global_management" | "factory_manager" | "dealer_manager" | "concession";
 type ProposalStatus =
   | "draft"
   | "sent"
@@ -100,6 +100,7 @@ type CurrentAccess = {
     viewAll: boolean;
     createProposal: boolean;
     manageAllAccess: boolean;
+    manageAccess: boolean;
     decideProposal: boolean;
     deleteAnyProposal: boolean;
     deleteOwnDraft: boolean;
@@ -240,18 +241,6 @@ export function Dashboard({ user }: { user: AppUser }) {
 
   if (loading) return <LoadingState />;
   if (error || !data) return <ErrorState message={error || "Acesso não disponível."} retry={loadData} />;
-  if (data.me.role === "user") {
-    return (
-      <PendingAssignment
-        user={user}
-        onSignOut={async () => {
-          await fetch("/api/auth/logout", { method: "POST" });
-          window.location.assign("/");
-        }}
-      />
-    );
-  }
-
   const canCreate = data.me.permissions.createProposal;
   const factoryManagers = data.users.filter((item) => item.role === "factory_manager" && item.active);
   async function refreshed(message: string) { setNotice(message); await loadData(); }
@@ -269,7 +258,7 @@ export function Dashboard({ user }: { user: AppUser }) {
           <NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão geral</NavButton>
           <NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton>
           <NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Concessionárias</NavButton>
-          <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>
+          {data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}
         </nav>
         {canCreate && <button className="sidebar-new" onClick={() => setShowNewProposal(true)}><Icon name="plus" size={17} />Nova proposta</button>}
         <div className="sidebar-account-actions"><button type="button" onClick={() => setShowChangePassword(true)}><Icon name="key" size={15} />Alterar senha</button></div>
@@ -292,7 +281,7 @@ export function Dashboard({ user }: { user: AppUser }) {
           <NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão</NavButton>
           <NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton>
           <NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Rede</NavButton>
-          <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>
+          {data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}
         </nav>
       </section>
 
@@ -323,7 +312,7 @@ function Overview({ data, onNew, onOpen, onAll }: { data: DashboardData; onNew: 
       <MetricCard label="Taxa de aceite" value={`${approvalRate}%`} meta={`${approved} propostas aceitas`} icon="trend" tone="green" />
       <MetricCard label="Concessionárias" value={String(data.dealerships.length)} meta="Dentro do seu escopo" icon="building" tone="dark" />
     </section>
-    {counteroffers.length > 0 && data.me.role !== "dealer_manager" && (
+    {counteroffers.length > 0 && !["dealer_manager", "concession"].includes(data.me.role) && (
       <CounterofferInbox proposals={counteroffers} onOpen={onOpen} />
     )}
     <section className="dashboard-grid">
@@ -407,7 +396,7 @@ function DealershipsView({ dealerships, proposals, onOpen }: { dealerships: Deal
 
 function AccessView({ data, onNew, onChanged }: { data: DashboardData; onNew: () => void; onChanged: () => Promise<void> }) {
   const [busy, setBusy] = useState("");
-  const isAdmin = data.me.role === "admin";
+  const canAssignRoles = ["general_admin", "global_management"].includes(data.me.role);
 
   async function updateAccess(record: AccessUser, patch: Partial<Pick<AccessUser, "role" | "dealershipId" | "active">>) {
     setBusy(record.email);
@@ -426,12 +415,14 @@ function AccessView({ data, onNew, onChanged }: { data: DashboardData; onNew: ()
     <div className="content-frame">
       <header className="page-heading">
         <div><span className="eyebrow">Segurança e governança</span><h1>Gestão de acessos</h1><p>{accessDescription(data.me.role)}</p></div>
-        <button className="primary-button" onClick={onNew}><Icon name="plus" size={18} />Criar usuário comum</button>
+        {data.me.permissions.manageAccess && <button className="primary-button" onClick={onNew}><Icon name="plus" size={18} />Criar acesso</button>}
       </header>
       <section className="permission-summary">
-        <PermissionCard title="ADM" text="Exclusivo de Mateus Mazieiro, com visão e gestão total." active={data.me.role === "admin"} />
+        <PermissionCard title="ADM Geral" text="Controle total do portal, usuários, permissões e dados." active={data.me.role === "general_admin"} />
+        <PermissionCard title="Gestão Global" text="Visão consolidada da operação e gestão dos demais níveis." active={data.me.role === "global_management"} />
         <PermissionCard title="Gestor Fábrica" text="Carteira atribuída, propostas e acessos das concessionárias atendidas." active={data.me.role === "factory_manager"} />
         <PermissionCard title="Gestor Concessionária" text="Propostas da própria empresa, decisões e acessos internos." active={data.me.role === "dealer_manager"} />
+        <PermissionCard title="Concessão" text="Acesso operacional às propostas da própria concessionária." active={data.me.role === "concession"} />
       </section>
       <article className="panel access-panel">
         <PanelHeader title="Usuários no seu escopo" subtitle={`${data.users.length} acessos cadastrados`} />
@@ -445,21 +436,22 @@ function AccessView({ data, onNew, onChanged }: { data: DashboardData; onNew: ()
                   <tr key={record.email}>
                     <td><strong>{record.name}</strong><small>{record.email}</small></td>
                     <td>
-                      {isAdmin && !isPrimaryAdmin ? (
+                      {canAssignRoles && !isPrimaryAdmin ? (
                         <select
                           value={record.role}
                           disabled={busy === record.email}
                           onChange={(event) => void updateAccess(record, { role: event.target.value as UserRole })}
                           aria-label={`Posição de ${record.name}`}
                         >
-                          <option value="user">Usuário comum</option>
+                          <option value="global_management">Gestão Global</option>
                           <option value="factory_manager">Gestor Fábrica</option>
                           <option value="dealer_manager">Gestor Concessionária</option>
+                          <option value="concession">Concessão</option>
                         </select>
                       ) : <span className="role-badge">{record.roleLabel}</span>}
                     </td>
                     <td>
-                      {isAdmin && !isPrimaryAdmin ? (
+                      {canAssignRoles && !isPrimaryAdmin ? (
                         <select
                           value={record.dealershipId ?? ""}
                           disabled={busy === record.email}
@@ -700,7 +692,7 @@ function NewProposalModal({
                 </article>
                 <article className="responsible-card">
                   <span>Responsável HORSCH</span>
-                  {role === "admin" && (!selectedDealer || !selectedDealer.factoryManagerEmail) ? (
+                  {["general_admin", "global_management"].includes(role) && (!selectedDealer || !selectedDealer.factoryManagerEmail) ? (
                     <label className="field">
                       <span>Gestor Fábrica</span>
                       <select value={factoryManagerEmail} onChange={(event) => setFactoryManagerEmail(event.target.value)} required>
@@ -760,9 +752,10 @@ function NewProposalModal({
 }
 
 function NewAccessModal({ me, dealerships, onClose, onSaved }: { me: CurrentAccess; dealerships: Dealership[]; onClose: () => void; onSaved: () => Promise<void> }) {
-  const [name, setName] = useState(""); const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [dealershipId, setDealershipId] = useState<number | null>(me.role === "dealer_manager" ? me.dealershipId : null); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
-  async function submit(event: FormEvent) { event.preventDefault(); setSaving(true); setError(""); const response = await fetch("/api/access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, email, password, dealershipId }) }); const payload = (await response.json()) as { error?: string }; if (!response.ok) { setError(payload.error || "Não foi possível criar o acesso."); setSaving(false); return; } await onSaved(); }
-  return <div className="modal-backdrop" role="dialog" aria-modal="true"><form className="access-modal" onSubmit={(event) => void submit(event)}><header className="modal-header"><div><span className="eyebrow">Novo usuário</span><h2>Criar usuário comum</h2><p>A posição será atribuída posteriormente pelo ADM.</p></div><button type="button" className="icon-button" onClick={onClose}><Icon name="close" /></button></header><div className="form-scroll"><div className="access-form-grid"><label className="field"><span>Nome completo</span><input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} required /></label><label className="field"><span>E-mail corporativo</span><input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label><label className="field"><span>Senha inicial</span><input type="password" minLength={10} maxLength={128} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>{me.role !== "dealer_manager" && <label className="field"><span>Concessionária inicial (opcional)</span><select value={dealershipId ?? ""} onChange={(event) => setDealershipId(Number(event.target.value) || null)}><option value="">Sem vínculo</option>{dealerships.map((dealer) => <option key={dealer.id} value={dealer.id}>{dealer.name}</option>)}</select></label>}</div><div className="access-note"><strong>Usuário comum</strong><p>O acesso nasce sem permissão operacional. Somente o ADM poderá atribuir a posição posteriormente.</p></div>{error && <p className="form-error">{error}</p>}</div><footer className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button type="submit" className="primary-button" disabled={saving}>{saving ? "Criando..." : "Criar usuário"}</button></footer></form></div>;
+  const [name, setName] = useState(""); const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [role, setRole] = useState<UserRole>(["general_admin", "global_management"].includes(me.role) ? "global_management" : "concession"); const [dealershipId, setDealershipId] = useState<number | null>(me.role === "dealer_manager" || me.role === "concession" ? me.dealershipId : null); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
+  async function submit(event: FormEvent) { event.preventDefault(); setSaving(true); setError(""); const response = await fetch("/api/access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, email, password, role, dealershipId }) }); const payload = (await response.json()) as { error?: string }; if (!response.ok) { setError(payload.error || "Não foi possível criar o acesso."); setSaving(false); return; } await onSaved(); }
+  const canChooseRole = ["general_admin", "global_management"].includes(me.role);
+  return <div className="modal-backdrop" role="dialog" aria-modal="true"><form className="access-modal" onSubmit={(event) => void submit(event)}><header className="modal-header"><div><span className="eyebrow">Novo acesso</span><h2>Criar acesso por nível</h2><p>Defina o nível e o escopo operacional deste usuário.</p></div><button type="button" className="icon-button" onClick={onClose}><Icon name="close" /></button></header><div className="form-scroll"><div className="access-form-grid"><label className="field"><span>Nome completo</span><input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} required /></label><label className="field"><span>E-mail corporativo</span><input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label><label className="field"><span>Senha inicial</span><input type="password" minLength={10} maxLength={128} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>{canChooseRole && <label className="field"><span>Nível de permissão</span><select value={role} onChange={(event) => setRole(event.target.value as UserRole)}><option value="global_management">Gestão Global</option><option value="factory_manager">Gestor Fábrica</option><option value="dealer_manager">Gestor Concessionária</option><option value="concession">Concessão</option></select></label>}{me.role !== "dealer_manager" && <label className="field"><span>Concessionária inicial (opcional)</span><select value={dealershipId ?? ""} onChange={(event) => setDealershipId(Number(event.target.value) || null)}><option value="">Sem vínculo</option>{dealerships.map((dealer) => <option key={dealer.id} value={dealer.id}>{dealer.name}</option>)}</select></label>}</div><div className="access-note"><strong>{canChooseRole ? "Nível selecionado" : "Concessão"}</strong><p>{canChooseRole ? "O nível define a visão, as ações e o escopo dos dados no portal." : "O acesso ficará restrito à concessionária vinculada."}</p></div>{error && <p className="form-error">{error}</p>}</div><footer className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button type="submit" className="primary-button" disabled={saving}>{saving ? "Criando..." : "Criar acesso"}</button></footer></form></div>;
 }
 
 function ChangePasswordModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
@@ -803,10 +796,10 @@ function ProposalPreviewLegacy({ proposal, me, onClose, onUpdated, onDeleted }: 
   const [confirmDelete, setConfirmDelete] = useState(false); const [deleting, setDeleting] = useState(false);
   async function updateStatus(nextStatus: ProposalStatus) { setUpdating(true); setError(""); const cents = nextStatus === "counteroffer" ? parseMoneyToCents(counteroffer) : null; const response = await fetch("/api/proposals", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: proposal.id, status: nextStatus, counterofferCents: cents, decisionNote: note }) }); const payload = (await response.json()) as { error?: string }; if (!response.ok) { setError(payload.error || "Não foi possível atualizar a proposta."); setUpdating(false); return; } setStatus(nextStatus); await onUpdated(nextStatus, cents); setUpdating(false); }
   async function deleteProposal() { setDeleting(true); setError(""); const response = await fetch("/api/proposals", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: proposal.id }) }); const payload = (await response.json()) as { error?: string }; if (!response.ok) { setError(payload.error || "Não foi possível excluir a proposta."); setDeleting(false); return; } await onDeleted(); }
-  const decisionOpen = me.role === "dealer_manager" && ["sent", "counteroffer"].includes(proposal.status);
+  const decisionOpen = ["dealer_manager", "concession"].includes(me.role) && ["sent", "counteroffer"].includes(proposal.status);
   const canDelete = me.permissions.deleteAnyProposal || (me.permissions.deleteOwnDraft && proposal.status === "draft" && proposal.createdByEmail === me.email);
   const managerStatuses = STATUS_ORDER.filter((item) => item !== "counteroffer" || proposal.status === "counteroffer");
-  return <div className="modal-backdrop preview-backdrop print-overlay" role="dialog" aria-modal="true"><div className="preview-shell"><header className="preview-toolbar no-print"><div><strong>{proposal.id}</strong><span>{me.role === "dealer_manager" ? "Análise da concessionária" : "Visualização da proposta"}</span></div><div className="preview-actions">{me.role !== "dealer_manager" && <label>Status<select value={status} disabled={updating} onChange={(event) => void updateStatus(event.target.value as ProposalStatus)}>{managerStatuses.map((item) => <option value={item} key={item}>{STATUS_LABELS[item]}</option>)}</select></label>}<button className="outline-button dark" onClick={() => window.print()}><Icon name="print" size={16} />Imprimir / PDF</button><button className="icon-button dark" onClick={onClose}><Icon name="close" /></button></div></header>{decisionOpen && <section className="decision-panel no-print"><div><span className="eyebrow">Decisão da concessionária</span><h2>Analise e responda à proposta</h2><p>O retorno ficará registrado no histórico comercial.</p></div><label className="field"><span>Observação</span><input value={note} onChange={(event) => setNote(event.target.value)} placeholder="Comentário opcional" /></label><label className="field"><span>Valor da contraproposta</span><input value={counteroffer} onChange={(event) => setCounteroffer(event.target.value)} onBlur={(event) => setCounteroffer(formatMoneyInput(event.target.value))} placeholder="0,00" /></label><div className="decision-actions"><button className="decision-button reject" disabled={updating} onClick={() => void updateStatus("rejected")}>Recusar</button><button className="decision-button counter" disabled={updating} onClick={() => void updateStatus("counteroffer")}>Enviar contraproposta</button><button className="decision-button accept" disabled={updating} onClick={() => void updateStatus("approved")}>Aceitar proposta</button></div>{error && <p className="form-error">{error}</p>}</section>}<article className="proposal-paper"><header className="document-header"><div className="document-title"><h1>Proposta comercial</h1><p>Fornecimento de peças</p></div><HorschDocumentLogo /></header><section className="document-stats"><div><span>Número da proposta</span><strong>{proposal.id}</strong></div><div><span>Data de emissão</span><strong>{formatDate(proposal.issueDate)}</strong></div><div><span>Válida até</span><strong>{formatDate(proposal.validUntil)}</strong></div></section><section className="document-customer"><div><span>Responsável da concessionária</span><strong>{proposal.contactName || "—"}</strong></div><div><span>Concessionária</span><strong>{proposal.dealership}</strong></div></section><p className="document-intro">Apresentamos nossa proposta comercial para o fornecimento dos itens abaixo. Valores e condições permanecem válidos até a data indicada.</p><div className="document-section-title"><h2>Itens da proposta</h2><span>Valores líquidos em reais</span></div><table className="document-items"><thead><tr><th>PN</th><th>VT</th><th>Origem</th><th>NCM</th><th>Quantidade</th><th>Net Price (R$)</th></tr></thead><tbody>{proposal.items.map((item) => <tr key={item.id}><td>{item.partNumber || "—"}</td><td>{item.description || "—"}</td><td>{item.origin || "—"}</td><td>{item.ncm || "—"}</td><td>{item.quantity}</td><td>{formatBRL(item.unitPriceCents)}</td></tr>)}</tbody></table><div className="document-total"><span>Valor total da proposta</span><strong>{formatBRL(proposal.totalCents)}</strong></div>{proposal.counterofferCents && <section className="document-counteroffer"><span>Contraproposta da concessionária</span><strong>{formatBRL(proposal.counterofferCents)}</strong>{proposal.decisionNote && <p>{proposal.decisionNote}</p>}</section>}<section className="document-terms"><strong>Condições comerciais</strong><p>Valores líquidos em reais, sujeitos à disponibilidade de estoque. Tributos e frete seguem as condições vigentes acordadas com a concessionária.</p></section><section className="document-signatures"><div><span className="signature-name">{proposal.commercialOwner}</span><small>Responsável Comercial HORSCH</small></div><div><span /><small>Responsável / Concessionária</small></div></section><footer className="document-footer"><span>HORSCH do Brasil<br />Curitiba · Paraná · Brasil</span><span>Documento confidencial<br />Uso comercial</span></footer></article></div></div>;
+  return <div className="modal-backdrop preview-backdrop print-overlay" role="dialog" aria-modal="true"><div className="preview-shell"><header className="preview-toolbar no-print"><div><strong>{proposal.id}</strong><span>{["dealer_manager", "concession"].includes(me.role) ? "Análise da concessionária" : "Visualização da proposta"}</span></div><div className="preview-actions">{!decisionOpen && <label>Status<select value={status} disabled={updating} onChange={(event) => void updateStatus(event.target.value as ProposalStatus)}>{managerStatuses.map((item) => <option value={item} key={item}>{STATUS_LABELS[item]}</option>)}</select></label>}<button className="outline-button dark" onClick={() => window.print()}><Icon name="print" size={16} />Imprimir / PDF</button><button className="icon-button dark" onClick={onClose}><Icon name="close" /></button></div></header>{decisionOpen && <section className="decision-panel no-print"><div><span className="eyebrow">Decisão da concessionária</span><h2>Analise e responda à proposta</h2><p>O retorno ficará registrado no histórico comercial.</p></div><label className="field"><span>Observação</span><input value={note} onChange={(event) => setNote(event.target.value)} placeholder="Comentário opcional" /></label><label className="field"><span>Valor da contraproposta</span><input value={counteroffer} onChange={(event) => setCounteroffer(event.target.value)} onBlur={(event) => setCounteroffer(formatMoneyInput(event.target.value))} placeholder="0,00" /></label><div className="decision-actions"><button className="decision-button reject" disabled={updating} onClick={() => void updateStatus("rejected")}>Recusar</button><button className="decision-button counter" disabled={updating} onClick={() => void updateStatus("counteroffer")}>Enviar contraproposta</button><button className="decision-button accept" disabled={updating} onClick={() => void updateStatus("approved")}>Aceitar proposta</button></div>{error && <p className="form-error">{error}</p>}</section>}<article className="proposal-paper"><header className="document-header"><div className="document-title"><h1>Proposta comercial</h1><p>Fornecimento de peças</p></div><HorschDocumentLogo /></header><section className="document-stats"><div><span>Número da proposta</span><strong>{proposal.id}</strong></div><div><span>Data de emissão</span><strong>{formatDate(proposal.issueDate)}</strong></div><div><span>Válida até</span><strong>{formatDate(proposal.validUntil)}</strong></div></section><section className="document-customer"><div><span>Responsável da concessionária</span><strong>{proposal.contactName || "—"}</strong></div><div><span>Concessionária</span><strong>{proposal.dealership}</strong></div></section><p className="document-intro">Apresentamos nossa proposta comercial para o fornecimento dos itens abaixo. Valores e condições permanecem válidos até a data indicada.</p><div className="document-section-title"><h2>Itens da proposta</h2><span>Valores líquidos em reais</span></div><table className="document-items"><thead><tr><th>PN</th><th>VT</th><th>Origem</th><th>NCM</th><th>Quantidade</th><th>Net Price (R$)</th></tr></thead><tbody>{proposal.items.map((item) => <tr key={item.id}><td>{item.partNumber || "—"}</td><td>{item.description || "—"}</td><td>{item.origin || "—"}</td><td>{item.ncm || "—"}</td><td>{item.quantity}</td><td>{formatBRL(item.unitPriceCents)}</td></tr>)}</tbody></table><div className="document-total"><span>Valor total da proposta</span><strong>{formatBRL(proposal.totalCents)}</strong></div>{proposal.counterofferCents && <section className="document-counteroffer"><span>Contraproposta da concessionária</span><strong>{formatBRL(proposal.counterofferCents)}</strong>{proposal.decisionNote && <p>{proposal.decisionNote}</p>}</section>}<section className="document-terms"><strong>Condições comerciais</strong><p>Valores líquidos em reais, sujeitos à disponibilidade de estoque. Tributos e frete seguem as condições vigentes acordadas com a concessionária.</p></section><section className="document-signatures"><div><span className="signature-name">{proposal.commercialOwner}</span><small>Responsável Comercial HORSCH</small></div><div><span /><small>Responsável / Concessionária</small></div></section><footer className="document-footer"><span>HORSCH do Brasil<br />Curitiba · Paraná · Brasil</span><span>Documento confidencial<br />Uso comercial</span></footer></article></div></div>;
 }
 /* eslint-enable @typescript-eslint/no-unused-vars */
 
@@ -834,9 +827,9 @@ function ProposalPreview({ proposal, me, onClose, onUpdated, onDeleted }: { prop
   const [error, setError] = useState("");
 
   const decisionOpen =
-    me.role === "dealer_manager" && ["sent", "counteroffer"].includes(status);
+    ["dealer_manager", "concession"].includes(me.role) && ["sent", "counteroffer"].includes(status);
   const canReviewCounteroffer =
-    ["admin", "factory_manager"].includes(me.role) && status === "counteroffer";
+    ["general_admin", "global_management", "factory_manager"].includes(me.role) && status === "counteroffer";
   const counterofferTotal = counterItems.reduce(
     (sum, item) => sum + item.quantity * parseMoneyToCents(item.price),
     0,
@@ -993,7 +986,7 @@ function ProposalPreview({ proposal, me, onClose, onUpdated, onDeleted }: { prop
             </span>
           </div>
           <div className="preview-actions">
-            {me.role !== "dealer_manager" && (
+            {!decisionOpen && (
               <label>
                 Status
                 <select
@@ -1019,7 +1012,7 @@ function ProposalPreview({ proposal, me, onClose, onUpdated, onDeleted }: { prop
                 Excluir
               </button>
             )}
-            {me.role !== "dealer_manager" && status !== "expired" && emailStatus !== "sent" && (
+            {!decisionOpen && status !== "expired" && emailStatus !== "sent" && (
               <button
                 type="button"
                 className="outline-button dark"
@@ -1241,17 +1234,6 @@ function ProposalPreview({ proposal, me, onClose, onUpdated, onDeleted }: { prop
 }
 
 function StatusBadge({ status }: { status: ProposalStatus }) { return <span className={`status-badge ${status}`}><i />{STATUS_LABELS[status]}</span>; }
-function PendingAssignment({ user, onSignOut }: { user: AppUser; onSignOut: () => Promise<void> }) {
-  return (
-    <main className="center-state">
-      <span className="state-mark">H</span>
-      <span className="eyebrow">Acesso criado</span>
-      <h1>Seu usuário aguarda uma posição</h1>
-      <p>{user.email} está ativo como usuário comum. O ADM precisa atribuir uma posição antes de liberar as funções operacionais.</p>
-      <div className="state-actions"><button className="outline-button" onClick={() => void onSignOut()}>Sair</button></div>
-    </main>
-  );
-}
 function LoadingState() { return <div className="center-state"><span className="state-mark">H</span><h1>Preparando o portal comercial</h1><p>Carregando seu perfil e as informações autorizadas.</p></div>; }
 function ErrorState({ message, retry }: { message: string; retry: () => Promise<void> }) { return <div className="center-state"><span className="state-mark">!</span><h1>Acesso não disponível</h1><p>{message}</p><div className="state-actions"><button className="primary-button" onClick={() => void retry()}>Tentar novamente</button><Link className="outline-button" href="/">Voltar ao login</Link></div></div>; }
 function EmptyState({ title, text }: { title: string; text: string }) { return <div className="empty-state"><span><Icon name="file" size={24} /></span><h3>{title}</h3><p>{text}</p></div>; }
@@ -1264,5 +1246,5 @@ function firstName(value: string) { const name = value.trim().split(/\s+/)[0]; r
 function defaultValidity() { const date = new Date(); date.setDate(date.getDate() + 30); return date.toISOString().slice(0, 10); }
 function parseMoneyToCents(value: string) { const cleaned = String(value).replace(/[^\d,.-]/g, ""); const normalized = cleaned.includes(",") ? cleaned.replace(/\./g, "").replace(",", ".") : cleaned; return Math.max(0, Math.round((Number(normalized) || 0) * 100)); }
 function formatMoneyInput(value: string) { const cents = parseMoneyToCents(value); if (!value.trim() && !cents) return ""; return (cents / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-function scopeDescription(me: CurrentAccess) { return me.role === "admin" ? "Visão consolidada de toda a operação e de todos os acessos." : me.role === "factory_manager" ? "Carteira atribuída, propostas e acessos das concessionárias sob sua gestão." : me.role === "dealer_manager" ? "Propostas e usuários vinculados exclusivamente à sua concessionária." : "Aguardando atribuição de posição pelo ADM."; }
-function accessDescription(role: UserRole) { return role === "admin" ? "Cadastre usuários comuns e atribua suas posições posteriormente." : role === "factory_manager" ? "Cadastre usuários comuns para as concessionárias da sua carteira." : role === "dealer_manager" ? "Cadastre usuários comuns vinculados à sua concessionária." : "Aguardando atribuição de posição."; }
+function scopeDescription(me: CurrentAccess) { return ["general_admin", "global_management"].includes(me.role) ? "Visão consolidada de toda a operação e dos acessos autorizados." : me.role === "factory_manager" ? "Carteira atribuída, propostas e acessos das concessionárias sob sua gestão." : me.role === "dealer_manager" ? "Propostas e usuários vinculados exclusivamente à sua concessionária." : "Acesso operacional às propostas da sua concessionária."; }
+function accessDescription(role: UserRole) { return role === "general_admin" ? "Controle total de usuários, permissões e dados do portal." : role === "global_management" ? "Gerencie os níveis operacionais e acompanhe toda a operação." : role === "factory_manager" ? "Cadastre e gerencie acessos das concessionárias da sua carteira." : role === "dealer_manager" ? "Cadastre acessos de Concessão vinculados à sua concessionária." : "Seu perfil consulta e movimenta propostas da própria concessionária."; }
