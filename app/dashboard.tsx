@@ -1176,7 +1176,6 @@ function ProposalPreview({ proposal, me, onClose, onUpdated, onDeleted }: { prop
             <div><span>Concessionária</span><strong>{proposal.dealership}</strong></div>
             <div><span>Responsável HORSCH</span><strong>{proposal.commercialOwner}</strong><small>{proposal.factoryManagerEmail || proposal.createdByEmail}</small></div>
           </section>
-          <p className="document-intro"><strong>Uma solução sob medida para sua operação.</strong> Apresentamos abaixo os itens, valores e condições comerciais desta proposta. A validade está indicada no cabeçalho do documento.</p>
           <div className="document-section-title"><h2>Itens da proposta</h2><span>Valores líquidos em reais</span></div>
           <table className="document-items">
             <thead><tr><th>PN</th><th>Descrição</th><th>VT</th><th>Origem</th><th>NCM</th><th>Qtd.</th><th>Net price (R$)</th></tr></thead>
