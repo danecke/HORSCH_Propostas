@@ -517,6 +517,7 @@ type DeliveryResponse = {
 };
 
 function NewProposalModal({
+  userEmail,
   role,
   dealerships,
   proposalResponsibles,
