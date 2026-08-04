@@ -3,6 +3,7 @@ import { getDb } from "../../../db";
 import { dealerships, proposalItems, proposals, users } from "../../../db/schema";
 import {
   canCreateProposal,
+  canBeProposalResponsible,
   getAccessProfile,
   normalizeUserRole,
   roleLabel,
@@ -303,6 +304,24 @@ export async function GET() {
           createdAt: record.createdAt,
         };
       }),
+      proposalResponsibles: allUsers
+        .filter((record) => {
+          const role = normalizeUserRole(record.email, record.role);
+          return record.active && Boolean(role && canBeProposalResponsible(role));
+        })
+        .map((record) => {
+          const role = normalizeUserRole(record.email, record.role)!;
+          return {
+            email: record.email,
+            name: record.name,
+            role,
+            roleLabel: roleLabel(role),
+            dealershipId: record.dealershipId,
+            active: record.active,
+            credentialReady: Boolean(record.passwordHash),
+            createdAt: record.createdAt,
+          };
+        }),
       me: {
         ...profile,
         roleLabel: roleLabel(profile.role),
@@ -352,14 +371,22 @@ export async function POST(request: Request) {
     }
     if (existingDealer && !dealerIsVisible(profile, existingDealer)) return forbidden();
 
-    const assignedManagerEmail = existingDealer
-      ? existingDealer.factoryManagerEmail.toLowerCase() ||
-        (profile.role === "factory_manager"
-          ? profile.email
-          : payload.factoryManagerEmail?.trim().toLowerCase() ?? "")
-      : profile.role === "factory_manager"
-        ? profile.email
-        : payload.factoryManagerEmail?.trim().toLowerCase() ?? "";
+    const allUsers = await db.select().from(users).orderBy(users.name, users.email);
+    const requestedManagerEmail = payload.factoryManagerEmail?.trim().toLowerCase() ?? "";
+    const assignedManagerEmail =
+      requestedManagerEmail ||
+      existingDealer?.factoryManagerEmail.trim().toLowerCase() ||
+      (profile.role === "factory_manager" ? profile.email : "");
+    const assignedManager = allUsers.find((record) => {
+      const role = normalizeUserRole(record.email, record.role);
+      return record.active && record.email.toLowerCase() === assignedManagerEmail && role && canBeProposalResponsible(role);
+    });
+    if (!assignedManager) {
+      return Response.json(
+        { error: "Selecione um responsável HORSCH ativo com nível ADM Geral, Gestão Global ou Gestor Fábrica." },
+        { status: 400 },
+      );
+    }
 
     let dealer = existingDealer;
     if (!dealer) {
@@ -393,12 +420,6 @@ export async function POST(request: Request) {
       dealer = updatedDealer;
     }
 
-    const allUsers = await db.select().from(users).orderBy(users.name, users.email);
-    const factoryManager = activeUserWithRole(
-      allUsers,
-      "factory_manager",
-      (record) => record.email === assignedManagerEmail,
-    );
     const dealerManager = activeUserWithRole(
       allUsers,
       "dealer_manager",
@@ -413,9 +434,7 @@ export async function POST(request: Request) {
     )
       .trim()
       .toLowerCase();
-    const commercialOwner =
-      factoryManager?.name ||
-      (assignedManagerEmail === profile.email ? profile.name : "Equipe Comercial HORSCH");
+    const commercialOwner = assignedManager.name || "Equipe Comercial HORSCH";
     const commercialOwnerEmail = assignedManagerEmail || profile.email;
 
     if (requestedStatus === "sent" && !contactEmail) {

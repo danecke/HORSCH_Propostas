@@ -11,6 +11,11 @@ export const ROLES = [
   "dealer_manager",
   "concession",
 ] as const;
+export const PROPOSAL_RESPONSIBLE_ROLES = [
+  "general_admin",
+  "global_management",
+  "factory_manager",
+] as const;
 export type UserRole = (typeof ROLES)[number];
 
 export type AccessProfile = {
@@ -45,6 +50,10 @@ export async function getAccessProfile(): Promise<AccessProfile | null> {
 
 export function canCreateProposal(profile: AccessProfile) {
   return ["general_admin", "global_management", "factory_manager"].includes(profile.role);
+}
+
+export function canBeProposalResponsible(role: UserRole) {
+  return PROPOSAL_RESPONSIBLE_ROLES.includes(role as (typeof PROPOSAL_RESPONSIBLE_ROLES)[number]);
 }
 
 export function roleLabel(role: UserRole) {

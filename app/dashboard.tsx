@@ -6,6 +6,7 @@ import Link from "next/link";
 import type { AppUser } from "../lib/auth";
 
 type UserRole = "general_admin" | "global_management" | "factory_manager" | "dealer_manager" | "concession";
+const PROPOSAL_RESPONSIBLE_ROLES: UserRole[] = ["general_admin", "global_management", "factory_manager"];
 type ProposalStatus =
   | "draft"
   | "sent"
@@ -111,6 +112,7 @@ type DashboardData = {
   proposals: Proposal[];
   dealerships: Dealership[];
   users: AccessUser[];
+  proposalResponsibles: AccessUser[];
   me: CurrentAccess;
 };
 
@@ -242,7 +244,7 @@ export function Dashboard({ user }: { user: AppUser }) {
   if (loading) return <LoadingState />;
   if (error || !data) return <ErrorState message={error || "Acesso não disponível."} retry={loadData} />;
   const canCreate = data.me.permissions.createProposal;
-  const factoryManagers = data.users.filter((item) => item.role === "factory_manager" && item.active);
+  const proposalResponsibles = data.proposalResponsibles.filter((item) => item.active);
   async function refreshed(message: string) { setNotice(message); await loadData(); }
   async function signOut() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -285,7 +287,7 @@ export function Dashboard({ user }: { user: AppUser }) {
         </nav>
       </section>
 
-      {showNewProposal && <NewProposalModal userName={data.me.name} role={data.me.role} dealerships={data.dealerships} factoryManagers={factoryManagers} onClose={() => setShowNewProposal(false)} onSaved={async (message) => { setShowNewProposal(false); await refreshed(message); }} />}
+      {showNewProposal && <NewProposalModal userEmail={data.me.email} role={data.me.role} dealerships={data.dealerships} proposalResponsibles={proposalResponsibles} onClose={() => setShowNewProposal(false)} onSaved={async (message) => { setShowNewProposal(false); await refreshed(message); }} />}
       {showNewAccess && <NewAccessModal me={data.me} dealerships={data.dealerships} onClose={() => setShowNewAccess(false)} onSaved={async () => { setShowNewAccess(false); await refreshed("Novo acesso criado com sucesso."); }} />}
       {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} onSaved={() => { setShowChangePassword(false); setNotice("Senha alterada com sucesso."); }} />}
       {preview && <ProposalPreview proposal={preview} me={data.me} onClose={() => setPreview(null)} onDeleted={async () => { setPreview(null); await refreshed("Proposta excluída com sucesso."); }} onUpdated={async (status, counterofferCents) => { setPreview({ ...preview, status, counterofferCents: counterofferCents ?? null }); await refreshed("Proposta atualizada com sucesso."); }} />}
@@ -515,17 +517,16 @@ type DeliveryResponse = {
 };
 
 function NewProposalModal({
-  userName,
   role,
   dealerships,
-  factoryManagers,
+  proposalResponsibles,
   onClose,
   onSaved,
 }: {
-  userName: string;
+  userEmail: string;
   role: UserRole;
   dealerships: Dealership[];
-  factoryManagers: AccessUser[];
+  proposalResponsibles: AccessUser[];
   onClose: () => void;
   onSaved: (message: string) => Promise<void>;
 }) {
@@ -538,7 +539,7 @@ function NewProposalModal({
   const [contactName, setContactName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [factoryManagerEmail, setFactoryManagerEmail] = useState(
-    role === "factory_manager" ? factoryManagers[0]?.email ?? "" : "",
+    PROPOSAL_RESPONSIBLE_ROLES.includes(role) ? userEmail : "",
   );
   const [validUntil, setValidUntil] = useState(defaultValidity());
   const [items, setItems] = useState<FormItem[]>([blankItem()]);
@@ -548,11 +549,6 @@ function NewProposalModal({
   const selectedDealer = dealerships.find(
     (record) => String(record.id) === dealershipSelection,
   );
-  const selectedFactoryManager = factoryManagers.find(
-    (record) => record.email === factoryManagerEmail,
-  );
-  const commercialOwner =
-    selectedDealer?.factoryManagerName || selectedFactoryManager?.name || userName;
   const isNewDealer = dealershipSelection === "new";
   const totalCents = items.reduce(
     (sum, item) => sum + item.quantity * parseMoneyToCents(item.price),
@@ -569,7 +565,7 @@ function NewProposalModal({
       setContactName("");
       setContactEmail("");
       setFactoryManagerEmail(
-        role === "factory_manager" ? factoryManagers[0]?.email ?? "" : "",
+        PROPOSAL_RESPONSIBLE_ROLES.includes(role) ? userEmail : "",
       );
       return;
     }
@@ -692,19 +688,15 @@ function NewProposalModal({
                 </article>
                 <article className="responsible-card">
                   <span>Responsável HORSCH</span>
-                  {["general_admin", "global_management"].includes(role) && (!selectedDealer || !selectedDealer.factoryManagerEmail) ? (
-                    <label className="field">
-                      <span>Gestor Fábrica</span>
-                      <select value={factoryManagerEmail} onChange={(event) => setFactoryManagerEmail(event.target.value)} required>
-                        <option value="">Selecione o gestor</option>
-                        {factoryManagers.map((manager) => (
-                          <option key={manager.email} value={manager.email}>{manager.name} · {manager.email}</option>
-                        ))}
-                      </select>
-                    </label>
-                  ) : (
-                    <label className="field"><span>Gestor Fábrica</span><input value={commercialOwner} readOnly /></label>
-                  )}
+                  <label className="field">
+                    <span>Responsável HORSCH</span>
+                    <select value={factoryManagerEmail} onChange={(event) => setFactoryManagerEmail(event.target.value)} required>
+                      <option value="">Selecione o responsável</option>
+                      {proposalResponsibles.map((manager) => (
+                        <option key={manager.email} value={manager.email}>{manager.name} · {manager.roleLabel}</option>
+                      ))}
+                    </select>
+                  </label>
                   <label className="field"><span>Válida até</span><input type="date" value={validUntil} onChange={(event) => setValidUntil(event.target.value)} required /></label>
                 </article>
               </div>
