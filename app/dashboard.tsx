@@ -153,6 +153,7 @@ type IconName =
   | "key"
   | "trash"
   | "close"
+  | "eye"
   | "history";
 
 function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
@@ -172,6 +173,7 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
     key: <><circle cx="8" cy="15" r="4" /><path d="m11 12 9-9M17 6l3 3M14 9l3 3" /></>,
     trash: <><path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14M10 11v6M14 11v6" /></>,
     close: <path d="m6 6 12 12M18 6 6 18" />,
+    eye: <><path d="M2.5 12s3.5-5 9.5-5 9.5 5 9.5 5-3.5 5-9.5 5-9.5-5-9.5-5Z" /><circle cx="12" cy="12" r="2.2" /></>,
     history: <><path d="M3 12a9 9 0 1 0 3-6.7" /><path d="M3 4v5h5M12 7v5l3 2" /></>,
   };
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
@@ -213,6 +215,7 @@ export function Dashboard({ user }: { user: AppUser }) {
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [editProposal, setEditProposal] = useState<Proposal | null>(null);
   const [preview, setPreview] = useState<Proposal | null>(null);
+  const [historyProposalId, setHistoryProposalId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
 
   const loadData = useCallback(async () => {
@@ -255,6 +258,11 @@ export function Dashboard({ user }: { user: AppUser }) {
     window.location.assign("/");
   }
 
+  function openHistory(proposalId?: string) {
+    setHistoryProposalId(proposalId ?? null);
+    setView("history");
+  }
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -277,15 +285,15 @@ export function Dashboard({ user }: { user: AppUser }) {
         <header className="mobile-header"><div className="mobile-lockup"><BrandMark className="mobile-mark" /><strong>HORSCH</strong></div><span className="mobile-role">{data.me.roleLabel}</span></header>
         {notice && <div className="toast" role="status"><Icon name="check" size={17} />{notice}</div>}
         {view === "overview" ? (
-          <Overview data={data} onNew={() => setShowNewProposal(true)} onOpen={setPreview} onAll={() => setView("proposals")} />
+          <Overview data={data} onNew={() => setShowNewProposal(true)} onOpen={setPreview} onHistory={openHistory} onAll={() => setView("proposals")} />
         ) : view === "proposals" ? (
-          <ProposalsView proposals={filteredProposals} allCount={data.proposals.length} search={search} onSearch={setSearch} status={statusFilter} onStatus={setStatusFilter} canCreate={canCreate} onNew={() => setShowNewProposal(true)} onOpen={setPreview} />
+          <ProposalsView proposals={filteredProposals} allCount={data.proposals.length} search={search} onSearch={setSearch} status={statusFilter} onStatus={setStatusFilter} canCreate={canCreate} onNew={() => setShowNewProposal(true)} onOpen={setPreview} canViewHistory={data.me.role === "general_admin"} onHistory={openHistory} />
         ) : view === "dealerships" ? (
           <DealershipsView dealerships={data.dealerships} proposals={data.proposals} onOpen={setPreview} />
         ) : view === "access" ? (
           <AccessView data={data} onNew={() => setShowNewAccess(true)} onChanged={() => refreshed("Acesso atualizado com segurança.")} />
         ) : (
-          <HistoryView />
+          <HistoryView proposalId={historyProposalId} />
         )}
         <nav className="mobile-nav" aria-label="Navegação móvel">
           <NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão</NavButton>
@@ -308,7 +316,7 @@ function NavButton({ active, icon, children, onClick }: { active: boolean; icon:
   return <button className={`nav-button ${active ? "active" : ""}`} onClick={onClick}><Icon name={icon} size={19} /><span>{children}</span></button>;
 }
 
-function Overview({ data, onNew, onOpen, onAll }: { data: DashboardData; onNew: () => void; onOpen: (proposal: Proposal) => void; onAll: () => void }) {
+function Overview({ data, onNew, onOpen, onHistory, onAll }: { data: DashboardData; onNew: () => void; onOpen: (proposal: Proposal) => void; onHistory: (proposalId?: string) => void; onAll: () => void }) {
   const totalCents = data.proposals.reduce((sum, proposal) => sum + proposal.totalCents, 0);
   const approved = data.proposals.filter((proposal) => proposal.status === "approved").length;
   const decided = data.proposals.filter((proposal) => ["approved", "rejected"].includes(proposal.status)).length;
@@ -330,7 +338,7 @@ function Overview({ data, onNew, onOpen, onAll }: { data: DashboardData; onNew: 
       <article className="panel pipeline-panel"><PanelHeader title="Fluxo de propostas" subtitle="Distribuição por decisão comercial" /><Pipeline proposals={data.proposals} /></article>
       <article className="panel dealers-panel"><PanelHeader title="Carteira de concessionárias" subtitle="Maior valor acumulado" /><div className="dealer-ranking">{data.dealerships.slice(0, 4).map((dealer, index) => <div className="ranking-row" key={dealer.id}><span className="ranking-index">{String(index + 1).padStart(2, "0")}</span><span className="dealer-monogram">{initials(dealer.name)}</span><div><strong>{dealer.name}</strong><small>{dealer.city}{dealer.state ? ` · ${dealer.state}` : ""}</small></div><span className="ranking-value">{formatBRL(dealer.totalCents)}</span></div>)}{!data.dealerships.length && <EmptyMini text="Nenhuma concessionária vinculada." />}</div></article>
     </section>
-    <article className="panel proposals-panel"><PanelHeader title="Propostas recentes" subtitle="Últimas movimentações no seu escopo" action={<button className="text-button" onClick={onAll}>Ver todas <Icon name="arrow" size={15} /></button>} /><ProposalTable proposals={data.proposals.slice(0, 7)} onOpen={onOpen} /></article>
+    <article className="panel proposals-panel"><PanelHeader title="Propostas recentes" subtitle="Últimas movimentações no seu escopo" action={<button className="text-button" onClick={onAll}>Ver todas <Icon name="arrow" size={15} /></button>} /><ProposalTable proposals={data.proposals.slice(0, 7)} onOpen={onOpen} canViewHistory={data.me.role === "general_admin"} onHistory={onHistory} /></article>
   </div>;
 }
 
@@ -392,13 +400,13 @@ function Pipeline({ proposals }: { proposals: Proposal[] }) {
   return <div className="pipeline-list">{stages.map((stage) => { const matches = proposals.filter((proposal) => proposal.status === stage.status); const count = matches.length; const value = matches.reduce((sum, proposal) => sum + proposal.totalCents, 0); return <div className="pipeline-row" key={stage.status}><div className="pipeline-label"><span>{stage.label}</span><strong>{count}</strong></div><div className="pipeline-track"><span className={`pipeline-fill ${stage.status}`} style={{ width: `${Math.max(count ? 10 : 0, (count / max) * 100)}%` }} /></div><small>{formatBRL(value)}</small></div>; })}</div>;
 }
 
-function ProposalsView({ proposals, allCount, search, onSearch, status, onStatus, canCreate, onNew, onOpen }: { proposals: Proposal[]; allCount: number; search: string; onSearch: (value: string) => void; status: "all" | ProposalStatus; onStatus: (value: "all" | ProposalStatus) => void; canCreate: boolean; onNew: () => void; onOpen: (proposal: Proposal) => void }) {
-  return <div className="content-frame"><header className="page-heading"><div><span className="eyebrow">Operação comercial</span><h1>Propostas</h1><p>{allCount} registros dentro do seu nível de acesso.</p></div>{canCreate && <button className="primary-button" onClick={onNew}><Icon name="plus" size={18} />Nova proposta</button>}</header><article className="panel full-list-panel"><div className="list-toolbar"><label className="search-field"><Icon name="search" size={18} /><input value={search} onChange={(event) => onSearch(event.target.value)} placeholder="Buscar proposta, concessionária ou responsável" /></label><select value={status} onChange={(event) => onStatus(event.target.value as "all" | ProposalStatus)} aria-label="Filtrar por status"><option value="all">Todos os status</option>{STATUS_ORDER.map((item) => <option key={item} value={item}>{STATUS_LABELS[item]}</option>)}</select></div><ProposalTable proposals={proposals} onOpen={onOpen} /></article></div>;
+function ProposalsView({ proposals, allCount, search, onSearch, status, onStatus, canCreate, onNew, onOpen, canViewHistory, onHistory }: { proposals: Proposal[]; allCount: number; search: string; onSearch: (value: string) => void; status: "all" | ProposalStatus; onStatus: (value: "all" | ProposalStatus) => void; canCreate: boolean; onNew: () => void; onOpen: (proposal: Proposal) => void; canViewHistory: boolean; onHistory: (proposalId?: string) => void }) {
+  return <div className="content-frame"><header className="page-heading"><div><span className="eyebrow">Operação comercial</span><h1>Propostas</h1><p>{allCount} registros dentro do seu nível de acesso.</p></div>{canCreate && <button className="primary-button" onClick={onNew}><Icon name="plus" size={18} />Nova proposta</button>}</header><article className="panel full-list-panel"><div className="list-toolbar"><label className="search-field"><Icon name="search" size={18} /><input value={search} onChange={(event) => onSearch(event.target.value)} placeholder="Buscar proposta, concessionária ou responsável" /></label><select value={status} onChange={(event) => onStatus(event.target.value as "all" | ProposalStatus)} aria-label="Filtrar por status"><option value="all">Todos os status</option>{STATUS_ORDER.map((item) => <option key={item} value={item}>{STATUS_LABELS[item]}</option>)}</select></div><ProposalTable proposals={proposals} onOpen={onOpen} canViewHistory={canViewHistory} onHistory={onHistory} /></article></div>;
 }
 
-function ProposalTable({ proposals, onOpen }: { proposals: Proposal[]; onOpen: (proposal: Proposal) => void }) {
+function ProposalTable({ proposals, onOpen, canViewHistory, onHistory }: { proposals: Proposal[]; onOpen: (proposal: Proposal) => void; canViewHistory: boolean; onHistory: (proposalId?: string) => void }) {
   if (!proposals.length) return <EmptyState title="Nenhuma proposta encontrada" text="Não há propostas neste escopo ou com os filtros selecionados." />;
-  return <div className="table-scroll"><table className="data-table"><thead><tr><th>Proposta</th><th>Concessionária</th><th>Emissão</th><th>Vigência</th><th>Responsável</th><th>Status</th><th className="align-right">Valor</th><th aria-label="Abrir" /></tr></thead><tbody>{proposals.map((proposal) => <tr key={proposal.id} onClick={() => onOpen(proposal)}><td><strong className="proposal-id">{proposal.id}</strong><small>{proposal.items.length} {proposal.items.length === 1 ? "item" : "itens"}</small></td><td><strong>{proposal.dealership}</strong><small>{proposal.city}{proposal.state ? ` · ${proposal.state}` : ""}</small></td><td>{formatDate(proposal.issueDate)}</td><td><strong>{formatDate(proposal.validUntil)}</strong>{proposal.status === "expired" && <small>Expirada automaticamente</small>}</td><td>{proposal.commercialOwner}</td><td><StatusBadge status={proposal.status} /></td><td className="align-right value-cell"><strong>{formatBRL(proposal.totalCents)}</strong>{proposal.status === "counteroffer" && proposal.counterofferCents && <small>Proposto: {formatBRL(proposal.counterofferCents)}</small>}</td><td><button className="row-action" onClick={(event) => { event.stopPropagation(); onOpen(proposal); }} aria-label={`Abrir ${proposal.id}`}><Icon name="arrow" size={16} /></button></td></tr>)}</tbody></table></div>;
+  return <div className="table-scroll"><table className="data-table"><thead><tr><th>Proposta</th><th>Concessionária</th><th>Emissão</th><th>Vigência</th><th>Responsável</th><th>Status</th><th className="align-right">Valor</th><th aria-label="Abrir" /></tr></thead><tbody>{proposals.map((proposal) => <tr key={proposal.id} onClick={() => onOpen(proposal)}><td><div className="proposal-id-line"><strong className="proposal-id">{proposal.id}</strong>{canViewHistory && <button type="button" className="history-row-action" onClick={(event) => { event.stopPropagation(); onHistory(proposal.id); }} aria-label={`Ver histórico de ${proposal.id}`} title="Ver histórico"><Icon name="eye" size={14} /></button>}</div><small>{proposal.items.length} {proposal.items.length === 1 ? "item" : "itens"}</small></td><td><strong>{proposal.dealership}</strong><small>{proposal.city}{proposal.state ? ` · ${proposal.state}` : ""}</small></td><td>{formatDate(proposal.issueDate)}</td><td><strong>{formatDate(proposal.validUntil)}</strong>{proposal.status === "expired" && <small>Expirada automaticamente</small>}</td><td>{proposal.commercialOwner}</td><td><StatusBadge status={proposal.status} /></td><td className="align-right value-cell"><strong>{formatBRL(proposal.totalCents)}</strong>{proposal.status === "counteroffer" && proposal.counterofferCents && <small>Proposto: {formatBRL(proposal.counterofferCents)}</small>}</td><td><button className="row-action" onClick={(event) => { event.stopPropagation(); onOpen(proposal); }} aria-label={`Abrir ${proposal.id}`}><Icon name="arrow" size={16} /></button></td></tr>)}</tbody></table></div>;
 }
 
 function DealershipsView({ dealerships, proposals, onOpen }: { dealerships: Dealership[]; proposals: Proposal[]; onOpen: (proposal: Proposal) => void }) {
@@ -1242,12 +1250,13 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
 }
 
 function StatusBadge({ status }: { status: ProposalStatus }) { return <span className={`status-badge ${status}`}><i />{STATUS_LABELS[status]}</span>; }
-function HistoryView() {
+function HistoryView({ proposalId }: { proposalId: string | null }) {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   useEffect(() => { let active = true; void fetch("/api/audit", { cache: "no-store" }).then(async (response) => { const payload = (await response.json()) as { entries?: AuditEntry[]; error?: string }; if (!response.ok) throw new Error(payload.error || "Não foi possível carregar o histórico."); if (active) setEntries(payload.entries ?? []); }).catch((loadError) => { if (active) setError(loadError instanceof Error ? loadError.message : "Erro ao carregar o histórico."); }).finally(() => { if (active) setLoading(false); }); return () => { active = false; }; }, []);
-  return <div className="content-frame"><header className="page-heading"><div><span className="eyebrow">Governança e segurança</span><h1>Histórico de ações</h1><p>Registro das alterações realizadas no portal.</p></div></header><section className="panel history-panel"><div className="history-intro"><div><strong>Auditoria administrativa</strong><span>Eventos com usuário, data, ação e comparação das informações.</span></div><span className="history-count">{entries.length} registros</span></div>{loading ? <EmptyMini text="Carregando histórico..." /> : error ? <div className="history-error">{error}</div> : entries.length === 0 ? <EmptyState title="Nenhuma ação registrada" text="As próximas ações aparecerão aqui." /> : <div className="history-list">{entries.map((entry) => <article className="history-row" key={entry.id}><div className="history-date"><strong>{formatDateTime(entry.createdAt)}</strong><small>{entry.actorName || entry.actorEmail}</small></div><div className="history-action"><span className={`history-action-tag ${entry.entity}`}>{entry.entity === "proposal" ? "Proposta" : "Acesso"}</span><strong>{auditActionLabel(entry.action)}</strong><small>{entry.proposalId || "Ação geral do portal"}</small></div><p>{entry.details}</p>{(entry.beforeJson || entry.afterJson) && <details className="history-details"><summary>Ver alterações</summary><div><strong>Antes</strong><code>{formatSnapshot(entry.beforeJson)}</code><strong>Depois</strong><code>{formatSnapshot(entry.afterJson)}</code></div></details>}</article>)}</div>}</section></div>;
+  const visibleEntries = proposalId ? entries.filter((entry) => entry.proposalId === proposalId) : entries;
+  return <div className="content-frame"><header className="page-heading"><div><span className="eyebrow">Governança e segurança</span><h1>Histórico de ações</h1><p>Registro das alterações realizadas no portal.</p></div></header><section className="panel history-panel"><div className="history-intro"><div><strong>Auditoria administrativa</strong><span>{proposalId ? `Ações registradas para ${proposalId}.` : "Eventos com usuário, data, ação e comparação das informações."}</span></div><span className="history-count">{visibleEntries.length} registros</span></div>{loading ? <EmptyMini text="Carregando histórico..." /> : error ? <div className="history-error">{error}</div> : visibleEntries.length === 0 ? <EmptyState title="Nenhuma ação registrada" text="As próximas ações aparecerão aqui." /> : <div className="history-list">{visibleEntries.map((entry) => <article className="history-row" key={entry.id}><div className="history-date"><strong>{formatDateTime(entry.createdAt)}</strong><small>{entry.actorName || entry.actorEmail}</small></div><div className="history-action"><span className={`history-action-tag ${entry.entity}`}>{entry.entity === "proposal" ? "Proposta" : "Acesso"}</span><strong>{auditActionLabel(entry.action)}</strong><small>{entry.proposalId || "Ação geral do portal"}</small></div><p>{entry.details}</p>{(entry.beforeJson || entry.afterJson) && <details className="history-details"><summary>Ver alterações</summary><div><strong>Antes</strong><code>{formatSnapshot(entry.beforeJson)}</code><strong>Depois</strong><code>{formatSnapshot(entry.afterJson)}</code></div></details>}</article>)}</div>}</section></div>;
 }
 function auditActionLabel(action: string) { const labels: Record<string, string> = { created: "Criada", edited: "Editada", sent: "Enviada", status_changed: "Status alterado", deleted: "Excluída", access_created: "Acesso criado", access_updated: "Acesso atualizado" }; return labels[action] || action; }
 function formatSnapshot(value: string) { if (!value) return "—"; try { return JSON.stringify(JSON.parse(value), null, 2); } catch { return value; } }

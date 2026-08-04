@@ -187,6 +187,9 @@ button { cursor: pointer; }
 .data-table td strong { color: var(--ink); font-size: 11px; }
 .data-table td small { margin-top: 4px; color: #9a9da1; font-size: 9px; }
 .proposal-id { color: var(--red) !important; font-family: var(--font-geist-mono), monospace; font-size: 10px !important; }
+.proposal-id-line { display: inline-flex; align-items: center; gap: 7px; }
+.history-row-action { width: 22px; height: 22px; padding: 0; display: inline-grid; place-items: center; border: 1px solid transparent; color: #9a9da1; background: transparent; }
+.history-row-action:hover { color: var(--red); border-color: #f0c7cc; background: #fff7f8; }
 .align-right { text-align: right !important; }
 .value-cell { color: var(--ink) !important; font-weight: 800; }
 .row-action { width: 31px; height: 31px; display: grid; place-items: center; border: 1px solid var(--line); color: #76797e; background: white; }
