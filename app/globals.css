@@ -662,7 +662,66 @@ button { cursor: pointer; }
 
 @media print {
   .proposal-paper { padding: 12mm 15mm 8mm; box-shadow: none !important; }
-  .document-header { min-height: 29mm; }
+  .document-header { min-height: 20mm; }
   .document-signatures { margin-top: 8mm; }
   .document-footer { margin-top: auto; }
+}
+
+/* Final distribution pass — balanced A4 proportions for screen and PDF */
+.proposal-paper {
+  padding: 12mm 15mm 9mm;
+  min-height: 297mm;
+}
+
+.document-header {
+  min-height: 20mm;
+  padding: 2.5mm 0 3.5mm;
+  gap: 7mm;
+}
+
+.document-title h1 { font-size: 17pt; }
+.document-brand-block { width: 52mm; }
+
+.document-stats {
+  margin-top: 4mm;
+  grid-template-columns: 1.15fr 1fr 1fr;
+}
+
+.document-stats div {
+  min-height: 15.5mm;
+  padding: 3mm 3.5mm;
+}
+
+.document-customer {
+  margin-top: 3mm;
+  padding: 6mm 3.5mm 3.5mm;
+}
+
+.document-customer::before { top: 2mm; left: 3.5mm; }
+.document-customer > div { padding: 0 3.5mm; }
+
+.document-section-title {
+  margin-top: 5mm;
+  margin-bottom: 2mm;
+}
+
+.document-items th { padding: 2.2mm 1.7mm; }
+.document-items td {
+  padding: 2.4mm 1.7mm;
+  font-size: 8.2pt;
+}
+
+.document-items td:nth-child(3),
+.document-items td:nth-child(4),
+.document-items td:nth-child(5) { font-size: 8pt; }
+
+.document-total { margin-top: 3.5mm; min-height: 16mm; }
+.document-terms { margin-top: 4.5mm; padding: 3.5mm 4mm; }
+.document-signatures { margin-top: 8mm; }
+
+@media print {
+  .proposal-paper { padding: 12mm 15mm 8mm; }
+  .document-header { min-height: 20mm; }
+  .document-section-title { margin-top: 4mm; }
+  .document-signatures { margin-top: 7mm; }
 }
