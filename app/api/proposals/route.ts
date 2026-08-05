@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, lt } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { dealerships, proposalItems, proposals, users } from "../../../db/schema";
+import { dealerships, proposalDocuments, proposalItems, proposals, users } from "../../../db/schema";
 import { recordAudit } from "../../../lib/audit";
 import {
   canCreateProposal,
@@ -47,6 +47,8 @@ type ProposalInput = {
   contactEmail?: string;
   factoryManagerEmail?: string;
   validUntil?: string;
+  customerName?: string;
+  customerSaleValueCents?: number | null;
   status?: string;
   items?: ItemInput[];
 };
@@ -111,6 +113,12 @@ function normalizeItems(items: ItemInput[]) {
     quantity: Math.max(1, Math.trunc(Number(item.quantity) || 1)),
     unitPriceCents: Math.max(0, Math.trunc(Number(item.unitPriceCents) || 0)),
   }));
+}
+
+function normalizeOptionalCents(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  const cents = Math.trunc(Number(value));
+  return Number.isFinite(cents) && cents > 0 ? cents : null;
 }
 
 function itemValidationError(items: ReturnType<typeof normalizeItems>) {
@@ -206,6 +214,8 @@ export async function GET() {
         issueDate: proposals.issueDate,
         validUntil: proposals.validUntil,
         totalCents: proposals.totalCents,
+        customerName: proposals.customerName,
+        customerSaleValueCents: proposals.customerSaleValueCents,
         counterofferCents: proposals.counterofferCents,
         decisionNote: proposals.decisionNote,
         decidedByEmail: proposals.decidedByEmail,
@@ -234,17 +244,40 @@ export async function GET() {
           .from(proposalItems)
           .where(inArray(proposalItems.proposalId, rows.map((row) => row.id)))
       : [];
+    const documentRows = rows.length
+      ? await db
+          .select({
+            id: proposalDocuments.id,
+            proposalId: proposalDocuments.proposalId,
+            category: proposalDocuments.category,
+            fileName: proposalDocuments.fileName,
+            contentType: proposalDocuments.contentType,
+            sizeBytes: proposalDocuments.sizeBytes,
+            uploadedByEmail: proposalDocuments.uploadedByEmail,
+            uploadedByName: proposalDocuments.uploadedByName,
+            createdAt: proposalDocuments.createdAt,
+          })
+          .from(proposalDocuments)
+          .where(inArray(proposalDocuments.proposalId, rows.map((row) => row.id)))
+      : [];
     const itemsByProposal = new Map<string, typeof itemRows>();
     for (const item of itemRows) {
       const current = itemsByProposal.get(item.proposalId) ?? [];
       current.push(item);
       itemsByProposal.set(item.proposalId, current);
     }
+    const documentsByProposal = new Map<string, typeof documentRows>();
+    for (const document of documentRows) {
+      const current = documentsByProposal.get(document.proposalId) ?? [];
+      current.push(document);
+      documentsByProposal.set(document.proposalId, current);
+    }
 
     const proposalData = rows.map(({ dealershipContactEmail, ...row }) => ({
       ...row,
       contactEmail: row.contactEmail || dealershipContactEmail,
       items: itemsByProposal.get(row.id) ?? [],
+      documents: documentsByProposal.get(row.id) ?? [],
     }));
     const dealershipData = visibleDealers.map((dealer) => {
       const dealerProposals = rows.filter((row) => row.dealershipId === dealer.id);
@@ -471,6 +504,8 @@ export async function POST(request: Request) {
       issueDate,
       validUntil,
       totalCents,
+      customerName: payload.customerName?.trim() ?? "",
+      customerSaleValueCents: normalizeOptionalCents(payload.customerSaleValueCents),
       emailStatus: requestedStatus === "sent" ? "processing" : "not_requested",
       createdByEmail: profile.email,
       createdByName: profile.name,
@@ -494,7 +529,7 @@ export async function POST(request: Request) {
       action: "created",
       entity: "proposal",
       details: requestedStatus === "sent" ? "Proposta criada e enviada." : "Proposta criada como rascunho.",
-      after: { id, dealershipId: dealer.id, dealership: dealer.name, commercialOwner, status: requestedStatus, validUntil, totalCents, items: validItems },
+      after: { id, dealershipId: dealer.id, dealership: dealer.name, commercialOwner, status: requestedStatus, validUntil, totalCents, customerName: payload.customerName?.trim() ?? "", customerSaleValueCents: normalizeOptionalCents(payload.customerSaleValueCents), items: validItems },
     });
 
     if (requestedStatus === "draft") {
@@ -541,6 +576,8 @@ export async function PATCH(request: Request) {
       contactEmail?: string;
       factoryManagerEmail?: string;
       validUntil?: string;
+      customerName?: string;
+      customerSaleValueCents?: number | null;
       items?: ItemInput[];
       counterofferCents?: number;
       decisionNote?: string;
@@ -587,15 +624,17 @@ export async function PATCH(request: Request) {
       const validUntil = payload.validUntil?.trim() || record.proposal.validUntil;
       if (validUntil < currentBusinessDate()) return Response.json({ error: "A data de vigência não pode estar vencida." }, { status: 400 });
       const currentItems = await db.select().from(proposalItems).where(eq(proposalItems.proposalId, record.proposal.id));
-      const before = { id: record.proposal.id, dealershipId: record.proposal.dealershipId, dealership: record.dealer.name, contactName: record.proposal.contactName, contactEmail: record.proposal.contactEmail, commercialOwner: record.proposal.commercialOwner, status: record.proposal.status, validUntil: record.proposal.validUntil, totalCents: record.proposal.totalCents, items: currentItems };
+      const before = { id: record.proposal.id, dealershipId: record.proposal.dealershipId, dealership: record.dealer.name, contactName: record.proposal.contactName, contactEmail: record.proposal.contactEmail, commercialOwner: record.proposal.commercialOwner, status: record.proposal.status, validUntil: record.proposal.validUntil, totalCents: record.proposal.totalCents, customerName: record.proposal.customerName, customerSaleValueCents: record.proposal.customerSaleValueCents, items: currentItems };
       const totalCents = validItems.reduce((sum, item) => sum + item.quantity * item.unitPriceCents, 0);
+      const customerName = payload.customerName?.trim() ?? "";
+      const customerSaleValueCents = normalizeOptionalCents(payload.customerSaleValueCents);
       const now = new Date().toISOString();
       await db.batch([
-        db.update(proposals).set({ dealershipId: editedDealer.id, contactName: payload.contactName?.trim() || editedDealer.contactName, contactEmail: (payload.contactEmail?.trim() || editedDealer.contactEmail).toLowerCase(), commercialOwner: assignedManager.name, status: "draft", validUntil, totalCents, counterofferCents: null, decisionNote: "", decidedByEmail: "", counterofferPaymentTerms: "", counterofferFreightTerms: "", counterofferDeliveryTerms: "", counterofferSubmittedAt: null, counterofferReviewedAt: null, counterofferReviewedByEmail: "", counterofferReviewNote: "", emailStatus: "not_requested", emailSentAt: null, emailError: "Proposta editada; reenvio necessário.", updatedAt: now }).where(eq(proposals.id, record.proposal.id)),
+        db.update(proposals).set({ dealershipId: editedDealer.id, contactName: payload.contactName?.trim() || editedDealer.contactName, contactEmail: (payload.contactEmail?.trim() || editedDealer.contactEmail).toLowerCase(), commercialOwner: assignedManager.name, status: "draft", validUntil, totalCents, customerName, customerSaleValueCents, counterofferCents: null, decisionNote: "", decidedByEmail: "", counterofferPaymentTerms: "", counterofferFreightTerms: "", counterofferDeliveryTerms: "", counterofferSubmittedAt: null, counterofferReviewedAt: null, counterofferReviewedByEmail: "", counterofferReviewNote: "", emailStatus: "not_requested", emailSentAt: null, emailError: "Proposta editada; reenvio necessário.", updatedAt: now }).where(eq(proposals.id, record.proposal.id)),
         db.delete(proposalItems).where(eq(proposalItems.proposalId, record.proposal.id)),
         db.insert(proposalItems).values(validItems.map((item) => ({ proposalId: record.proposal.id, ...item }))),
       ]);
-      await recordAudit(db, { proposalId: record.proposal.id, actorEmail: profile.email, actorName: profile.name, action: "edited", entity: "proposal", details: "Proposta editada; voltou para rascunho e exige novo envio.", before, after: { id: record.proposal.id, dealershipId: editedDealer.id, dealership: editedDealer.name, contactName: payload.contactName?.trim() || editedDealer.contactName, contactEmail: (payload.contactEmail?.trim() || editedDealer.contactEmail).toLowerCase(), commercialOwner: assignedManager.name, status: "draft", validUntil, totalCents, items: validItems } });
+      await recordAudit(db, { proposalId: record.proposal.id, actorEmail: profile.email, actorName: profile.name, action: "edited", entity: "proposal", details: "Proposta editada; voltou para rascunho e exige novo envio.", before, after: { id: record.proposal.id, dealershipId: editedDealer.id, dealership: editedDealer.name, contactName: payload.contactName?.trim() || editedDealer.contactName, contactEmail: (payload.contactEmail?.trim() || editedDealer.contactEmail).toLowerCase(), commercialOwner: assignedManager.name, status: "draft", validUntil, totalCents, customerName, customerSaleValueCents, items: validItems } });
       return Response.json({ ok: true, status: "draft", totalCents });
     }
 

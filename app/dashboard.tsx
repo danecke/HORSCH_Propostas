@@ -29,6 +29,18 @@ type ProposalItem = {
   counterofferUnitPriceCents: number | null;
 };
 
+type ProposalDocument = {
+  id: number;
+  proposalId: string;
+  category: "invoice" | "proof" | "other";
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  uploadedByEmail: string;
+  uploadedByName: string;
+  createdAt: string;
+};
+
 type Proposal = {
   id: string;
   dealershipId: number;
@@ -43,6 +55,8 @@ type Proposal = {
   issueDate: string;
   validUntil: string;
   totalCents: number;
+  customerName: string;
+  customerSaleValueCents: number | null;
   counterofferCents: number | null;
   decisionNote: string;
   decidedByEmail: string;
@@ -60,6 +74,7 @@ type Proposal = {
   createdAt: string;
   updatedAt: string;
   items: ProposalItem[];
+  documents: ProposalDocument[];
 };
 
 type Dealership = {
@@ -558,6 +573,12 @@ function NewProposalModal({
   const [state, setState] = useState(proposal?.state ?? "");
   const [contactName, setContactName] = useState(proposal?.contactName ?? "");
   const [contactEmail, setContactEmail] = useState(proposal?.contactEmail ?? "");
+  const [customerName, setCustomerName] = useState(proposal?.customerName ?? "");
+  const [customerSaleValue, setCustomerSaleValue] = useState(
+    proposal?.customerSaleValueCents ? formatMoneyInput(String(proposal.customerSaleValueCents / 100).replace(".", ",")) : "",
+  );
+  const [documentCategory, setDocumentCategory] = useState<ProposalDocument["category"]>("invoice");
+  const [selectedDocuments, setSelectedDocuments] = useState<File[]>([]);
   const [factoryManagerEmail, setFactoryManagerEmail] = useState(
     proposal?.factoryManagerEmail || (PROPOSAL_RESPONSIBLE_ROLES.includes(role) ? userEmail : ""),
   );
@@ -624,6 +645,8 @@ function NewProposalModal({
         state,
         contactName,
         contactEmail,
+        customerName,
+        customerSaleValueCents: customerSaleValue ? parseMoneyToCents(customerSaleValue) : null,
         factoryManagerEmail,
         validUntil,
         status,
@@ -635,12 +658,32 @@ function NewProposalModal({
     });
     const payload = (await response.json()) as {
       error?: string;
+      id?: string;
       delivery?: DeliveryResponse;
     };
     if (!response.ok) {
       setError(payload.error || "Não foi possível salvar a proposta.");
       setSaving(false);
       return;
+    }
+    const savedProposalId = proposal?.id || payload.id;
+    let documentsMessage = "";
+    if (savedProposalId && selectedDocuments.length) {
+      const failedDocuments: string[] = [];
+      for (const file of selectedDocuments) {
+        const formData = new FormData();
+        formData.set("proposalId", savedProposalId);
+        formData.set("category", documentCategory);
+        formData.set("file", file);
+        const uploadResponse = await fetch("/api/proposals/documents", { method: "POST", body: formData });
+        if (!uploadResponse.ok) {
+          const uploadPayload = (await uploadResponse.json()) as { error?: string };
+          failedDocuments.push(`${file.name}: ${uploadPayload.error || "falha no anexo"}`);
+        }
+      }
+      if (failedDocuments.length) {
+        documentsMessage = ` Porém, ${failedDocuments.length} documento(s) não foram anexados.`;
+      }
     }
     const message = proposal
       ? "Proposta editada e salva como rascunho. Faça um novo envio quando estiver pronta."
@@ -651,7 +694,7 @@ function NewProposalModal({
           : payload.delivery?.status === "pending_configuration"
             ? "Proposta salva. O envio por e-mail aguarda a configuração aprovada pelo TI."
             : "Proposta salva como rascunho; o serviço de e-mail não confirmou o envio.";
-    await onSaved(message);
+    await onSaved(`${message}${documentsMessage}`);
   }
 
   return (
@@ -751,6 +794,20 @@ function NewProposalModal({
               </table>
             </div>
             <div className="form-total"><span>Valor total da proposta</span><strong>{formatBRL(totalCents)}</strong></div>
+          </section>
+          <section className="form-section sale-documents-section">
+            <div className="form-section-title">
+              <span>03</span>
+              <div><h3>Venda do concessionário ao cliente</h3><p>Preenchimento opcional para registrar o cliente final, o valor fixado e os documentos da venda.</p></div>
+            </div>
+            <div className="form-grid two-columns">
+              <label className="field"><span>Cliente específico (opcional)</span><input value={customerName} onChange={(event) => setCustomerName(event.target.value)} placeholder="Nome do cliente final" /></label>
+              <label className="field"><span>Valor fixado para o cliente (opcional)</span><input inputMode="decimal" value={customerSaleValue} onChange={(event) => setCustomerSaleValue(event.target.value)} onBlur={(event) => setCustomerSaleValue(formatMoneyInput(event.target.value))} placeholder="R$ 0,00" /></label>
+              <label className="field"><span>Tipo do documento</span><select value={documentCategory} onChange={(event) => setDocumentCategory(event.target.value as ProposalDocument["category"])}><option value="invoice">Nota fiscal (NF)</option><option value="proof">Comprovante de venda</option><option value="other">Outro documento</option></select></label>
+              <label className="field"><span>Anexar documentos (opcional)</span><input type="file" multiple accept="application/pdf,image/jpeg,image/png,image/webp,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => setSelectedDocuments(Array.from(event.target.files ?? []))} /></label>
+            </div>
+            {selectedDocuments.length > 0 && <div className="selected-documents" aria-live="polite"><strong>Arquivos selecionados</strong>{selectedDocuments.map((file) => <span key={`${file.name}-${file.size}`}>{file.name} · {formatFileSize(file.size)}</span>)}</div>}
+            {proposal?.documents?.length ? <div className="existing-documents"><strong>Documentos já anexados</strong>{proposal.documents.map((document) => <a key={document.id} href={`/api/proposals/documents?proposalId=${encodeURIComponent(proposal.id)}&documentId=${document.id}`} target="_blank" rel="noreferrer">{documentCategoryLabel(document.category)} · {document.fileName} · {formatFileSize(document.sizeBytes)}</a>)}</div> : null}
           </section>
           {error && <p className="form-error">{error}</p>}
         </div>
@@ -1166,6 +1223,13 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
           </section>
         )}
 
+        {proposal.documents?.length > 0 && (
+          <section className="document-attachments no-print">
+            <div><span className="eyebrow">Documentação da venda</span><h2>Documentos anexados</h2><p>Arquivos vinculados à venda do concessionário ao cliente.</p></div>
+            <div className="document-attachment-list">{proposal.documents.map((document) => <a key={document.id} href={`/api/proposals/documents?proposalId=${encodeURIComponent(proposal.id)}&documentId=${document.id}`} target="_blank" rel="noreferrer"><Icon name="file" size={16} /><span><strong>{document.fileName}</strong><small>{documentCategoryLabel(document.category)} · {formatFileSize(document.sizeBytes)}</small></span><Icon name="arrow" size={15} /></a>)}</div>
+          </section>
+        )}
+
         <article className="proposal-paper">
           <header className="document-header">
             <div className="document-title">
@@ -1185,6 +1249,7 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
             <div><span>Concessionária</span><strong>{proposal.dealership}</strong></div>
             <div><span>Responsável HORSCH</span><strong>{proposal.commercialOwner}</strong><small>{proposal.factoryManagerEmail || proposal.createdByEmail}</small></div>
           </section>
+          {(proposal.customerName || proposal.customerSaleValueCents) && <section className="document-sale-data"><div><span>Cliente específico</span><strong>{proposal.customerName || "—"}</strong></div><div><span>Valor fixado para o cliente</span><strong>{proposal.customerSaleValueCents ? formatBRL(proposal.customerSaleValueCents) : "—"}</strong></div></section>}
           <div className="document-section-title"><h2>Itens da proposta</h2><span>Valores líquidos em reais</span></div>
           <table className="document-items">
             <thead><tr><th>PN</th><th>Descrição</th><th>VT</th><th>Origem</th><th>NCM</th><th>Qtd.</th><th>Net price (R$)</th></tr></thead>
@@ -1256,9 +1321,9 @@ function HistoryView({ proposalId }: { proposalId: string | null }) {
   const [error, setError] = useState("");
   useEffect(() => { let active = true; void fetch("/api/audit", { cache: "no-store" }).then(async (response) => { const payload = (await response.json()) as { entries?: AuditEntry[]; error?: string }; if (!response.ok) throw new Error(payload.error || "Não foi possível carregar o histórico."); if (active) setEntries(payload.entries ?? []); }).catch((loadError) => { if (active) setError(loadError instanceof Error ? loadError.message : "Erro ao carregar o histórico."); }).finally(() => { if (active) setLoading(false); }); return () => { active = false; }; }, []);
   const visibleEntries = proposalId ? entries.filter((entry) => entry.proposalId === proposalId) : entries;
-  return <div className="content-frame"><header className="page-heading"><div><span className="eyebrow">Governança e segurança</span><h1>Histórico de ações</h1><p>Registro das alterações realizadas no portal.</p></div></header><section className="panel history-panel"><div className="history-intro"><div><strong>Auditoria administrativa</strong><span>{proposalId ? `Ações registradas para ${proposalId}.` : "Eventos com usuário, data, ação e comparação das informações."}</span></div><span className="history-count">{visibleEntries.length} registros</span></div>{loading ? <EmptyMini text="Carregando histórico..." /> : error ? <div className="history-error">{error}</div> : visibleEntries.length === 0 ? <EmptyState title="Nenhuma ação registrada" text="As próximas ações aparecerão aqui." /> : <div className="history-list">{visibleEntries.map((entry) => <article className="history-row" key={entry.id}><div className="history-date"><strong>{formatDateTime(entry.createdAt)}</strong><small>{entry.actorName || entry.actorEmail}</small></div><div className="history-action"><span className={`history-action-tag ${entry.entity}`}>{entry.entity === "proposal" ? "Proposta" : "Acesso"}</span><strong>{auditActionLabel(entry.action)}</strong><small>{entry.proposalId || "Ação geral do portal"}</small></div><p>{entry.details}</p>{(entry.beforeJson || entry.afterJson) && <details className="history-details"><summary>Ver alterações</summary><div><strong>Antes</strong><code>{formatSnapshot(entry.beforeJson)}</code><strong>Depois</strong><code>{formatSnapshot(entry.afterJson)}</code></div></details>}</article>)}</div>}</section></div>;
+  return <div className="content-frame"><header className="page-heading"><div><span className="eyebrow">Governança e segurança</span><h1>Histórico de ações</h1><p>Registro das alterações realizadas no portal.</p></div></header><section className="panel history-panel"><div className="history-intro"><div><strong>Auditoria administrativa</strong><span>{proposalId ? `Ações registradas para ${proposalId}.` : "Eventos com usuário, data, ação e comparação das informações."}</span></div><span className="history-count">{visibleEntries.length} registros</span></div>{loading ? <EmptyMini text="Carregando histórico..." /> : error ? <div className="history-error">{error}</div> : visibleEntries.length === 0 ? <EmptyState title="Nenhuma ação registrada" text="As próximas ações aparecerão aqui." /> : <div className="history-list">{visibleEntries.map((entry) => <article className="history-row" key={entry.id}><div className="history-date"><strong>{formatDateTime(entry.createdAt)}</strong><small>{entry.actorName || entry.actorEmail}</small></div><div className="history-action"><span className={`history-action-tag ${entry.entity}`}>{entry.entity === "proposal" ? "Proposta" : entry.entity === "proposal_document" ? "Documento" : "Acesso"}</span><strong>{auditActionLabel(entry.action)}</strong><small>{entry.proposalId || "Ação geral do portal"}</small></div><p>{entry.details}</p>{(entry.beforeJson || entry.afterJson) && <details className="history-details"><summary>Ver alterações</summary><div><strong>Antes</strong><code>{formatSnapshot(entry.beforeJson)}</code><strong>Depois</strong><code>{formatSnapshot(entry.afterJson)}</code></div></details>}</article>)}</div>}</section></div>;
 }
-function auditActionLabel(action: string) { const labels: Record<string, string> = { created: "Criada", edited: "Editada", sent: "Enviada", status_changed: "Status alterado", deleted: "Excluída", access_created: "Acesso criado", access_updated: "Acesso atualizado" }; return labels[action] || action; }
+function auditActionLabel(action: string) { const labels: Record<string, string> = { created: "Criada", edited: "Editada", sent: "Enviada", status_changed: "Status alterado", deleted: "Excluída", document_attached: "Documento anexado", access_created: "Acesso criado", access_updated: "Acesso atualizado" }; return labels[action] || action; }
 function formatSnapshot(value: string) { if (!value) return "—"; try { return JSON.stringify(JSON.parse(value), null, 2); } catch { return value; } }
 function LoadingState() { return <div className="center-state"><span className="state-mark">H</span><h1>Preparando o portal comercial</h1><p>Carregando seu perfil e as informações autorizadas.</p></div>; }
 function ErrorState({ message, retry }: { message: string; retry: () => Promise<void> }) { return <div className="center-state"><span className="state-mark">!</span><h1>Acesso não disponível</h1><p>{message}</p><div className="state-actions"><button className="primary-button" onClick={() => void retry()}>Tentar novamente</button><Link className="outline-button" href="/">Voltar ao login</Link></div></div>; }
@@ -1272,5 +1337,7 @@ function firstName(value: string) { const name = value.trim().split(/\s+/)[0]; r
 function defaultValidity() { const date = new Date(); date.setDate(date.getDate() + 30); return date.toISOString().slice(0, 10); }
 function parseMoneyToCents(value: string) { const cleaned = String(value).replace(/[^\d,.-]/g, ""); const normalized = cleaned.includes(",") ? cleaned.replace(/\./g, "").replace(",", ".") : cleaned; return Math.max(0, Math.round((Number(normalized) || 0) * 100)); }
 function formatMoneyInput(value: string) { const cents = parseMoneyToCents(value); if (!value.trim() && !cents) return ""; return (cents / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function formatFileSize(bytes: number) { if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`; return `${(bytes / (1024 * 1024)).toFixed(1).replace(".", ",")} MB`; }
+function documentCategoryLabel(category: ProposalDocument["category"]) { return category === "invoice" ? "Nota fiscal (NF)" : category === "proof" ? "Comprovante de venda" : "Outro documento"; }
 function scopeDescription(me: CurrentAccess) { return ["general_admin", "global_management"].includes(me.role) ? "Visão consolidada de toda a operação e dos acessos autorizados." : me.role === "factory_manager" ? "Carteira atribuída, propostas e acessos das concessionárias sob sua gestão." : me.role === "dealer_manager" ? "Propostas e usuários vinculados exclusivamente à sua concessionária." : "Acesso operacional às propostas da sua concessionária."; }
 function accessDescription(role: UserRole) { return role === "general_admin" ? "Controle total de usuários, permissões e dados do portal." : role === "global_management" ? "Gerencie os níveis operacionais e acompanhe toda a operação." : role === "factory_manager" ? "Cadastre e gerencie acessos das concessionárias da sua carteira." : role === "dealer_manager" ? "Cadastre acessos de Concessão vinculados à sua concessionária." : "Seu perfil consulta e movimenta propostas da própria concessionária."; }

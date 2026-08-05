@@ -36,6 +36,8 @@ export const proposals = sqliteTable(
     issueDate: text("issue_date").notNull(),
     validUntil: text("valid_until").notNull(),
     totalCents: integer("total_cents").notNull().default(0),
+    customerName: text("customer_name").notNull().default(""),
+    customerSaleValueCents: integer("customer_sale_value_cents"),
     counterofferCents: integer("counteroffer_cents"),
     decisionNote: text("decision_note").notNull().default(""),
     decidedByEmail: text("decided_by_email").notNull().default(""),
@@ -118,6 +120,28 @@ export const proposalItems = sqliteTable(
     counterofferUnitPriceCents: integer("counteroffer_unit_price_cents"),
   },
   (table) => [index("proposal_items_proposal_idx").on(table.proposalId)],
+);
+
+export const proposalDocuments = sqliteTable(
+  "proposal_documents",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    proposalId: text("proposal_id")
+      .notNull()
+      .references(() => proposals.id, { onDelete: "cascade" }),
+    category: text("category").notNull().default("other"),
+    fileName: text("file_name").notNull(),
+    contentType: text("content_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull().default(0),
+    storageKey: text("storage_key").notNull(),
+    uploadedByEmail: text("uploaded_by_email").notNull(),
+    uploadedByName: text("uploaded_by_name").notNull().default(""),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("proposal_documents_proposal_idx").on(table.proposalId),
+    index("proposal_documents_created_at_idx").on(table.createdAt),
+  ],
 );
 
 export const auditLogs = sqliteTable(
