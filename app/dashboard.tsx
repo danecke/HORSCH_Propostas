@@ -1313,16 +1313,56 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
 }
 
 function StatusBadge({ status }: { status: ProposalStatus }) { return <span className={`status-badge ${status}`}><i />{STATUS_LABELS[status]}</span>; }
+type AuditChange = { label: string; before: string; after: string };
+
+const AUDIT_FIELD_LABELS: Record<string, string> = {
+  dealership: "Concessionária",
+  contactName: "Responsável da concessionária",
+  contactEmail: "E-mail do responsável",
+  commercialOwner: "Responsável HORSCH",
+  status: "Status",
+  validUntil: "Validade da proposta",
+  totalCents: "Valor total da proposta",
+  customerName: "Cliente específico",
+  customerSaleValueCents: "Valor fixado para o cliente",
+  decisionNote: "Observação",
+  emailStatus: "Status do envio",
+  items: "Itens da proposta",
+};
+
+const AUDIT_IGNORED_FIELDS = new Set(["id", "dealershipId", "documentId", "contentType", "sizeBytes"]);
+
 function HistoryView({ proposalId }: { proposalId: string | null }) {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   useEffect(() => { let active = true; void fetch("/api/audit", { cache: "no-store" }).then(async (response) => { const payload = (await response.json()) as { entries?: AuditEntry[]; error?: string }; if (!response.ok) throw new Error(payload.error || "Não foi possível carregar o histórico."); if (active) setEntries(payload.entries ?? []); }).catch((loadError) => { if (active) setError(loadError instanceof Error ? loadError.message : "Erro ao carregar o histórico."); }).finally(() => { if (active) setLoading(false); }); return () => { active = false; }; }, []);
   const visibleEntries = proposalId ? entries.filter((entry) => entry.proposalId === proposalId) : [];
-  return <div className="content-frame"><header className="page-heading"><div><span className="eyebrow">Governança e segurança</span><h1>Histórico da proposta</h1><p>{proposalId ? `Registro das ações realizadas em ${proposalId}.` : "Abra o histórico pelo ícone de olho ao lado de uma proposta."}</p></div></header><section className="panel history-panel"><div className="history-intro"><div><strong>Auditoria da proposta</strong><span>{proposalId ? `Ações registradas para ${proposalId}.` : "Selecione uma proposta para consultar suas ações."}</span></div><span className="history-count">{visibleEntries.length} registros</span></div>{loading ? <EmptyMini text="Carregando histórico..." /> : error ? <div className="history-error">{error}</div> : visibleEntries.length === 0 ? <EmptyState title={proposalId ? "Nenhuma ação registrada" : "Nenhuma proposta selecionada"} text={proposalId ? "As próximas ações aparecerão aqui." : "Use o olho ao lado da proposta para abrir seu histórico."} /> : <div className="history-list">{visibleEntries.map((entry) => <article className="history-row" key={entry.id}><div className="history-date"><strong>{formatDateTime(entry.createdAt)}</strong><small>{entry.actorName || entry.actorEmail}</small></div><div className="history-action"><span className={`history-action-tag ${entry.entity}`}>{entry.entity === "proposal" ? "Proposta" : entry.entity === "proposal_document" ? "Documento" : "Acesso"}</span><strong>{auditActionLabel(entry.action)}</strong><small>{entry.proposalId || "Ação geral do portal"}</small></div><p>{entry.details}</p>{(entry.beforeJson || entry.afterJson) && <details className="history-details"><summary>Ver alterações</summary><div><strong>Antes</strong><code>{formatSnapshot(entry.beforeJson)}</code><strong>Depois</strong><code>{formatSnapshot(entry.afterJson)}</code></div></details>}</article>)}</div>}</section></div>;
+  return <div className="content-frame"><header className="page-heading"><div><span className="eyebrow">Governança e segurança</span><h1>Histórico da proposta</h1><p>{proposalId ? `Registro das ações realizadas em ${proposalId}.` : "Abra o histórico pelo ícone de olho ao lado de uma proposta."}</p></div></header><section className="panel history-panel"><div className="history-intro"><div><strong>Alterações realizadas</strong><span>{proposalId ? `Histórico filtrado da proposta ${proposalId}.` : "Cada registro mostra apenas o campo que mudou e seus novos valores."}</span></div><span className="history-count">{visibleEntries.length} registros</span></div>{loading ? <EmptyMini text="Carregando histórico..." /> : error ? <div className="history-error">{error}</div> : visibleEntries.length === 0 ? <EmptyState title={proposalId ? "Nenhuma ação registrada" : "Nenhuma proposta selecionada"} text={proposalId ? "As próximas ações aparecerão aqui." : "Use o olho ao lado da proposta para abrir seu histórico."} /> : <div className="history-list">{visibleEntries.map((entry) => { const changes = auditChanges(entry); return <article className="history-row" key={entry.id}><div className="history-date"><strong>{formatDateTime(entry.createdAt)}</strong><small>{entry.actorName || entry.actorEmail}</small></div><div className="history-action"><span className={`history-action-tag ${entry.entity}`}>{entry.entity === "proposal" ? "Proposta" : entry.entity === "proposal_document" ? "Documento" : "Acesso"}</span><strong>{auditActionLabel(entry.action)}</strong><small>{entry.proposalId || "Ação geral do portal"}</small></div><div className="history-change-area">{changes.length ? <><strong className="history-change-heading">O que mudou</strong><div className="history-change-list">{changes.map((change) => <div className="history-change" key={change.label}><span>{change.label}</span><div><small>{change.before}</small><b>→</b><strong>{change.after}</strong></div></div>)}</div></> : <p className="history-summary">{entry.details}</p>}</div></article>; })}</div>}</section></div>;
 }
 function auditActionLabel(action: string) { const labels: Record<string, string> = { created: "Criada", edited: "Editada", sent: "Enviada", status_changed: "Status alterado", deleted: "Excluída", document_attached: "Documento anexado", access_created: "Acesso criado", access_updated: "Acesso atualizado" }; return labels[action] || action; }
-function formatSnapshot(value: string) { if (!value) return "—"; try { return JSON.stringify(JSON.parse(value), null, 2); } catch { return value; } }
+function auditChanges(entry: AuditEntry): AuditChange[] {
+  if (["created", "deleted", "document_attached", "access_created"].includes(entry.action)) return [];
+  const before = parseAuditSnapshot(entry.beforeJson);
+  const after = parseAuditSnapshot(entry.afterJson);
+  const keys = Array.from(new Set([...Object.keys(before), ...Object.keys(after)]));
+  return keys.filter((key) => !AUDIT_IGNORED_FIELDS.has(key) && !auditValuesEqual(before[key], after[key])).map((key) => ({
+    label: AUDIT_FIELD_LABELS[key] || key,
+    before: formatAuditValue(key, before[key]),
+    after: formatAuditValue(key, after[key]),
+  }));
+}
+function parseAuditSnapshot(value: string): Record<string, unknown> { if (!value) return {}; try { const parsed = JSON.parse(value); return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}; } catch { return {}; } }
+function auditValuesEqual(before: unknown, after: unknown) { return JSON.stringify(before) === JSON.stringify(after); }
+function formatAuditValue(field: string, value: unknown): string {
+  if (value === null || value === undefined || value === "") return "Não informado";
+  if (field === "status") return STATUS_LABELS[value as ProposalStatus] || String(value);
+  if (["totalCents", "customerSaleValueCents"].includes(field) && typeof value === "number") return formatBRL(value);
+  if (field === "validUntil" && typeof value === "string") return formatDate(value);
+  if (field === "items" && Array.isArray(value)) return `${value.length} ${value.length === 1 ? "item" : "itens"}`;
+  if (field === "emailStatus") return String(value).replaceAll("_", " ");
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
 function LoadingState() { return <div className="center-state"><span className="state-mark">H</span><h1>Preparando o portal comercial</h1><p>Carregando seu perfil e as informações autorizadas.</p></div>; }
 function ErrorState({ message, retry }: { message: string; retry: () => Promise<void> }) { return <div className="center-state"><span className="state-mark">!</span><h1>Acesso não disponível</h1><p>{message}</p><div className="state-actions"><button className="primary-button" onClick={() => void retry()}>Tentar novamente</button><Link className="outline-button" href="/">Voltar ao login</Link></div></div>; }
 function EmptyState({ title, text }: { title: string; text: string }) { return <div className="empty-state"><span><Icon name="file" size={24} /></span><h3>{title}</h3><p>{text}</p></div>; }
