@@ -357,6 +357,16 @@ button { cursor: pointer; }
 @media (max-width: 950px) { .history-row { grid-template-columns: 1fr 1fr; } .history-change-area { grid-column: 1 / -1; } }
 .password-modal { width: min(560px, 100%); }
 .password-form-grid { display: grid; gap: 15px; }
+.access-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.password-recovery-note { padding: 15px; display: flex; gap: 12px; align-items: flex-start; border: 1px solid #f0c7cc; color: #6f2029; background: #fff7f8; }
+.password-recovery-note strong, .password-recovery-note span { display: block; }
+.password-recovery-note span { margin-top: 5px; color: #7b5b60; font-size: 11px; line-height: 1.5; }
+.password-result { margin-top: 16px; padding: 15px; border: 1px solid var(--line); background: #fafafa; }
+.password-result > span, .password-result small { display: block; }
+.password-result > span { color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.password-result > div { margin-top: 9px; display: flex; gap: 8px; align-items: center; }
+.password-result input { min-width: 0; flex: 1; height: 39px; padding: 0 10px; border: 1px solid var(--line); color: var(--ink); background: white; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.password-result small { margin-top: 8px; color: var(--muted); font-size: 10px; line-height: 1.45; }
 
 /* Proposal document preview */
 .preview-backdrop { overflow: auto; place-items: start center; }

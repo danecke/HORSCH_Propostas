@@ -428,6 +428,7 @@ function DealershipsView({ dealerships, proposals, onOpen }: { dealerships: Deal
 
 function AccessView({ data, onNew, onChanged }: { data: DashboardData; onNew: () => void; onChanged: () => Promise<void> }) {
   const [busy, setBusy] = useState("");
+  const [passwordTarget, setPasswordTarget] = useState<AccessUser | null>(null);
   const canAssignRoles = ["general_admin", "global_management"].includes(data.me.role);
 
   async function updateAccess(record: AccessUser, patch: Partial<Pick<AccessUser, "role" | "dealershipId" | "active">>) {
@@ -497,13 +498,16 @@ function AccessView({ data, onNew, onChanged }: { data: DashboardData; onNew: ()
                     </td>
                     <td><span className={`access-status ${record.active ? "active" : "inactive"}`}>{record.active ? "Ativo" : "Inativo"}</span></td>
                     <td className="align-right">
-                      <button
-                        className="outline-button compact"
-                        disabled={busy === record.email || record.email === data.me.email}
-                        onClick={() => void updateAccess(record, { active: !record.active })}
-                      >
-                        {record.email === data.me.email ? "Seu acesso" : record.active ? "Desativar" : "Ativar"}
-                      </button>
+                      <div className="access-actions">
+                        {data.me.role === "general_admin" && <button className="outline-button compact" onClick={() => setPasswordTarget(record)}><Icon name="key" size={14} />Senha</button>}
+                        <button
+                          className="outline-button compact"
+                          disabled={busy === record.email || record.email === data.me.email}
+                          onClick={() => void updateAccess(record, { active: !record.active })}
+                        >
+                          {record.email === data.me.email ? "Seu acesso" : record.active ? "Desativar" : "Ativar"}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -512,6 +516,7 @@ function AccessView({ data, onNew, onChanged }: { data: DashboardData; onNew: ()
           </table>
         </div>
       </article>
+      {passwordTarget && <AdminPasswordModal target={passwordTarget} onClose={() => setPasswordTarget(null)} />}
     </div>
   );
 }
@@ -825,6 +830,55 @@ function NewAccessModal({ me, dealerships, onClose, onSaved }: { me: CurrentAcce
   async function submit(event: FormEvent) { event.preventDefault(); setSaving(true); setError(""); const response = await fetch("/api/access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, email, password, role, dealershipId }) }); const payload = (await response.json()) as { error?: string }; if (!response.ok) { setError(payload.error || "Não foi possível criar o acesso."); setSaving(false); return; } await onSaved(); }
   const canChooseRole = ["general_admin", "global_management"].includes(me.role);
   return <div className="modal-backdrop" role="dialog" aria-modal="true"><form className="access-modal" onSubmit={(event) => void submit(event)}><header className="modal-header"><div><span className="eyebrow">Novo acesso</span><h2>Criar acesso por nível</h2><p>Defina o nível e o escopo operacional deste usuário.</p></div><button type="button" className="icon-button" onClick={onClose}><Icon name="close" /></button></header><div className="form-scroll"><div className="access-form-grid"><label className="field"><span>Nome completo</span><input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} required /></label><label className="field"><span>E-mail corporativo</span><input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label><label className="field"><span>Senha inicial</span><input type="password" minLength={10} maxLength={128} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>{canChooseRole && <label className="field"><span>Nível de permissão</span><select value={role} onChange={(event) => setRole(event.target.value as UserRole)}><option value="global_management">Gestão Global</option><option value="factory_manager">Gestor Fábrica</option><option value="dealer_manager">Gestor Concessionária</option><option value="concession">Concessão</option></select></label>}{me.role !== "dealer_manager" && <label className="field"><span>Concessionária inicial (opcional)</span><select value={dealershipId ?? ""} onChange={(event) => setDealershipId(Number(event.target.value) || null)}><option value="">Sem vínculo</option>{dealerships.map((dealer) => <option key={dealer.id} value={dealer.id}>{dealer.name}</option>)}</select></label>}</div><div className="access-note"><strong>{canChooseRole ? "Nível selecionado" : "Concessão"}</strong><p>{canChooseRole ? "O nível define a visão, as ações e o escopo dos dados no portal." : "O acesso ficará restrito à concessionária vinculada."}</p></div>{error && <p className="form-error">{error}</p>}</div><footer className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button type="submit" className="primary-button" disabled={saving}>{saving ? "Criando..." : "Criar acesso"}</button></footer></form></div>;
+}
+
+function AdminPasswordModal({ target, onClose }: { target: AccessUser; onClose: () => void }) {
+  const [temporaryPassword, setTemporaryPassword] = useState("");
+  const [visible, setVisible] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function restorePassword() {
+    setSaving(true);
+    setError("");
+    setCopied(false);
+    const response = await fetch("/api/access/password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: target.email }),
+    });
+    const payload = (await response.json()) as { error?: string; temporaryPassword?: string };
+    if (!response.ok || !payload.temporaryPassword) {
+      setError(payload.error || "Não foi possível restaurar a senha.");
+      setSaving(false);
+      return;
+    }
+    setTemporaryPassword(payload.temporaryPassword);
+    setVisible(true);
+    setSaving(false);
+  }
+
+  async function copyPassword() {
+    if (!temporaryPassword) return;
+    await navigator.clipboard.writeText(temporaryPassword);
+    setCopied(true);
+  }
+
+  return <div className="modal-backdrop" role="dialog" aria-modal="true">
+    <section className="access-modal password-modal">
+      <header className="modal-header">
+        <div><span className="eyebrow">Controle administrativo</span><h2>Senha de {target.name}</h2><p>O sistema não permite visualizar a senha atual: ela é armazenada somente como proteção criptográfica.</p></div>
+        <button type="button" className="icon-button" onClick={onClose} aria-label="Fechar"><Icon name="close" /></button>
+      </header>
+      <div className="form-scroll">
+        <div className="password-recovery-note"><Icon name="key" size={18} /><div><strong>Restaurar acesso</strong><span>Gere uma nova senha temporária. A senha anterior deixa de funcionar e o usuário precisará entrar novamente.</span></div></div>
+        {temporaryPassword && <div className="password-result"><span>Nova senha temporária</span><div><input aria-label="Nova senha temporária" readOnly type={visible ? "text" : "password"} value={temporaryPassword} /><button type="button" className="outline-button compact" onClick={() => setVisible((value) => !value)}>{visible ? "Ocultar" : "Ver"}</button><button type="button" className="outline-button compact" onClick={() => void copyPassword()}>{copied ? "Copiada" : "Copiar"}</button></div><small>Copie e envie por um canal seguro. Ela será exibida somente nesta tela.</small></div>}
+        {error && <p className="form-error">{error}</p>}
+      </div>
+      <footer className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Fechar</button><button type="button" className="primary-button" disabled={saving} onClick={() => void restorePassword()}>{saving ? "Restaurando..." : temporaryPassword ? "Gerar outra senha" : "Restaurar senha"}</button></footer>
+    </section>
+  </div>;
 }
 
 function ChangePasswordModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
@@ -1340,7 +1394,7 @@ function HistoryView({ proposalId }: { proposalId: string | null }) {
   const visibleEntries = proposalId ? entries.filter((entry) => entry.proposalId === proposalId) : [];
   return <div className="content-frame"><header className="page-heading"><div><span className="eyebrow">Governança e segurança</span><h1>Histórico da proposta</h1><p>{proposalId ? `Registro das ações realizadas em ${proposalId}.` : "Abra o histórico pelo ícone de olho ao lado de uma proposta."}</p></div></header><section className="panel history-panel"><div className="history-intro"><div><strong>Alterações realizadas</strong><span>{proposalId ? `Histórico filtrado da proposta ${proposalId}.` : "Cada registro mostra apenas o campo que mudou e seus novos valores."}</span></div><span className="history-count">{visibleEntries.length} registros</span></div>{loading ? <EmptyMini text="Carregando histórico..." /> : error ? <div className="history-error">{error}</div> : visibleEntries.length === 0 ? <EmptyState title={proposalId ? "Nenhuma ação registrada" : "Nenhuma proposta selecionada"} text={proposalId ? "As próximas ações aparecerão aqui." : "Use o olho ao lado da proposta para abrir seu histórico."} /> : <div className="history-list">{visibleEntries.map((entry) => { const changes = auditChanges(entry); return <article className="history-row" key={entry.id}><div className="history-date"><strong>{formatDateTime(entry.createdAt)}</strong><small>{entry.actorName || entry.actorEmail}</small></div><div className="history-action"><span className={`history-action-tag ${entry.entity}`}>{entry.entity === "proposal" ? "Proposta" : entry.entity === "proposal_document" ? "Documento" : "Acesso"}</span><strong>{auditActionLabel(entry.action)}</strong><small>{entry.proposalId || "Ação geral do portal"}</small></div><div className="history-change-area">{changes.length ? <><strong className="history-change-heading">O que mudou</strong><div className="history-change-list">{changes.map((change) => <div className="history-change" key={change.label}><span>{change.label}</span><div><small>{change.before}</small><b>→</b><strong>{change.after}</strong></div></div>)}</div></> : <p className="history-summary">{entry.details}</p>}</div></article>; })}</div>}</section></div>;
 }
-function auditActionLabel(action: string) { const labels: Record<string, string> = { created: "Criada", edited: "Editada", sent: "Enviada", status_changed: "Status alterado", deleted: "Excluída", document_attached: "Documento anexado", access_created: "Acesso criado", access_updated: "Acesso atualizado" }; return labels[action] || action; }
+function auditActionLabel(action: string) { const labels: Record<string, string> = { created: "Criada", edited: "Editada", sent: "Enviada", status_changed: "Status alterado", deleted: "Excluída", document_attached: "Documento anexado", access_created: "Acesso criado", access_updated: "Acesso atualizado", access_password_reset: "Senha restaurada" }; return labels[action] || action; }
 function auditChanges(entry: AuditEntry): AuditChange[] {
   if (["created", "deleted", "document_attached", "access_created"].includes(entry.action)) return [];
   const before = parseAuditSnapshot(entry.beforeJson);

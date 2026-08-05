@@ -41,6 +41,12 @@ export async function createPasswordCredential(
   };
 }
 
+export function generateTemporaryPassword(length = 16) {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
+  const bytes = crypto.getRandomValues(new Uint8Array(length));
+  return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("");
+}
+
 export async function verifyPassword(
   password: string,
   credential: PasswordCredential,
