@@ -4,6 +4,7 @@ import { dealerships, users } from "../../../db/schema";
 import { recordAudit } from "../../../lib/audit";
 import {
   getAccessProfile,
+  canManageLowerRole,
   MASTER_ADMIN_EMAIL,
   normalizeUserRole,
   ROLES,
@@ -34,11 +35,9 @@ async function canManage(
   role: UserRole,
   dealershipId: number | null,
 ) {
-  if (role === "general_admin") return actor.role === "general_admin";
+  if (!canManageLowerRole(actor.role, role)) return false;
   if (["general_admin", "global_management"].includes(actor.role)) return true;
-  if (!["dealer_manager", "concession"].includes(role) || dealershipId === null) return false;
-  if (actor.role === "dealer_manager") return actor.dealershipId === dealershipId;
-  if (actor.role !== "factory_manager") return false;
+  if (actor.role !== "factory_manager" || dealershipId === null) return false;
 
   const db = await getDb();
   const [dealer] = await db
@@ -124,8 +123,8 @@ export async function PATCH(request: Request) {
     const changesPosition =
       (payload.role !== undefined && payload.role !== currentRole) ||
       (payload.dealershipId !== undefined && dealershipId !== (target.dealershipId ?? null));
-    if (changesPosition && !["general_admin", "global_management"].includes(actor.role)) {
-      return forbidden("Somente o ADM Geral ou a Gestão Global pode atribuir ou alterar posições.");
+    if (changesPosition && !(await canManage(actor, currentRole, target.dealershipId ?? null))) {
+      return forbidden("Você só pode alterar posições dentro dos níveis abaixo do seu.");
     }
     if (email === MASTER_ADMIN_EMAIL && (role !== "general_admin" || payload.active === false)) {
       return Response.json({ error: "O ADM principal não pode ser reclassificado ou desativado." }, { status: 409 });
@@ -136,9 +135,7 @@ export async function PATCH(request: Request) {
     if (role === "dealer_manager" && dealershipId === null) {
       return Response.json({ error: "Selecione a concessionária deste gestor." }, { status: 400 });
     }
-    if (!(await canManage(actor, currentRole, target.dealershipId ?? null))) {
-      return forbidden();
-    }
+    if (!(await canManage(actor, currentRole, target.dealershipId ?? null))) return forbidden();
     if (!(await canManage(actor, role, dealershipId))) return forbidden();
     if (email === actor.email && payload.active === false) {
       return Response.json({ error: "Você não pode desativar o próprio acesso." }, { status: 409 });

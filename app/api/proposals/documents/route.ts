@@ -31,6 +31,7 @@ function canManageDocuments(profile: AccessProfile) {
 function proposalIsVisible(profile: AccessProfile, dealer: { id: number; factoryManagerEmail: string }) {
   if (["general_admin", "global_management"].includes(profile.role)) return true;
   if (profile.role === "factory_manager") return dealer.factoryManagerEmail.toLowerCase() === profile.email;
+  if (profile.role === "concession") return false;
   return dealer.id === profile.dealershipId;
 }
 

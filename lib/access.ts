@@ -18,6 +18,14 @@ export const PROPOSAL_RESPONSIBLE_ROLES = [
 ] as const;
 export type UserRole = (typeof ROLES)[number];
 
+export const LOWER_MANAGED_ROLES: Record<UserRole, readonly UserRole[]> = {
+  general_admin: ROLES,
+  global_management: ["factory_manager", "dealer_manager", "concession"],
+  factory_manager: ["dealer_manager", "concession"],
+  dealer_manager: [],
+  concession: [],
+};
+
 export type AccessProfile = {
   email: string;
   name: string;
@@ -50,6 +58,43 @@ export async function getAccessProfile(): Promise<AccessProfile | null> {
 
 export function canCreateProposal(profile: AccessProfile) {
   return ["general_admin", "global_management", "factory_manager"].includes(profile.role);
+}
+
+export function canManageLowerRole(actorRole: UserRole, targetRole: UserRole) {
+  return LOWER_MANAGED_ROLES[actorRole].includes(targetRole);
+}
+
+export function canManageAccess(actorRole: UserRole) {
+  return ["general_admin", "global_management", "factory_manager"].includes(actorRole);
+}
+
+export function canRestorePassword(actorRole: UserRole, targetRole: UserRole) {
+  return actorRole === "general_admin" || canManageLowerRole(actorRole, targetRole);
+}
+
+export function rolePermissions(role: UserRole) {
+  return {
+    viewAll: ["general_admin", "global_management"].includes(role),
+    viewPriceList: true,
+    requestQuote: ["general_admin", "global_management", "dealer_manager"].includes(role),
+    respondQuote: ["general_admin", "global_management", "dealer_manager"].includes(role),
+    createProposal: ["general_admin", "global_management", "factory_manager"].includes(role),
+    editPriceList: ["general_admin", "global_management"].includes(role),
+    publishPriceList: ["general_admin", "global_management"].includes(role),
+    manageDSH: ["general_admin", "global_management", "factory_manager", "dealer_manager"].includes(role),
+    createCampaign: ["general_admin", "global_management"].includes(role),
+    analyzeQuotes: ["general_admin", "global_management", "factory_manager"].includes(role),
+    viewOpenQuotes: ["general_admin", "global_management", "factory_manager", "dealer_manager"].includes(role),
+    approveQuoteReturn: ["general_admin", "global_management", "dealer_manager"].includes(role),
+    placeOrder: ["general_admin", "global_management", "factory_manager"].includes(role),
+    manageAccess: canManageAccess(role),
+    manageAllAccess: role === "general_admin",
+    assignLowerPermission: ["general_admin", "global_management", "factory_manager"].includes(role),
+    restoreLowerPassword: ["general_admin", "global_management", "factory_manager"].includes(role),
+    decideProposal: ["general_admin", "global_management", "dealer_manager"].includes(role),
+    deleteAnyProposal: role === "general_admin",
+    deleteOwnDraft: ["global_management", "factory_manager"].includes(role),
+  };
 }
 
 export function canBeProposalResponsible(role: UserRole) {

@@ -114,9 +114,22 @@ type CurrentAccess = {
   active: boolean;
   permissions: {
     viewAll: boolean;
+    viewPriceList: boolean;
+    requestQuote: boolean;
+    respondQuote: boolean;
     createProposal: boolean;
+    editPriceList: boolean;
+    publishPriceList: boolean;
+    manageDSH: boolean;
+    createCampaign: boolean;
+    analyzeQuotes: boolean;
+    viewOpenQuotes: boolean;
+    approveQuoteReturn: boolean;
+    placeOrder: boolean;
     manageAllAccess: boolean;
     manageAccess: boolean;
+    assignLowerPermission: boolean;
+    restoreLowerPassword: boolean;
     decideProposal: boolean;
     deleteAnyProposal: boolean;
     deleteOwnDraft: boolean;
@@ -266,6 +279,7 @@ export function Dashboard({ user }: { user: AppUser }) {
   if (loading) return <LoadingState />;
   if (error || !data) return <ErrorState message={error || "Acesso não disponível."} retry={loadData} />;
   const canCreate = data.me.permissions.createProposal;
+  const concessionOnly = data.me.role === "concession";
   const proposalResponsibles = data.proposalResponsibles.filter((item) => item.active);
   async function refreshed(message: string) { setNotice(message); await loadData(); }
   async function signOut() {
@@ -284,10 +298,7 @@ export function Dashboard({ user }: { user: AppUser }) {
         <div className="brand-lockup"><BrandMark className="brand-mark" /><div><strong>HORSCH</strong><span>Brasil</span></div></div>
         <div className="role-card"><span>Perfil ativo</span><strong>{data.me.roleLabel}</strong><small>{scopeDescription(data.me)}</small></div>
         <nav className="sidebar-nav" aria-label="Navegação principal">
-          <NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão geral</NavButton>
-          <NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton>
-          <NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Concessionárias</NavButton>
-          {data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}
+          {concessionOnly ? <NavButton active icon="file" onClick={() => setView("overview")}>Lista de preços</NavButton> : <><NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão geral</NavButton><NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton><NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Concessionárias</NavButton>{data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}</>}
         </nav>
         {canCreate && <button className="sidebar-new" onClick={() => setShowNewProposal(true)}><Icon name="plus" size={17} />Nova proposta</button>}
         <div className="sidebar-account-actions"><button type="button" onClick={() => setShowChangePassword(true)}><Icon name="key" size={15} />Alterar senha</button></div>
@@ -297,7 +308,7 @@ export function Dashboard({ user }: { user: AppUser }) {
       <section className="workspace">
         <header className="mobile-header"><div className="mobile-lockup"><BrandMark className="mobile-mark" /><strong>HORSCH</strong></div><span className="mobile-role">{data.me.roleLabel}</span></header>
         {notice && <div className="toast" role="status"><Icon name="check" size={17} />{notice}</div>}
-        {view === "overview" ? (
+        {concessionOnly ? <PriceListView /> : view === "overview" ? (
           <Overview data={data} onNew={() => setShowNewProposal(true)} onOpen={setPreview} onHistory={openHistory} onAll={() => setView("proposals")} />
         ) : view === "proposals" ? (
           <ProposalsView proposals={filteredProposals} allCount={data.proposals.length} search={search} onSearch={setSearch} status={statusFilter} onStatus={setStatusFilter} canCreate={canCreate} onNew={() => setShowNewProposal(true)} onOpen={setPreview} canViewHistory={data.me.role === "general_admin"} onHistory={openHistory} />
@@ -309,10 +320,7 @@ export function Dashboard({ user }: { user: AppUser }) {
           <HistoryView proposalId={historyProposalId} />
         )}
         <nav className="mobile-nav" aria-label="Navegação móvel">
-          <NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão</NavButton>
-          <NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton>
-          <NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Rede</NavButton>
-          {data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}
+          {!concessionOnly && <><NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão</NavButton><NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton><NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Rede</NavButton>{data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}</>}
         </nav>
       </section>
 
@@ -327,6 +335,10 @@ export function Dashboard({ user }: { user: AppUser }) {
 
 function NavButton({ active, icon, children, onClick }: { active: boolean; icon: IconName; children: ReactNode; onClick: () => void }) {
   return <button className={`nav-button ${active ? "active" : ""}`} onClick={onClick}><Icon name={icon} size={19} /><span>{children}</span></button>;
+}
+
+function PriceListView() {
+  return <div className="content-frame"><header className="page-heading"><div><span className="eyebrow">Consulta autorizada</span><h1>Lista de preços</h1><p>Seu perfil possui acesso exclusivamente consultivo aos preços vigentes.</p></div></header><article className="panel"><div className="empty-state"><span><Icon name="file" size={24} /></span><h3>Lista de preços vigente</h3><p>A consulta da lista de preços está disponível neste ambiente conforme a publicação realizada pela HORSCH.</p></div></article></div>;
 }
 
 function Overview({ data, onNew, onOpen, onHistory, onAll }: { data: DashboardData; onNew: () => void; onOpen: (proposal: Proposal) => void; onHistory: (proposalId: string) => void; onAll: () => void }) {
@@ -429,7 +441,7 @@ function DealershipsView({ dealerships, proposals, onOpen }: { dealerships: Deal
 function AccessView({ data, onNew, onChanged }: { data: DashboardData; onNew: () => void; onChanged: () => Promise<void> }) {
   const [busy, setBusy] = useState("");
   const [passwordTarget, setPasswordTarget] = useState<AccessUser | null>(null);
-  const canAssignRoles = ["general_admin", "global_management"].includes(data.me.role);
+  const canAssignRoles = data.me.permissions.assignLowerPermission;
 
   async function updateAccess(record: AccessUser, patch: Partial<Pick<AccessUser, "role" | "dealershipId" | "active">>) {
     setBusy(record.email);
@@ -451,11 +463,11 @@ function AccessView({ data, onNew, onChanged }: { data: DashboardData; onNew: ()
         {data.me.permissions.manageAccess && <button className="primary-button" onClick={onNew}><Icon name="plus" size={18} />Criar acesso</button>}
       </header>
       <section className="permission-summary">
-        <PermissionCard title="ADM Geral" text="Controle total do portal, usuários, permissões e dados." active={data.me.role === "general_admin"} />
-        <PermissionCard title="Gestão Global" text="Visão consolidada da operação e gestão dos demais níveis." active={data.me.role === "global_management"} />
-        <PermissionCard title="Gestor Fábrica" text="Carteira atribuída, propostas e acessos das concessionárias atendidas." active={data.me.role === "factory_manager"} />
-        <PermissionCard title="Gestor Concessionária" text="Propostas da própria empresa, decisões e acessos internos." active={data.me.role === "dealer_manager"} />
-        <PermissionCard title="Concessão" text="Acesso operacional às propostas da própria concessionária." active={data.me.role === "concession"} />
+        <PermissionCard title="ADM Geral" text="Acesso completo, incluindo usuários, permissões, preços, DSH, campanhas e auditoria." active={data.me.role === "general_admin"} />
+        <PermissionCard title="Gestão Global" text="Cotações, propostas, preços, DSH, campanhas, análises e gestão dos níveis abaixo." active={data.me.role === "global_management"} />
+        <PermissionCard title="Gestor Fábrica" text="Propostas, cotações abertas, DSH, pedidos e acessos dos níveis abaixo na sua carteira." active={data.me.role === "factory_manager"} />
+        <PermissionCard title="Gestor Concessionária" text="Solicita cotações, responde propostas, aprova retornos, faz DSH e consulta preços." active={data.me.role === "dealer_manager"} />
+        <PermissionCard title="Concessão" text="Acesso exclusivamente consultivo à lista de preços vigente." active={data.me.role === "concession"} />
       </section>
       <article className="panel access-panel">
         <PanelHeader title="Usuários no seu escopo" subtitle={`${data.users.length} acessos cadastrados`} />
@@ -465,26 +477,27 @@ function AccessView({ data, onNew, onChanged }: { data: DashboardData; onNew: ()
             <tbody>
               {data.users.map((record) => {
                 const isPrimaryAdmin = record.email === "mateus.mazieiro@horsch.com";
+                const canEditPosition = canAssignRoles && !isPrimaryAdmin && record.email !== data.me.email;
                 return (
                   <tr key={record.email}>
                     <td><strong>{record.name}</strong><small>{record.email}</small></td>
                     <td>
-                      {canAssignRoles && !isPrimaryAdmin ? (
+                      {canEditPosition ? (
                         <select
                           value={record.role}
                           disabled={busy === record.email}
                           onChange={(event) => void updateAccess(record, { role: event.target.value as UserRole })}
                           aria-label={`Posição de ${record.name}`}
                         >
-                          <option value="global_management">Gestão Global</option>
-                          <option value="factory_manager">Gestor Fábrica</option>
-                          <option value="dealer_manager">Gestor Concessionária</option>
+                          {data.me.role === "general_admin" && <><option value="global_management">Gestão Global</option><option value="factory_manager">Gestor Fábrica</option></>}
+                          {data.me.role === "global_management" && <option value="factory_manager">Gestor Fábrica</option>}
+                          {data.me.role !== "general_admin" && <option value="dealer_manager">Gestor Concessionária</option>}
                           <option value="concession">Concessão</option>
                         </select>
                       ) : <span className="role-badge">{record.roleLabel}</span>}
                     </td>
                     <td>
-                      {canAssignRoles && !isPrimaryAdmin ? (
+                      {canEditPosition ? (
                         <select
                           value={record.dealershipId ?? ""}
                           disabled={busy === record.email}
@@ -499,7 +512,7 @@ function AccessView({ data, onNew, onChanged }: { data: DashboardData; onNew: ()
                     <td><span className={`access-status ${record.active ? "active" : "inactive"}`}>{record.active ? "Ativo" : "Inativo"}</span></td>
                     <td className="align-right">
                       <div className="access-actions">
-                        {data.me.role === "general_admin" && <button className="outline-button compact" onClick={() => setPasswordTarget(record)}><Icon name="key" size={14} />Senha</button>}
+                        {data.me.permissions.restoreLowerPassword && <button className="outline-button compact" onClick={() => setPasswordTarget(record)}><Icon name="key" size={14} />Senha</button>}
                         <button
                           className="outline-button compact"
                           disabled={busy === record.email || record.email === data.me.email}
@@ -826,10 +839,10 @@ function NewProposalModal({
 }
 
 function NewAccessModal({ me, dealerships, onClose, onSaved }: { me: CurrentAccess; dealerships: Dealership[]; onClose: () => void; onSaved: () => Promise<void> }) {
-  const [name, setName] = useState(""); const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [role, setRole] = useState<UserRole>(["general_admin", "global_management"].includes(me.role) ? "global_management" : "concession"); const [dealershipId, setDealershipId] = useState<number | null>(me.role === "dealer_manager" || me.role === "concession" ? me.dealershipId : null); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
+  const [name, setName] = useState(""); const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [role, setRole] = useState<UserRole>(me.role === "general_admin" ? "global_management" : me.role === "global_management" ? "factory_manager" : me.role === "factory_manager" ? "dealer_manager" : "concession"); const [dealershipId, setDealershipId] = useState<number | null>(me.role === "dealer_manager" || me.role === "concession" ? me.dealershipId : null); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
   async function submit(event: FormEvent) { event.preventDefault(); setSaving(true); setError(""); const response = await fetch("/api/access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, email, password, role, dealershipId }) }); const payload = (await response.json()) as { error?: string }; if (!response.ok) { setError(payload.error || "Não foi possível criar o acesso."); setSaving(false); return; } await onSaved(); }
-  const canChooseRole = ["general_admin", "global_management"].includes(me.role);
-  return <div className="modal-backdrop" role="dialog" aria-modal="true"><form className="access-modal" onSubmit={(event) => void submit(event)}><header className="modal-header"><div><span className="eyebrow">Novo acesso</span><h2>Criar acesso por nível</h2><p>Defina o nível e o escopo operacional deste usuário.</p></div><button type="button" className="icon-button" onClick={onClose}><Icon name="close" /></button></header><div className="form-scroll"><div className="access-form-grid"><label className="field"><span>Nome completo</span><input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} required /></label><label className="field"><span>E-mail corporativo</span><input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label><label className="field"><span>Senha inicial</span><input type="password" minLength={10} maxLength={128} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>{canChooseRole && <label className="field"><span>Nível de permissão</span><select value={role} onChange={(event) => setRole(event.target.value as UserRole)}><option value="global_management">Gestão Global</option><option value="factory_manager">Gestor Fábrica</option><option value="dealer_manager">Gestor Concessionária</option><option value="concession">Concessão</option></select></label>}{me.role !== "dealer_manager" && <label className="field"><span>Concessionária inicial (opcional)</span><select value={dealershipId ?? ""} onChange={(event) => setDealershipId(Number(event.target.value) || null)}><option value="">Sem vínculo</option>{dealerships.map((dealer) => <option key={dealer.id} value={dealer.id}>{dealer.name}</option>)}</select></label>}</div><div className="access-note"><strong>{canChooseRole ? "Nível selecionado" : "Concessão"}</strong><p>{canChooseRole ? "O nível define a visão, as ações e o escopo dos dados no portal." : "O acesso ficará restrito à concessionária vinculada."}</p></div>{error && <p className="form-error">{error}</p>}</div><footer className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button type="submit" className="primary-button" disabled={saving}>{saving ? "Criando..." : "Criar acesso"}</button></footer></form></div>;
+  const canChooseRole = ["general_admin", "global_management", "factory_manager"].includes(me.role);
+  return <div className="modal-backdrop" role="dialog" aria-modal="true"><form className="access-modal" onSubmit={(event) => void submit(event)}><header className="modal-header"><div><span className="eyebrow">Novo acesso</span><h2>Criar acesso por nível</h2><p>Defina o nível e o escopo operacional deste usuário.</p></div><button type="button" className="icon-button" onClick={onClose}><Icon name="close" /></button></header><div className="form-scroll"><div className="access-form-grid"><label className="field"><span>Nome completo</span><input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} required /></label><label className="field"><span>E-mail corporativo</span><input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label><label className="field"><span>Senha inicial</span><input type="password" minLength={10} maxLength={128} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>{canChooseRole && <label className="field"><span>Nível de permissão</span><select value={role} onChange={(event) => setRole(event.target.value as UserRole)}>{me.role === "general_admin" && <option value="global_management">Gestão Global</option>}{(me.role === "general_admin" || me.role === "global_management") && <option value="factory_manager">Gestor Fábrica</option>}{(me.role === "general_admin" || me.role === "global_management" || me.role === "factory_manager") && <option value="dealer_manager">Gestor Concessionária</option>}<option value="concession">Concessão</option></select></label>}{me.role !== "dealer_manager" && <label className="field"><span>Concessionária inicial {me.role === "factory_manager" ? "(obrigatória)" : "(opcional)"}</span><select required={me.role === "factory_manager"} value={dealershipId ?? ""} onChange={(event) => setDealershipId(Number(event.target.value) || null)}><option value="">Sem vínculo</option>{dealerships.map((dealer) => <option key={dealer.id} value={dealer.id}>{dealer.name}</option>)}</select></label>}</div><div className="access-note"><strong>{canChooseRole ? "Nível selecionado" : "Concessão"}</strong><p>{canChooseRole ? "O nível define a visão, as ações e o escopo dos dados no portal." : "O acesso ficará restrito à concessionária vinculada."}</p></div>{error && <p className="form-error">{error}</p>}</div><footer className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button type="submit" className="primary-button" disabled={saving}>{saving ? "Criando..." : "Criar acesso"}</button></footer></form></div>;
 }
 
 function AdminPasswordModal({ target, onClose }: { target: AccessUser; onClose: () => void }) {
@@ -950,7 +963,7 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
   const [error, setError] = useState("");
 
   const decisionOpen =
-    ["dealer_manager", "concession"].includes(me.role) && ["sent", "counteroffer"].includes(status);
+    me.role === "dealer_manager" && ["sent", "counteroffer"].includes(status);
   const canReviewCounteroffer =
     ["general_admin", "global_management", "factory_manager"].includes(me.role) && status === "counteroffer";
   const counterofferTotal = counterItems.reduce(
@@ -1431,5 +1444,5 @@ function parseMoneyToCents(value: string) { const cleaned = String(value).replac
 function formatMoneyInput(value: string) { const cents = parseMoneyToCents(value); if (!value.trim() && !cents) return ""; return (cents / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function formatFileSize(bytes: number) { if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`; return `${(bytes / (1024 * 1024)).toFixed(1).replace(".", ",")} MB`; }
 function documentCategoryLabel(category: ProposalDocument["category"]) { return category === "invoice" ? "Nota fiscal (NF)" : category === "proof" ? "Comprovante de venda" : "Outro documento"; }
-function scopeDescription(me: CurrentAccess) { return ["general_admin", "global_management"].includes(me.role) ? "Visão consolidada de toda a operação e dos acessos autorizados." : me.role === "factory_manager" ? "Carteira atribuída, propostas e acessos das concessionárias sob sua gestão." : me.role === "dealer_manager" ? "Propostas e usuários vinculados exclusivamente à sua concessionária." : "Acesso operacional às propostas da sua concessionária."; }
-function accessDescription(role: UserRole) { return role === "general_admin" ? "Controle total de usuários, permissões e dados do portal." : role === "global_management" ? "Gerencie os níveis operacionais e acompanhe toda a operação." : role === "factory_manager" ? "Cadastre e gerencie acessos das concessionárias da sua carteira." : role === "dealer_manager" ? "Cadastre acessos de Concessão vinculados à sua concessionária." : "Seu perfil consulta e movimenta propostas da própria concessionária."; }
+function scopeDescription(me: CurrentAccess) { return ["general_admin", "global_management"].includes(me.role) ? "Visão consolidada de toda a operação e dos acessos autorizados." : me.role === "factory_manager" ? "Carteira atribuída, propostas e acessos das concessionárias sob sua gestão." : me.role === "dealer_manager" ? "Propostas e decisões comerciais exclusivamente da sua concessionária." : "Acesso exclusivamente consultivo à lista de preços."; }
+function accessDescription(role: UserRole) { return role === "general_admin" ? "Controle total de usuários, permissões e dados do portal." : role === "global_management" ? "Gerencie os níveis abaixo, responda cotações, propostas, preços, DSH, campanhas e análises." : role === "factory_manager" ? "Crie propostas, gerencie DSH, analise cotações abertas, coloque pedidos e administre níveis abaixo." : role === "dealer_manager" ? "Solicite cotações, responda propostas, aprove retornos, faça DSH e consulte preços." : "Seu perfil pode apenas consultar a lista de preços."; }
