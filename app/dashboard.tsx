@@ -77,6 +77,16 @@ type Proposal = {
   documents: ProposalDocument[];
 };
 
+type QuoteStatus = "global_review" | "data_pending" | "returned" | "approved" | "rejected" | "order_pending" | "order_input";
+type Quote = {
+  id: string; partNumber: string; dealershipId: number; dealership: string; city: string; state: string;
+  requestedByEmail: string; requestedByName: string; status: QuoteStatus; statusLabel: string;
+  actionOwnerRole: string; actionOwnerLabel: string; actionOwnerName: string; actionOwnerEmail: string;
+  description: string; vt: string; origin: string; netPriceCents: number | null; catalogImportedAt: string | null;
+  actionNote: string; requestedAt: string; returnedAt: string | null; decidedAt: string | null; decidedByEmail: string;
+  factoryActionAt: string | null; updatedAt: string;
+};
+
 type Dealership = {
   id: number;
   name: string;
@@ -138,6 +148,7 @@ type CurrentAccess = {
 
 type DashboardData = {
   proposals: Proposal[];
+  quotes: Quote[];
   dealerships: Dealership[];
   users: AccessUser[];
   proposalResponsibles: AccessUser[];
@@ -145,7 +156,7 @@ type DashboardData = {
 };
 
 type AuditEntry = { id: number; proposalId: string | null; actorEmail: string; actorName: string; action: string; entity: string; details: string; beforeJson: string; afterJson: string; createdAt: string };
-type View = "overview" | "proposals" | "dealerships" | "access" | "history";
+type View = "overview" | "proposals" | "quotes" | "dealerships" | "access" | "history";
 
 const STATUS_LABELS: Record<ProposalStatus, string> = {
   draft: "Rascunho",
@@ -252,7 +263,10 @@ export function Dashboard({ user }: { user: AppUser }) {
       const response = await fetch("/api/proposals", { cache: "no-store" });
       const payload = (await response.json()) as DashboardData & { error?: string };
       if (!response.ok) throw new Error(payload.error || "Não foi possível carregar os dados.");
-      setData(payload);
+      const quoteResponse = payload.me.role === "concession" ? null : await fetch("/api/quotes", { cache: "no-store" });
+      const quotePayload = quoteResponse ? ((await quoteResponse.json()) as { quotes?: Quote[]; error?: string }) : { quotes: [] };
+      if (quoteResponse && !quoteResponse.ok) throw new Error(quotePayload.error || "Não foi possível carregar as cotações.");
+      setData({ ...payload, quotes: quotePayload.quotes ?? [] });
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Erro ao carregar dados.");
     } finally {
@@ -298,7 +312,7 @@ export function Dashboard({ user }: { user: AppUser }) {
         <div className="brand-lockup"><BrandMark className="brand-mark" /><div><strong>HORSCH</strong><span>Brasil</span></div></div>
         <div className="role-card"><span>Perfil ativo</span><strong>{data.me.roleLabel}</strong><small>{scopeDescription(data.me)}</small></div>
         <nav className="sidebar-nav" aria-label="Navegação principal">
-          {concessionOnly ? <NavButton active icon="file" onClick={() => setView("overview")}>Lista de preços</NavButton> : <><NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão geral</NavButton><NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton><NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Concessionárias</NavButton>{data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}</>}
+          {concessionOnly ? <NavButton active icon="file" onClick={() => setView("overview")}>Lista de preços</NavButton> : <><NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão geral</NavButton><NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton><NavButton active={view === "quotes"} icon="clock" onClick={() => setView("quotes")}>Cotações</NavButton><NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Concessionárias</NavButton>{data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}</>}
         </nav>
         {canCreate && <button className="sidebar-new" onClick={() => setShowNewProposal(true)}><Icon name="plus" size={17} />Nova proposta</button>}
         <div className="sidebar-account-actions"><button type="button" onClick={() => setShowChangePassword(true)}><Icon name="key" size={15} />Alterar senha</button></div>
@@ -312,6 +326,8 @@ export function Dashboard({ user }: { user: AppUser }) {
           <Overview data={data} onNew={() => setShowNewProposal(true)} onOpen={setPreview} onHistory={openHistory} onAll={() => setView("proposals")} />
         ) : view === "proposals" ? (
           <ProposalsView proposals={filteredProposals} allCount={data.proposals.length} search={search} onSearch={setSearch} status={statusFilter} onStatus={setStatusFilter} canCreate={canCreate} onNew={() => setShowNewProposal(true)} onOpen={setPreview} canViewHistory={data.me.role === "general_admin"} onHistory={openHistory} />
+        ) : view === "quotes" ? (
+          <QuotesView quotes={data.quotes} me={data.me} onChanged={() => refreshed("Cotação atualizada com sucesso.")} />
         ) : view === "dealerships" ? (
           <DealershipsView dealerships={data.dealerships} proposals={data.proposals} onOpen={setPreview} />
         ) : view === "access" ? (
@@ -320,7 +336,7 @@ export function Dashboard({ user }: { user: AppUser }) {
           <HistoryView proposalId={historyProposalId} />
         )}
         <nav className="mobile-nav" aria-label="Navegação móvel">
-          {!concessionOnly && <><NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão</NavButton><NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton><NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Rede</NavButton>{data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}</>}
+          {!concessionOnly && <><NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão</NavButton><NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton><NavButton active={view === "quotes"} icon="clock" onClick={() => setView("quotes")}>Cotações</NavButton><NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Rede</NavButton>{data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}</>}
         </nav>
       </section>
 
@@ -331,6 +347,36 @@ export function Dashboard({ user }: { user: AppUser }) {
       {preview && <ProposalPreview proposal={preview} me={data.me} onClose={() => setPreview(null)} onEdit={() => { setEditProposal(preview); setPreview(null); }} onDeleted={async () => { setPreview(null); await refreshed("Proposta excluída com sucesso."); }} onUpdated={async (status, counterofferCents) => { setPreview({ ...preview, status, counterofferCents: counterofferCents ?? null }); await refreshed("Proposta atualizada com sucesso."); }} />}
     </main>
   );
+}
+
+function QuotesView({ quotes, me, onChanged }: { quotes: Quote[]; me: CurrentAccess; onChanged: () => Promise<void> }) {
+  const [pn, setPn] = useState(""); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
+  async function submit(event: FormEvent) {
+    event.preventDefault(); setSaving(true); setError("");
+    const response = await fetch("/api/quotes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ partNumber: pn }) });
+    const payload = (await response.json()) as { error?: string };
+    if (!response.ok) { setError(payload.error || "Não foi possível solicitar a cotação."); setSaving(false); return; }
+    setPn(""); setSaving(false); await onChanged();
+  }
+  return <div className="content-frame"><header className="page-heading"><div><span className="eyebrow">Fluxo de atendimento</span><h1>Cotações</h1><p>Solicite um PN, acompanhe a ação e aprove o retorno até o input do pedido.</p></div></header>
+    {me.permissions.requestQuote && <form className="panel quote-request-panel" onSubmit={(event) => void submit(event)}><div><strong>Solicitar nova cotação</strong><span>O sistema verifica dados imputados nos últimos 30 dias.</span></div><div className="quote-request-fields"><label className="field"><span>PN</span><input value={pn} onChange={(event) => setPn(event.target.value)} placeholder="Ex.: 34061200" required /></label><button className="primary-button" disabled={saving}>{saving ? "Solicitando..." : "Solicitar cotação"}</button></div>{error && <p className="form-error">{error}</p>}</form>}
+    <section className="quote-list">{quotes.length ? quotes.map((quote) => <QuoteCard key={quote.id} quote={quote} me={me} onChanged={onChanged} />) : <article className="panel"><EmptyState title="Nenhuma cotação registrada" text={me.permissions.requestQuote ? "Solicite o primeiro PN para iniciar o fluxo." : "As cotações do seu escopo aparecerão aqui."} /></article>}</section>
+  </div>;
+}
+function QuoteCard({ quote, me, onChanged }: { quote: Quote; me: CurrentAccess; onChanged: () => Promise<void> }) {
+  const [description, setDescription] = useState(quote.description); const [vt, setVt] = useState(quote.vt); const [origin, setOrigin] = useState(quote.origin); const [price, setPrice] = useState(quote.netPriceCents ? formatMoneyInput(String(quote.netPriceCents / 100).replace(".", ",")) : ""); const [note, setNote] = useState(""); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
+  const review = ["general_admin", "global_management"].includes(me.role) && ["global_review", "data_pending"].includes(quote.status); const decide = me.role === "dealer_manager" && quote.status === "returned"; const place = me.role === "factory_manager" && quote.status === "order_pending";
+  async function action(name: string) {
+    setSaving(true); setError("");
+    const response = await fetch("/api/quotes", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: quote.id, action: name, description, vt, origin, netPriceCents: parseMoneyToCents(price), actionNote: note }) });
+    const payload = (await response.json()) as { error?: string };
+    if (!response.ok) { setError(payload.error || "Não foi possível atualizar a cotação."); setSaving(false); return; }
+    setSaving(false); await onChanged();
+  }
+  return <article className="panel quote-card"><header className="quote-card-header"><div><span className="eyebrow">{quote.id}</span><h2>PN {quote.partNumber}</h2><p>{quote.dealership + " · " + quote.city + (quote.state ? " · " + quote.state : "")}</p></div><span className={"status-badge quote-status " + quote.status}><i />{quote.statusLabel}</span></header><div className="quote-meta-grid"><div><span>Solicitada por</span><strong>{quote.requestedByName || quote.requestedByEmail}</strong><small>{formatDateTime(quote.requestedAt)}</small></div><div><span>Próxima ação</span><strong>{quote.actionOwnerLabel || "Encerrada"}</strong><small>{quote.actionOwnerName}</small></div><div><span>PN / descrição</span><strong>{quote.description || "Aguardando imputação"}</strong><small>{quote.actionNote || "Sem observação"}</small></div></div>{quote.description && <div className="quote-return-grid"><div><span>VT</span><strong>{quote.vt || "—"}</strong></div><div><span>Origem</span><strong>{quote.origin || "—"}</strong></div><div><span>Net price</span><strong>{quote.netPriceCents ? formatBRL(quote.netPriceCents) : "—"}</strong></div><div><span>Base</span><strong>{quote.catalogImportedAt ? formatDate(quote.catalogImportedAt) : "—"}</strong></div></div>}
+    {review && <div className="quote-action-box"><strong>Tratamento da Gestão Global</strong><p>Retorne a cotação ou registre a necessidade de imputação/revisão.</p><div className="quote-edit-grid"><label className="field"><span>Descrição</span><input value={description} onChange={(event) => setDescription(event.target.value)} /></label><label className="field"><span>VT</span><input value={vt} onChange={(event) => setVt(event.target.value)} /></label><label className="field"><span>Origem</span><input value={origin} onChange={(event) => setOrigin(event.target.value)} /></label><label className="field"><span>Net price</span><input value={price} onChange={(event) => setPrice(event.target.value)} /></label></div><label className="field"><span>Observação</span><input value={note} onChange={(event) => setNote(event.target.value)} /></label><div className="quote-action-buttons"><button type="button" className="outline-button" disabled={saving} onClick={() => void action("needs_action")}>Solicitar imputação/revisão</button><button type="button" className="primary-button" disabled={saving} onClick={() => void action("return_quote")}>Retornar cotação</button></div></div>}
+    {decide && <div className="quote-action-box"><strong>Decisão da concessionária</strong><label className="field"><span>Observação</span><input value={note} onChange={(event) => setNote(event.target.value)} /></label><div className="quote-action-buttons"><button type="button" className="outline-button danger-button" disabled={saving} onClick={() => void action("reject")}>Rejeitar retorno</button><button type="button" className="primary-button" disabled={saving} onClick={() => void action("approve")}>Aprovar e enviar à fábrica</button></div></div>}
+    {place && <div className="quote-action-box factory-decision"><strong>Input do pedido</strong><p>Cotação aprovada e aguardando lançamento em carteira.</p><label className="field"><span>Referência do pedido</span><input value={note} onChange={(event) => setNote(event.target.value)} /></label><button type="button" className="primary-button" disabled={saving} onClick={() => void action("place_order")}>Marcar input realizado</button></div>}{error && <p className="form-error">{error}</p>}</article>;
 }
 
 function NavButton({ active, icon, children, onClick }: { active: boolean; icon: IconName; children: ReactNode; onClick: () => void }) {

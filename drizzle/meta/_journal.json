@@ -57,6 +57,13 @@
       "when": 1785927310454,
       "tag": "0007_graceful_warstar",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786032000000,
+      "tag": "0008_quote_requests",
+      "breakpoints": true
     }
   ]
 }

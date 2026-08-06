@@ -164,3 +164,42 @@ export const auditLogs = sqliteTable(
     index("audit_logs_actor_idx").on(table.actorEmail),
   ],
 );
+
+export const quoteCatalog = sqliteTable("quote_catalog", {
+  partNumber: text("part_number").primaryKey(),
+  description: text("description").notNull().default(""),
+  vt: text("vt").notNull().default(""),
+  origin: text("origin").notNull().default(""),
+  netPriceCents: integer("net_price_cents").notNull().default(0),
+  importedAt: text("imported_at").notNull(),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [index("quote_catalog_imported_idx").on(table.importedAt)]);
+
+export const quoteRequests = sqliteTable("quote_requests", {
+  id: text("id").primaryKey(),
+  partNumber: text("part_number").notNull(),
+  dealershipId: integer("dealership_id").notNull().references(() => dealerships.id),
+  requestedByEmail: text("requested_by_email").notNull(),
+  requestedByName: text("requested_by_name").notNull().default(""),
+  status: text("status").notNull().default("global_review"),
+  actionOwnerRole: text("action_owner_role").notNull().default("global_management"),
+  actionOwnerEmail: text("action_owner_email").notNull().default(""),
+  description: text("description").notNull().default(""),
+  vt: text("vt").notNull().default(""),
+  origin: text("origin").notNull().default(""),
+  netPriceCents: integer("net_price_cents"),
+  catalogImportedAt: text("catalog_imported_at"),
+  actionNote: text("action_note").notNull().default(""),
+  requestedAt: text("requested_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  returnedAt: text("returned_at"),
+  decidedAt: text("decided_at"),
+  decidedByEmail: text("decided_by_email").notNull().default(""),
+  factoryActionAt: text("factory_action_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("quote_requests_dealership_idx").on(table.dealershipId),
+  index("quote_requests_status_idx").on(table.status),
+  index("quote_requests_part_number_idx").on(table.partNumber),
+  index("quote_requests_updated_at_idx").on(table.updatedAt),
+]);
