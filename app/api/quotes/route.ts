@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 const DAY = 86400000;
 function forbidden() { return Response.json({ error: "Seu perfil não possui acesso às cotações." }, { status: 403 }); }
 function actionForStatus(status: string) { return ["global_review", "data_pending"].includes(status) ? "global_management" : status === "returned" ? "dealer_manager" : status === "order_pending" ? "factory_manager" : ""; }
-function statusLabel(status: string) { return ({ global_review: "Em análise global", data_pending: "Ação necessária", returned: "Retorno enviado", approved: "Aprovada", rejected: "Rejeitada", order_pending: "Aguardando input fábrica", order_input: "Input realizado" } as Record<string, string>)[status] || status; }
+function statusLabel(status: string) { return ({ global_review: "Aguardando Gestão Global", data_pending: "Ação da Gestão Global", returned: "Aguardando aprovação", approved: "Aprovada", rejected: "Reprovada e encerrada", order_pending: "Aguardando Gestor Fábrica", order_input: "Pedido colocado" } as Record<string, string>)[status] || status; }
 function canSee(profile: NonNullable<Awaited<ReturnType<typeof getAccessProfile>>>, dealer: { id: number; factoryManagerEmail: string }) {
   if (["general_admin", "global_management"].includes(profile.role)) return true;
   if (profile.role === "factory_manager") return dealer.factoryManagerEmail.toLowerCase() === profile.email.toLowerCase();
@@ -15,8 +15,8 @@ function canSee(profile: NonNullable<Awaited<ReturnType<typeof getAccessProfile>
 }
 function canAct(profile: NonNullable<Awaited<ReturnType<typeof getAccessProfile>>>, status: string, action: string) {
   if (["return_quote", "needs_action"].includes(action)) return ["general_admin", "global_management"].includes(profile.role);
-  if (["approve", "reject"].includes(action)) return profile.role === "dealer_manager" && status === "returned";
-  return action === "place_order" && profile.role === "factory_manager" && status === "order_pending";
+  if (["approve", "reject"].includes(action)) return ["general_admin", "dealer_manager"].includes(profile.role) && status === "returned";
+  return action === "place_order" && ["general_admin", "factory_manager"].includes(profile.role) && status === "order_pending";
 }
 function errorMessage(error: unknown) { const message = error instanceof Error ? error.message : "Erro inesperado."; return message.includes("no such table") ? "A estrutura de cotações ainda está sendo preparada. Tente novamente." : message; }
 export async function GET() {
@@ -50,11 +50,10 @@ export async function POST(request: Request) {
     const fresh = Boolean(catalog?.importedAt && Date.now() - new Date(catalog.importedAt).getTime() <= 30 * DAY);
     const allUsers = await db.select().from(users);
     const globalUser = allUsers.find((user) => user.active && normalizeUserRole(user.email, user.role) === "global_management");
-    const dealerUser = allUsers.find((user) => user.active && normalizeUserRole(user.email, user.role) === "dealer_manager" && user.dealershipId === profile.dealershipId);
     const now = new Date().toISOString();
     const id = "COT-" + Date.now().toString(36).toUpperCase();
-    const status = fresh ? "returned" : "global_review";
-    await db.insert(quoteRequests).values({ id, partNumber, dealershipId: profile.dealershipId, requestedByEmail: profile.email, requestedByName: profile.name, status, actionOwnerRole: fresh ? "dealer_manager" : "global_management", actionOwnerEmail: fresh ? (dealerUser?.email || profile.email) : (globalUser?.email || ""), description: catalog?.description || "", vt: catalog?.vt || "", origin: catalog?.origin || "", netPriceCents: fresh ? catalog?.netPriceCents || null : null, catalogImportedAt: catalog?.importedAt || null, actionNote: fresh ? "Dados encontrados na base e imputados nos últimos 30 dias." : catalog ? "Dados encontrados, mas o impute tem mais de 30 dias. A Gestão Global deve revisar." : "PN não localizado na base. A Gestão Global deve imputar ou revisar.", requestedAt: now, returnedAt: fresh ? now : null, createdAt: now, updatedAt: now });
+    const status = "global_review";
+    await db.insert(quoteRequests).values({ id, partNumber, dealershipId: profile.dealershipId, requestedByEmail: profile.email, requestedByName: profile.name, status, actionOwnerRole: "global_management", actionOwnerEmail: globalUser?.email || "", description: catalog?.description || "", vt: catalog?.vt || "", origin: catalog?.origin || "", netPriceCents: fresh ? catalog?.netPriceCents || null : null, catalogImportedAt: catalog?.importedAt || null, actionNote: fresh ? "Dados encontrados e imputados nos últimos 30 dias. A Gestão Global deve conferir e retornar a cotação." : catalog ? "Dados encontrados, mas o impute tem mais de 30 dias. A Gestão Global deve revisar antes de retornar." : "PN não localizado na base. A Gestão Global deve imputar ou revisar antes de retornar.", requestedAt: now, createdAt: now, updatedAt: now });
     await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "quote_requested", entity: "quote", details: "Cotação " + id + " solicitada para o PN " + partNumber + ".", after: { id, partNumber, status, dealership: dealer.name, fresh } });
     return Response.json({ id, status, fresh });
   } catch (error) { return Response.json({ error: errorMessage(error) }, { status: 500 }); }
