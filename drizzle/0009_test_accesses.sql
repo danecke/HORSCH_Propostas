@@ -1,7 +1,11 @@
+INSERT INTO `dealerships` (`name`, `city`, `state`, `contact_name`, `contact_email`, `factory_manager_email`)
+VALUES ('Agro Sul Máquinas', 'Cascavel', 'PR', 'Ricardo Martins', 'ricardo@agrosul.example', '')
+ON CONFLICT(`name`) DO NOTHING;
+--> statement-breakpoint
 INSERT INTO `users` (
   `email`, `name`, `role`, `dealership_id`, `active`, `password_hash`, `password_salt`, `password_iterations`, `created_by_email`, `created_at`, `updated_at`
 ) VALUES (
-  'teste.concessionaria@horsch.com', 'Teste Gestor Concessionária', 'dealer_manager', 1, 1,
+  'teste.concessionaria@horsch.com', 'Teste Gestor Concessionária', 'dealer_manager', (SELECT `id` FROM `dealerships` WHERE `name` = 'Agro Sul Máquinas' LIMIT 1), 1,
   'quMHOPyECMFM2+XAHNuvjdrwOeKXKlQwcK4re3DjJZ0=', 'aG9yc2NoLXRlc3QtZGVhbGVyLTAx', 100000,
   'mateus.mazieiro@horsch.com', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 )
