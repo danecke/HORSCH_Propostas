@@ -62,6 +62,16 @@ button { cursor: pointer; }
 .login-security strong, .login-security small { display: block; }
 .login-security strong { font-size: 13px; }
 .login-security small { margin-top: 4px; color: var(--muted); line-height: 1.45; }
+.test-accesses { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 16px; }
+.test-accesses summary { color: var(--red); cursor: pointer; font-size: 12px; font-weight: 800; }
+.test-accesses > p { margin: 10px 0 12px; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.test-access-list { display: grid; gap: 8px; }
+.test-access-card { width: 100%; padding: 11px 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--line); color: var(--ink); background: #fafafa; text-align: left; }
+.test-access-card:hover { border-color: #d99aa1; background: #fff7f8; }
+.test-access-card span, .test-access-card strong, .test-access-card small { display: block; }
+.test-access-card strong { font-size: 11px; }
+.test-access-card small { margin-top: 3px; color: var(--muted); font-size: 9px; }
+.test-access-card em { flex: 0 0 auto; color: var(--red); font-size: 9px; font-style: normal; font-weight: 800; }
 .login-footer { position: absolute; bottom: 30px; color: #94969a; }
 
 /* App shell */

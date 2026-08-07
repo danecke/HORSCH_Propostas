@@ -130,6 +130,20 @@ export function LoginForm() {
           <small>Senha criptografada e sessão individual para cada usuário.</small>
         </div>
       </div>
+      <details className="test-accesses">
+        <summary>Testar com dois usuários demonstrativos</summary>
+        <p>Abra duas janelas anônimas ou dois navegadores para acompanhar o mesmo fluxo.</p>
+        <div className="test-access-list">
+          <button type="button" className="test-access-card" onClick={() => { setEmail("teste.concessionaria@horsch.com"); setPassword("TesteConcessionaria2026!"); setError(""); }}>
+            <span><strong>Gestor Concessionária</strong><small>Solicita e aprova/reprova cotações</small></span>
+            <em>Preencher acesso</em>
+          </button>
+          <button type="button" className="test-access-card" onClick={() => { setEmail("teste.gestao.global@horsch.com"); setPassword("TesteGestaoGlobal2026!"); setError(""); }}>
+            <span><strong>Gestão Global</strong><small>Recebe e responde cotações</small></span>
+            <em>Preencher acesso</em>
+          </button>
+        </div>
+      </details>
     </form>
   );
 }
