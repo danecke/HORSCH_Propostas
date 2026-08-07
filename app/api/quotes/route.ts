@@ -31,7 +31,11 @@ export async function GET() {
       const ownerRole = actionForStatus(quote.status);
       const owner = allUsers.find((user) => user.email.toLowerCase() === quote.actionOwnerEmail.toLowerCase());
       const requester = allUsers.find((user) => user.email.toLowerCase() === quote.requestedByEmail.toLowerCase());
-      return { ...quote, dealership: dealership.name, city: dealership.city, state: dealership.state, statusLabel: statusLabel(quote.status), actionOwnerRole: ownerRole, actionOwnerLabel: ownerRole ? roleLabel(ownerRole as "global_management" | "factory_manager" | "dealer_manager") : "", actionOwnerName: owner?.name || quote.actionOwnerEmail || "—", requestedByName: requester?.name || quote.requestedByName };
+      const actionNote = quote.actionNote
+        .replace(/dados do PN encontrados na base e retornados automaticamente:?/gi, "Informações do PN encontradas e retornadas automaticamente:")
+        .replace(/base de dados/gi, "informações disponíveis")
+        .replace(/\bbase\b/gi, "informações disponíveis");
+      return { ...quote, actionNote, dealership: dealership.name, city: dealership.city, state: dealership.state, statusLabel: statusLabel(quote.status), actionOwnerRole: ownerRole, actionOwnerLabel: ownerRole ? roleLabel(ownerRole as "global_management" | "factory_manager" | "dealer_manager") : "", actionOwnerName: owner?.name || quote.actionOwnerEmail || "—", requestedByName: requester?.name || quote.requestedByName };
     }) });
   } catch (error) { return Response.json({ error: errorMessage(error) }, { status: 500 }); }
 }
@@ -64,12 +68,12 @@ export async function POST(request: Request) {
     const actionOwnerRole = autoReturned ? "dealer_manager" : "global_management";
     const actionOwnerEmail = autoReturned ? profile.email : globalUser?.email || "";
     const actionNote = autoReturned
-      ? "Dados do PN encontrados na base e retornados automaticamente: descrição, VT, origem e net price."
+      ? "Informações do PN encontradas e retornadas automaticamente: descrição, VT, origem e net price."
       : catalog
-        ? "Dados encontrados, mas o impute tem mais de 30 dias ou está incompleto. A Gestão Global deve revisar antes de retornar."
-        : "PN não localizado na base. A Gestão Global deve imputar ou revisar antes de retornar.";
+        ? "Informações disponíveis, mas precisam de revisão antes do retorno."
+        : "Não foi possível completar o retorno automaticamente. A Gestão Global deve revisar antes de responder.";
     await db.insert(quoteRequests).values({ id, partNumber, dealershipId: profile.dealershipId, requestedByEmail: profile.email, requestedByName: profile.name, status, actionOwnerRole, actionOwnerEmail, description: catalog?.description || "", vt: catalog?.vt || "", origin: catalog?.origin || "", netPriceCents: catalog?.netPriceCents || null, catalogImportedAt: catalog?.importedAt || null, actionNote, requestedAt: now, createdAt: now, updatedAt: now });
-    await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: autoReturned ? "quote_auto_returned" : "quote_requested", entity: "quote", details: autoReturned ? "Cotação " + id + " retornada automaticamente para aprovação da concessionária após localizar o PN " + partNumber + " na base." : "Cotação " + id + " solicitada para o PN " + partNumber + ".", after: { id, partNumber, status, dealership: dealer.name, fresh, catalogReady, autoReturned } });
+    await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: autoReturned ? "quote_auto_returned" : "quote_requested", entity: "quote", details: autoReturned ? "Cotação " + id + " retornada automaticamente para aprovação da concessionária após localizar o PN " + partNumber + "." : "Cotação " + id + " solicitada para o PN " + partNumber + ".", after: { id, partNumber, status, dealership: dealer.name, fresh, catalogReady, autoReturned } });
     return Response.json({ id, status, fresh, autoReturned });
   } catch (error) { return Response.json({ error: errorMessage(error) }, { status: 500 }); }
 }
