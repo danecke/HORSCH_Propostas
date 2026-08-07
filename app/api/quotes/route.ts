@@ -48,14 +48,29 @@ export async function POST(request: Request) {
     if (!dealer) return Response.json({ error: "Concessionária não encontrada." }, { status: 404 });
     const [catalog] = await db.select().from(quoteCatalog).where(eq(quoteCatalog.partNumber, partNumber)).limit(1);
     const fresh = Boolean(catalog?.importedAt && Date.now() - new Date(catalog.importedAt).getTime() <= 30 * DAY);
+    const catalogReady = Boolean(
+      catalog &&
+        catalog.description.trim() &&
+        catalog.vt.trim() &&
+        catalog.origin.trim() &&
+        catalog.netPriceCents > 0,
+    );
+    const autoReturned = fresh && catalogReady;
     const allUsers = await db.select().from(users);
     const globalUser = allUsers.find((user) => user.active && normalizeUserRole(user.email, user.role) === "global_management");
     const now = new Date().toISOString();
     const id = "COT-" + Date.now().toString(36).toUpperCase();
-    const status = "global_review";
-    await db.insert(quoteRequests).values({ id, partNumber, dealershipId: profile.dealershipId, requestedByEmail: profile.email, requestedByName: profile.name, status, actionOwnerRole: "global_management", actionOwnerEmail: globalUser?.email || "", description: catalog?.description || "", vt: catalog?.vt || "", origin: catalog?.origin || "", netPriceCents: fresh ? catalog?.netPriceCents || null : null, catalogImportedAt: catalog?.importedAt || null, actionNote: fresh ? "Dados encontrados e imputados nos últimos 30 dias. A Gestão Global deve conferir e retornar a cotação." : catalog ? "Dados encontrados, mas o impute tem mais de 30 dias. A Gestão Global deve revisar antes de retornar." : "PN não localizado na base. A Gestão Global deve imputar ou revisar antes de retornar.", requestedAt: now, createdAt: now, updatedAt: now });
-    await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "quote_requested", entity: "quote", details: "Cotação " + id + " solicitada para o PN " + partNumber + ".", after: { id, partNumber, status, dealership: dealer.name, fresh } });
-    return Response.json({ id, status, fresh });
+    const status = autoReturned ? "returned" : "global_review";
+    const actionOwnerRole = autoReturned ? "dealer_manager" : "global_management";
+    const actionOwnerEmail = autoReturned ? profile.email : globalUser?.email || "";
+    const actionNote = autoReturned
+      ? "Dados do PN encontrados na base e retornados automaticamente: descrição, VT, origem e net price."
+      : catalog
+        ? "Dados encontrados, mas o impute tem mais de 30 dias ou está incompleto. A Gestão Global deve revisar antes de retornar."
+        : "PN não localizado na base. A Gestão Global deve imputar ou revisar antes de retornar.";
+    await db.insert(quoteRequests).values({ id, partNumber, dealershipId: profile.dealershipId, requestedByEmail: profile.email, requestedByName: profile.name, status, actionOwnerRole, actionOwnerEmail, description: catalog?.description || "", vt: catalog?.vt || "", origin: catalog?.origin || "", netPriceCents: catalog?.netPriceCents || null, catalogImportedAt: catalog?.importedAt || null, actionNote, requestedAt: now, createdAt: now, updatedAt: now });
+    await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: autoReturned ? "quote_auto_returned" : "quote_requested", entity: "quote", details: autoReturned ? "Cotação " + id + " retornada automaticamente para aprovação da concessionária após localizar o PN " + partNumber + " na base." : "Cotação " + id + " solicitada para o PN " + partNumber + ".", after: { id, partNumber, status, dealership: dealer.name, fresh, catalogReady, autoReturned } });
+    return Response.json({ id, status, fresh, autoReturned });
   } catch (error) { return Response.json({ error: errorMessage(error) }, { status: 500 }); }
 }
 export async function PATCH(request: Request) {
@@ -78,7 +93,23 @@ export async function PATCH(request: Request) {
       const dealerUser = allUsers.find((user) => user.active && normalizeUserRole(user.email, user.role) === "dealer_manager" && user.dealershipId === record.quote.dealershipId);
       await db.insert(quoteCatalog).values({ partNumber: record.quote.partNumber, description, vt, origin, netPriceCents, importedAt: now, updatedAt: now }).onConflictDoUpdate({ target: quoteCatalog.partNumber, set: { description, vt, origin, netPriceCents, importedAt: now, updatedAt: now } });
       patch = { ...patch, status: "returned", actionOwnerRole: "dealer_manager", actionOwnerEmail: dealerUser?.email || "", description, vt, origin, netPriceCents, catalogImportedAt: now, actionNote: payload.actionNote?.trim() || "Cotação retornada pela Gestão Global.", returnedAt: now };
-    } else if (["approve", "reject"].includes(payload.action)) patch = { ...patch, status: payload.action === "approve" ? "order_pending" : "rejected", actionOwnerRole: payload.action === "approve" ? "factory_manager" : "", actionOwnerEmail: payload.action === "approve" ? record.dealership.factoryManagerEmail : "", decidedAt: now, decidedByEmail: profile.email, actionNote: payload.actionNote?.trim() || (payload.action === "approve" ? "Aprovada; encaminhada ao Gestor Fábrica para input do pedido." : "Retorno rejeitado pela concessionária.") };
+    } else if (["approve", "reject"].includes(payload.action)) {
+      if (payload.action === "approve") {
+        const allUsers = await db.select().from(users);
+        const assignedFactoryEmail = record.dealership.factoryManagerEmail.trim().toLowerCase();
+        const factoryUser = allUsers.find((user) => {
+          const role = normalizeUserRole(user.email, user.role);
+          return user.active && role === "factory_manager" && (
+            user.email.toLowerCase() === assignedFactoryEmail ||
+            (!assignedFactoryEmail && user.dealershipId === record.quote.dealershipId)
+          );
+        });
+        if (!factoryUser) return Response.json({ error: "Não há Gestor Fábrica ativo vinculado a esta concessionária." }, { status: 409 });
+        patch = { ...patch, status: "order_pending", actionOwnerRole: "factory_manager", actionOwnerEmail: factoryUser.email, decidedAt: now, decidedByEmail: profile.email, actionNote: payload.actionNote?.trim() || "Aprovada; encaminhada ao Gestor Fábrica para input do pedido." };
+      } else {
+        patch = { ...patch, status: "rejected", actionOwnerRole: "", actionOwnerEmail: "", decidedAt: now, decidedByEmail: profile.email, actionNote: payload.actionNote?.trim() || "Retorno rejeitado pela concessionária." };
+      }
+    }
     else if (payload.action === "place_order") patch = { ...patch, status: "order_input", actionOwnerRole: "", actionOwnerEmail: "", factoryActionAt: now, actionNote: payload.actionNote?.trim() || "Input do pedido realizado pelo Gestor Fábrica." };
     else return Response.json({ error: "Ação de cotação não reconhecida." }, { status: 400 });
     await db.update(quoteRequests).set(patch).where(eq(quoteRequests.id, payload.id));
