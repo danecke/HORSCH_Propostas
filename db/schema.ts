@@ -259,3 +259,30 @@ export const proposalRequests = sqliteTable("proposal_requests", {
   index("proposal_requests_status_idx").on(table.status),
   index("proposal_requests_updated_at_idx").on(table.updatedAt),
 ]);
+
+export const leads = sqliteTable("leads", {
+  id: text("id").primaryKey(),
+  dealershipId: integer("dealership_id").notNull().references(() => dealerships.id, { onDelete: "cascade" }),
+  createdByEmail: text("created_by_email").notNull(),
+  createdByName: text("created_by_name").notNull().default(""),
+  customerName: text("customer_name").notNull(),
+  phone: text("phone").notNull().default(""),
+  email: text("email").notNull().default(""),
+  machineDomain: text("machine_domain").notNull().default(""),
+  partsOfInterest: text("parts_of_interest").notNull().default(""),
+  temperature: text("temperature").notNull().default("warm"),
+  stage: text("stage").notNull().default("new"),
+  negotiatedValueCents: integer("negotiated_value_cents").notNull().default(0),
+  invoiceNumber: text("invoice_number").notNull().default(""),
+  sellerName: text("seller_name").notNull().default(""),
+  sellerEmail: text("seller_email").notNull().default(""),
+  closedAt: text("closed_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("leads_dealership_idx").on(table.dealershipId),
+  index("leads_stage_idx").on(table.stage),
+  index("leads_temperature_idx").on(table.temperature),
+  index("leads_seller_idx").on(table.sellerEmail),
+  index("leads_updated_at_idx").on(table.updatedAt),
+]);

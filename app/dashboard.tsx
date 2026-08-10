@@ -4,9 +4,10 @@ import type { FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { AppUser } from "../lib/auth";
+import { HorschLeadsView, type LeadModuleData } from "./horsch-leads";
 
 type UserRole = "general_admin" | "global_management" | "factory_manager" | "dealer_manager" | "concession";
-type ModuleKey = "proposals" | "quotes" | "price_list";
+type ModuleKey = "proposals" | "quotes" | "price_list" | "leads";
 type ModuleAccess = { key: ModuleKey; enabled: boolean };
 const PROPOSAL_RESPONSIBLE_ROLES: UserRole[] = ["general_admin", "global_management", "factory_manager"];
 type ProposalStatus =
@@ -177,6 +178,9 @@ type CurrentAccess = {
     decideProposal: boolean;
     deleteAnyProposal: boolean;
     deleteOwnDraft: boolean;
+    createLead: boolean;
+    editLead: boolean;
+    viewLeadMetrics: boolean;
   };
 };
 
@@ -191,7 +195,7 @@ type DashboardData = {
 };
 
 type AuditEntry = { id: number; proposalId: string | null; actorEmail: string; actorName: string; action: string; entity: string; details: string; beforeJson: string; afterJson: string; createdAt: string };
-type View = "overview" | "proposals" | "quotes" | "quote-analysis" | "dealerships" | "access" | "history";
+type View = "overview" | "proposals" | "quotes" | "quote-analysis" | "leads" | "dealerships" | "access" | "history";
 
 const STATUS_LABELS: Record<ProposalStatus, string> = {
   draft: "Rascunho",
@@ -294,6 +298,7 @@ export function Dashboard({ user }: { user: AppUser }) {
   const [editProposal, setEditProposal] = useState<Proposal | null>(null);
   const [preview, setPreview] = useState<Proposal | null>(null);
   const [historyProposalId, setHistoryProposalId] = useState<string | null>(null);
+  const [leadData, setLeadData] = useState<LeadModuleData | null>(null);
   const [notice, setNotice] = useState("");
 
   const loadData = useCallback(async () => {
@@ -310,7 +315,11 @@ export function Dashboard({ user }: { user: AppUser }) {
       const requestResponse = payload.me.role === "concession" || !moduleEnabled("proposals") ? null : await fetch("/api/proposal-requests", { cache: "no-store" });
       const requestPayload = requestResponse ? ((await requestResponse.json()) as { requests?: ProposalRequest[]; error?: string }) : { requests: [] };
       if (requestResponse && !requestResponse.ok) throw new Error(requestPayload.error || "Não foi possível carregar as solicitações de proposta.");
+      const leadResponse = moduleEnabled("leads") ? await fetch("/api/leads", { cache: "no-store" }) : null;
+      const leadPayload = leadResponse ? ((await leadResponse.json()) as LeadModuleData & { error?: string }) : null;
+      if (leadResponse && !leadResponse.ok) throw new Error(leadPayload?.error || "Não foi possível carregar os leads.");
       setData({ ...payload, proposalRequests: requestPayload.requests ?? [], quotes: quotePayload.quotes ?? [] });
+      setLeadData(leadPayload);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Erro ao carregar dados.");
     } finally {
@@ -339,6 +348,7 @@ export function Dashboard({ user }: { user: AppUser }) {
   const moduleEnabled = (moduleKey: ModuleKey) => ["general_admin", "global_management", "factory_manager"].includes(data.me.role) || Boolean(data.dealerships.find((dealer) => dealer.id === data.me.dealershipId)?.modules.find((module) => module.key === moduleKey)?.enabled ?? true);
   const proposalsEnabled = moduleEnabled("proposals");
   const quotesEnabled = moduleEnabled("quotes");
+  const leadsEnabled = moduleEnabled("leads");
   const canCreate = data.me.permissions.createProposal && proposalsEnabled;
   const canRequestProposal = data.me.role === "dealer_manager" && proposalsEnabled;
   const concessionOnly = data.me.role === "concession";
@@ -360,7 +370,7 @@ export function Dashboard({ user }: { user: AppUser }) {
         <div className="brand-lockup"><BrandMark className="brand-mark" /><div><strong>HORSCH</strong><span>Brasil</span></div></div>
         <div className="role-card"><span>Perfil ativo</span><strong>{data.me.roleLabel}</strong><small>{scopeDescription(data.me)}</small></div>
         <nav className="sidebar-nav" aria-label="Navegação principal">
-          {concessionOnly ? <NavButton active icon="file" onClick={() => setView("overview")}>Lista de preços</NavButton> : <><NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão geral</NavButton>{proposalsEnabled && <NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton>}{quotesEnabled && <NavButton active={view === "quotes"} icon="clock" onClick={() => setView("quotes")}>Cotações</NavButton>}<NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Concessionárias</NavButton>{data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}</>}
+          {concessionOnly ? <><NavButton active={view === "overview"} icon="file" onClick={() => setView("overview")}>Lista de preços</NavButton>{leadsEnabled && <NavButton active={view === "leads"} icon="trend" onClick={() => setView("leads")}>Horsch Leads</NavButton>}</> : <><NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão geral</NavButton>{proposalsEnabled && <NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton>}{quotesEnabled && <NavButton active={view === "quotes"} icon="clock" onClick={() => setView("quotes")}>Cotações</NavButton>}{leadsEnabled && <NavButton active={view === "leads"} icon="trend" onClick={() => setView("leads")}>Horsch Leads</NavButton>}<NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Concessionárias</NavButton>{data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}</>}
         </nav>
         {(canCreate || canRequestProposal) && <button className="sidebar-new" onClick={() => canRequestProposal ? setShowNewProposalRequest(true) : setShowNewProposal(true)}><Icon name="plus" size={17} />{canRequestProposal ? "Solicitar proposta" : "Nova proposta"}</button>}
         <div className="sidebar-account-actions"><button type="button" onClick={() => setShowChangePassword(true)}><Icon name="key" size={15} />Alterar senha</button></div>
@@ -371,7 +381,9 @@ export function Dashboard({ user }: { user: AppUser }) {
         <header className="mobile-header"><div className="mobile-lockup"><BrandMark className="mobile-mark" /><strong>HORSCH</strong></div><span className="mobile-role">{data.me.roleLabel}</span></header>
         {notice && <div className="toast" role="status"><Icon name="check" size={17} />{notice}</div>}
         {view === "history" && <button type="button" className="outline-button compact back-button workspace-back-button" onClick={() => { setView(proposalsEnabled ? "proposals" : "overview"); setHistoryProposalId(null); }}>← Voltar</button>}
-        {concessionOnly ? <PriceListView /> : view === "overview" ? (
+        {view === "leads" && leadsEnabled && leadData ? (
+          <HorschLeadsView data={leadData} me={data.me} onChanged={async (message) => refreshed(message)} />
+        ) : concessionOnly ? <PriceListView /> : view === "overview" ? (
           <Overview data={data} onNew={() => setShowNewProposal(true)} onOpen={setPreview} onHistory={openHistory} onAll={() => setView("proposals")} />
         ) : view === "proposals" && proposalsEnabled ? (
           <ProposalsView proposals={filteredProposals} proposalRequests={data.proposalRequests} me={data.me} allCount={data.proposals.length} search={search} onSearch={setSearch} status={statusFilter} onStatus={setStatusFilter} canCreate={canCreate} canRequestProposal={canRequestProposal} onNew={() => setShowNewProposal(true)} onNewRequest={() => setShowNewProposalRequest(true)} onOpen={setPreview} canViewHistory={data.me.role === "general_admin"} onHistory={openHistory} onChanged={() => refreshed("Solicitação de proposta atualizada.")} />
@@ -387,7 +399,7 @@ export function Dashboard({ user }: { user: AppUser }) {
           <Overview data={data} onNew={() => setShowNewProposal(true)} onOpen={setPreview} onHistory={openHistory} onAll={() => setView("proposals")} />
         )}
         <nav className="mobile-nav" aria-label="Navegação móvel">
-          {!concessionOnly && <><NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão</NavButton>{proposalsEnabled && <NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton>}{quotesEnabled && <NavButton active={view === "quotes"} icon="clock" onClick={() => setView("quotes")}>Cotações</NavButton>}<NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Rede</NavButton>{data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}</>}
+          {!concessionOnly ? <><NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão</NavButton>{proposalsEnabled && <NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton>}{quotesEnabled && <NavButton active={view === "quotes"} icon="clock" onClick={() => setView("quotes")}>Cotações</NavButton>}{leadsEnabled && <NavButton active={view === "leads"} icon="trend" onClick={() => setView("leads")}>Leads</NavButton>}<NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Rede</NavButton>{data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}</> : leadsEnabled && <NavButton active={view === "leads"} icon="trend" onClick={() => setView("leads")}>Leads</NavButton>}
         </nav>
       </section>
 
@@ -753,11 +765,12 @@ function ModuleAccessModal({ dealership, onClose, onSaved }: { dealership: Deale
   const [modules, setModules] = useState<ModuleAccess[]>(dealership.modules);
   const [busy, setBusy] = useState<ModuleKey | "">("");
   const [error, setError] = useState("");
-  const labels: Record<ModuleKey, string> = { proposals: "Propostas", quotes: "Cotações", price_list: "Lista de preços" };
+  const labels: Record<ModuleKey, string> = { proposals: "Propostas", quotes: "Cotações", price_list: "Lista de preços", leads: "Horsch Leads" };
   const descriptions: Record<ModuleKey, string> = {
     proposals: "Solicitações, propostas comerciais e retornos.",
     quotes: "Cotações de PN, análise 360º e encaminhamento.",
     price_list: "Consulta e controle da lista de preços.",
+    leads: "Funil de vendas, vendedores e resultados.",
   };
 
   async function toggle(moduleKey: ModuleKey) {
