@@ -81,9 +81,7 @@ export async function POST(request: Request) {
     const actionOwnerEmail = autoReturned ? profile.email : globalUser?.email || "";
     const actionNote = autoReturned
       ? "Cotação retornada; aguardando ação do Gestor Concessionária."
-      : catalog
-        ? "Informações disponíveis, mas precisam de revisão antes do retorno."
-        : "Não foi possível completar o retorno automaticamente. A Gestão Global deve revisar antes de responder.";
+      : "Solicitação recebida e encaminhada para análise.";
     await db.insert(quoteRequests).values({ id, partNumber, dealershipId: profile.dealershipId, requestedByEmail: profile.email, requestedByName: profile.name, requestedQuantity, targetNetPriceCents, requestObservation, status, actionOwnerRole, actionOwnerEmail, description: catalog?.description || "", vt: catalog?.vt || "", origin: catalog?.origin || "", netPriceCents: catalog?.netPriceCents || null, catalogImportedAt: catalog?.importedAt || null, actionNote, requestedAt: now, createdAt: now, updatedAt: now });
     await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: autoReturned ? "quote_auto_returned" : "quote_requested", entity: "quote", details: autoReturned ? "Cotação " + id + " retornada automaticamente para aprovação da concessionária após localizar o PN " + partNumber + "." : "Cotação " + id + " solicitada para o PN " + partNumber + ".", after: { id, partNumber, status, dealership: dealer.name, targetNetPriceCents, requestObservation, fresh, catalogReady, autoReturned } });
     return Response.json({ id, status, fresh, autoReturned, requestedQuantity, targetNetPriceCents });
