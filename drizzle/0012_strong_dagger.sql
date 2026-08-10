@@ -1,0 +1,1 @@
+ALTER TABLE `proposals` ADD `commercial_owner_email` text DEFAULT '' NOT NULL;

@@ -57,6 +57,8 @@ type Proposal = {
   totalCents: number;
   customerName: string;
   customerSaleValueCents: number | null;
+  commercialOwnerEmail: string;
+  isActionOwner: boolean;
   counterofferCents: number | null;
   decisionNote: string;
   decidedByEmail: string;
@@ -81,7 +83,7 @@ type QuoteStatus = "global_review" | "data_pending" | "returned" | "approved" | 
 type Quote = {
   id: string; partNumber: string; dealershipId: number; dealership: string; city: string; state: string;
   requestedByEmail: string; requestedByName: string; status: QuoteStatus; statusLabel: string;
-  actionOwnerRole: string; actionOwnerLabel: string; actionOwnerName: string; actionOwnerEmail: string;
+  isActionOwner: boolean; actionOwnerRole: string; actionOwnerLabel: string; actionOwnerName: string; actionOwnerEmail: string;
   description: string; vt: string; origin: string; netPriceCents: number | null; targetNetPriceCents: number | null; requestObservation: string; catalogImportedAt: string | null;
   requestedQuantity: number; approvedQuantity: number | null; priceListIncluded: boolean; priceListIncludedAt: string | null; priceListIncludedByEmail: string | null;
   actionNote: string; requestedAt: string; returnedAt: string | null; decidedAt: string | null; decidedByEmail: string;
@@ -533,7 +535,7 @@ function QuoteMetrics({ quotes }: { quotes: Quote[] }) {
 }
 function QuoteCard({ quote, me, onChanged }: { quote: Quote; me: CurrentAccess; onChanged: () => Promise<void> }) {
   const [description, setDescription] = useState(quote.description); const [vt, setVt] = useState(quote.vt); const [origin, setOrigin] = useState(quote.origin); const [price, setPrice] = useState(quote.netPriceCents ? formatMoneyInput(String(quote.netPriceCents / 100).replace(".", ",")) : ""); const [approvedQuantity, setApprovedQuantity] = useState(String(quote.approvedQuantity ?? quote.requestedQuantity ?? 1)); const [note, setNote] = useState(""); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
-  const review = ["general_admin", "global_management"].includes(me.role) && ["global_review", "data_pending"].includes(quote.status); const decide = ["general_admin", "dealer_manager"].includes(me.role) && quote.status === "returned"; const place = ["general_admin", "factory_manager"].includes(me.role) && quote.status === "order_pending";
+  const review = quote.isActionOwner && ["general_admin", "global_management"].includes(me.role) && ["global_review", "data_pending"].includes(quote.status); const decide = quote.isActionOwner && ["general_admin", "dealer_manager"].includes(me.role) && quote.status === "returned"; const place = quote.isActionOwner && ["general_admin", "factory_manager"].includes(me.role) && quote.status === "order_pending";
   async function action(name: string) {
     setSaving(true); setError("");
     const response = await fetch("/api/quotes", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: quote.id, action: name, description, vt, origin, netPriceCents: parseMoneyToCents(price), approvedQuantity: Number(approvedQuantity), actionNote: note }) });
@@ -541,7 +543,7 @@ function QuoteCard({ quote, me, onChanged }: { quote: Quote; me: CurrentAccess; 
     if (!response.ok) { setError(payload.error || "Não foi possível atualizar a cotação."); setSaving(false); return; }
     setSaving(false); await onChanged();
   }
-  return <article className="panel quote-card"><header className="quote-card-header"><div><span className="eyebrow">{quote.id}</span><h2>PN {quote.partNumber}</h2><p>{quote.dealership + " · " + quote.city + (quote.state ? " · " + quote.state : "")}</p></div><span className={"status-badge quote-status " + quote.status}><i />{quote.statusLabel}</span></header><div className="quote-meta-grid"><div><span>Solicitada por</span><strong>{quote.requestedByName || quote.requestedByEmail}</strong><small>{formatDateTime(quote.requestedAt)}</small></div><div><span>Quantidade</span><strong>{quote.approvedQuantity ?? quote.requestedQuantity} un.</strong><small>{quote.approvedQuantity ? "Aprovada" : "Solicitada"}</small></div><div><span>Net price alvo</span><strong>{quote.targetNetPriceCents ? formatBRL(quote.targetNetPriceCents) : "—"}</strong><small>Definido pela concessionária</small></div><div><span>Próxima ação</span><strong>{quote.actionOwnerLabel || "Encerrada"}</strong><small>{quote.actionOwnerName}</small></div></div>{quote.requestObservation && <div className="quote-request-observation"><span>Contexto da solicitação</span><p>{quote.requestObservation}</p></div>}{quote.description && <div className="quote-return-grid"><div><span>Descrição</span><strong>{quote.description}</strong></div><div><span>VT</span><strong>{quote.vt || "—"}</strong></div><div><span>Origem</span><strong>{quote.origin || "—"}</strong></div><div><span>Net price retornado</span><strong>{quote.netPriceCents ? formatBRL(quote.netPriceCents) : "—"}</strong></div></div>}
+  return <article className="panel quote-card"><header className="quote-card-header"><div><span className="eyebrow">{quote.id}</span><h2>PN {quote.partNumber}</h2><p>{quote.dealership + " · " + quote.city + (quote.state ? " · " + quote.state : "")}</p></div><span className={"status-badge quote-status " + quote.status}><i />{quote.statusLabel}</span></header><div className="quote-meta-grid"><div><span>Solicitada por</span><strong>{quote.requestedByName || quote.requestedByEmail}</strong><small>{formatDateTime(quote.requestedAt)}</small></div><div><span>Quantidade</span><strong>{quote.approvedQuantity ?? quote.requestedQuantity} un.</strong><small>{quote.approvedQuantity ? "Aprovada" : "Solicitada"}</small></div><div><span>Net price alvo</span><strong>{quote.targetNetPriceCents ? formatBRL(quote.targetNetPriceCents) : "—"}</strong><small>Definido pela concessionária</small></div>{quote.isActionOwner ? <div><span>Próxima ação</span><strong>{quote.actionOwnerLabel || "Encerrada"}</strong><small>Responsabilidade atribuída a você</small></div> : <div><span>Acompanhamento</span><strong>Somente consulta</strong><small>Sem ação atribuída a este perfil</small></div>}</div>{quote.requestObservation && <div className="quote-request-observation"><span>Contexto da solicitação</span><p>{quote.requestObservation}</p></div>}{quote.description && <div className="quote-return-grid"><div><span>Descrição</span><strong>{quote.description}</strong></div><div><span>VT</span><strong>{quote.vt || "—"}</strong></div><div><span>Origem</span><strong>{quote.origin || "—"}</strong></div><div><span>Net price retornado</span><strong>{quote.netPriceCents ? formatBRL(quote.netPriceCents) : "—"}</strong></div></div>}
     {review && <div className="quote-action-box"><strong>Resposta da Gestão Global</strong><p>Confira os dados, solicite imputação/revisão quando necessário ou retorne a cotação para aprovação da concessionária.</p><div className="quote-edit-grid"><label className="field"><span>Descrição</span><input value={description} onChange={(event) => setDescription(event.target.value)} /></label><label className="field"><span>VT</span><input value={vt} onChange={(event) => setVt(event.target.value)} /></label><label className="field"><span>Origem</span><input value={origin} onChange={(event) => setOrigin(event.target.value)} /></label><label className="field"><span>Net price</span><input value={price} onChange={(event) => setPrice(event.target.value)} /></label></div><label className="field"><span>Observação</span><input value={note} onChange={(event) => setNote(event.target.value)} /></label><div className="quote-action-buttons"><button type="button" className="outline-button" disabled={saving} onClick={() => void action("needs_action")}>Solicitar imputação/revisão</button><button type="button" className="primary-button" disabled={saving} onClick={() => void action("return_quote")}>Enviar para aprovação</button></div></div>}
     {decide && <div className="quote-action-box"><strong>Aprovação da Gestão Concessionária</strong><p>Analise o retorno da Gestão Global. Se reprovar, a cotação será encerrada e continuará visível aos níveis superiores.</p><label className="field"><span>Quantidade aprovada</span><input type="number" min="1" value={approvedQuantity} onChange={(event) => setApprovedQuantity(event.target.value)} /></label><label className="field"><span>Observação</span><input value={note} onChange={(event) => setNote(event.target.value)} /></label><div className="quote-action-buttons"><button type="button" className="outline-button danger-button" disabled={saving} onClick={() => void action("reject")}>Reprovar e encerrar</button><button type="button" className="primary-button" disabled={saving} onClick={() => void action("approve")}>Aprovar e enviar à fábrica</button></div></div>}
     {place && <div className="quote-action-box factory-decision"><strong>Input do pedido</strong><p>Cotação aprovada e aguardando lançamento em carteira.</p><label className="field"><span>Referência do pedido</span><input value={note} onChange={(event) => setNote(event.target.value)} /></label><button type="button" className="primary-button" disabled={saving} onClick={() => void action("place_order")}>Marcar input realizado</button></div>}{error && <p className="form-error">{error}</p>}</article>;
@@ -1177,9 +1179,9 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
   const [error, setError] = useState("");
 
   const decisionOpen =
-    me.role === "dealer_manager" && ["sent", "counteroffer"].includes(status);
+    proposal.isActionOwner && me.role === "dealer_manager" && ["sent", "counteroffer"].includes(status);
   const canReviewCounteroffer =
-    ["general_admin", "global_management", "factory_manager"].includes(me.role) && status === "counteroffer";
+    proposal.isActionOwner && ["general_admin", "global_management", "factory_manager"].includes(me.role) && status === "counteroffer";
   const counterofferTotal = counterItems.reduce(
     (sum, item) => sum + item.quantity * parseMoneyToCents(item.price),
     0,
@@ -1199,7 +1201,8 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
     (me.permissions.deleteOwnDraft &&
       status === "draft" &&
       proposal.createdByEmail === me.email);
-  const canEdit = ["general_admin", "global_management", "factory_manager"].includes(me.role) && status !== "expired";
+  const canEdit = proposal.isActionOwner && ["general_admin", "global_management", "factory_manager"].includes(me.role) && status !== "expired";
+  const canManageStatus = proposal.isActionOwner && (me.role === "dealer_manager" || ["general_admin", "global_management", "factory_manager"].includes(me.role));
 
   function updateCounterItem(
     id: number,
@@ -1337,7 +1340,7 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
             </span>
           </div>
           <div className="preview-actions">
-            {!decisionOpen && (
+            {!decisionOpen && canManageStatus && (
               <label>
                 Status
                 <select
@@ -1364,7 +1367,7 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
               </button>
             )}
             {canEdit && <button type="button" className="outline-button dark" onClick={onEdit}>Editar proposta</button>}
-            {!decisionOpen && status !== "expired" && emailStatus !== "sent" && (
+            {!decisionOpen && proposal.isActionOwner && status !== "expired" && emailStatus !== "sent" && (
               <button
                 type="button"
                 className="outline-button dark"

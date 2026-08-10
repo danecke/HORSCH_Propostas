@@ -13,7 +13,8 @@ function canSee(profile: NonNullable<Awaited<ReturnType<typeof getAccessProfile>
   if (profile.role === "factory_manager") return dealer.factoryManagerEmail.toLowerCase() === profile.email.toLowerCase();
   return profile.role === "dealer_manager" && dealer.id === profile.dealershipId;
 }
-function canAct(profile: NonNullable<Awaited<ReturnType<typeof getAccessProfile>>>, status: string, action: string) {
+function canAct(profile: NonNullable<Awaited<ReturnType<typeof getAccessProfile>>>, status: string, action: string, actionOwnerEmail: string) {
+  if (!actionOwnerEmail || actionOwnerEmail.trim().toLowerCase() !== profile.email.trim().toLowerCase()) return false;
   if (["return_quote", "needs_action"].includes(action)) return ["general_admin", "global_management"].includes(profile.role);
   if (["approve", "reject"].includes(action)) return ["general_admin", "dealer_manager"].includes(profile.role) && status === "returned";
   return action === "place_order" && ["general_admin", "factory_manager"].includes(profile.role) && status === "order_pending";
@@ -43,7 +44,8 @@ export async function GET() {
           .replace(/\bbase\b/gi, "informações disponíveis")
           .replace(/retornad[oa]s? automaticamente/gi, "retornadas");
       const listEntry = priceList.get(quote.partNumber);
-      return { ...quote, actionNote, dealership: dealership.name, city: dealership.city, state: dealership.state, statusLabel: statusLabel(quote.status), actionOwnerRole: ownerRole, actionOwnerLabel: ownerRole ? roleLabel(ownerRole as "global_management" | "factory_manager" | "dealer_manager") : "", actionOwnerName: owner?.name || quote.actionOwnerEmail || "—", requestedByName: requester?.name || quote.requestedByName, priceListIncluded: Boolean(listEntry), priceListIncludedAt: listEntry?.includedAt || null, priceListIncludedByEmail: listEntry?.includedByEmail || null };
+      const isActionOwner = Boolean(quote.actionOwnerEmail && quote.actionOwnerEmail.trim().toLowerCase() === profile.email.trim().toLowerCase());
+      return { ...quote, actionNote, dealership: dealership.name, city: dealership.city, state: dealership.state, statusLabel: statusLabel(quote.status), isActionOwner, actionOwnerRole: isActionOwner ? ownerRole : "", actionOwnerLabel: isActionOwner && ownerRole ? roleLabel(ownerRole as "global_management" | "factory_manager" | "dealer_manager") : "", actionOwnerName: isActionOwner ? (owner?.name || "Você") : "", actionOwnerEmail: isActionOwner ? quote.actionOwnerEmail : "", requestedByName: requester?.name || quote.requestedByName, priceListIncluded: Boolean(listEntry), priceListIncludedAt: listEntry?.includedAt || null, priceListIncludedByEmail: listEntry?.includedByEmail || null };
     }) });
   } catch (error) { return Response.json({ error: errorMessage(error) }, { status: 500 }); }
 }
@@ -107,7 +109,7 @@ export async function PATCH(request: Request) {
       await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: existing ? "quote_removed_from_price_list" : "quote_added_to_price_list", entity: "quote", details: "Controle da lista de preços atualizado para o PN " + record.quote.partNumber + ".", before: { included: Boolean(existing) }, after: { included: !existing } });
       return Response.json({ ok: true, included: !existing });
     }
-    if (!canAct(profile, record.quote.status, payload.action)) return Response.json({ error: "Seu perfil não pode executar esta ação nesta etapa." }, { status: 403 });
+    if (!canAct(profile, record.quote.status, payload.action, record.quote.actionOwnerEmail)) return Response.json({ error: "Esta ação está disponível somente para o responsável atual da cotação." }, { status: 403 });
     const now = new Date().toISOString();
     let patch: Partial<typeof quoteRequests.$inferInsert> = { updatedAt: now };
     if (payload.action === "needs_action") patch = { ...patch, status: "data_pending", actionOwnerRole: "global_management", actionOwnerEmail: profile.email, actionNote: payload.actionNote?.trim() || "Imputar ou revisar os dados do PN." };

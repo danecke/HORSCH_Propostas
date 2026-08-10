@@ -32,6 +32,7 @@ export const proposals = sqliteTable(
     contactName: text("contact_name").notNull().default(""),
     contactEmail: text("contact_email").notNull().default(""),
     commercialOwner: text("commercial_owner").notNull(),
+    commercialOwnerEmail: text("commercial_owner_email").notNull().default(""),
     status: text("status").notNull().default("draft"),
     issueDate: text("issue_date").notNull(),
     validUntil: text("valid_until").notNull(),

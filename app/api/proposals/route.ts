@@ -104,6 +104,18 @@ function activeUserWithRole(
   );
 }
 
+function proposalActionOwnerEmail(
+  proposal: { status: string; commercialOwnerEmail: string; createdByEmail: string; dealershipId: number },
+  dealer: { id: number; contactEmail: string },
+  allUsers: UserRecord[],
+) {
+  if (proposal.status === "sent") {
+    const dealerManager = activeUserWithRole(allUsers, "dealer_manager", (record) => record.dealershipId === dealer.id);
+    return (dealerManager?.email || dealer.contactEmail || "").trim().toLowerCase();
+  }
+  return (proposal.commercialOwnerEmail || proposal.createdByEmail || "").trim().toLowerCase();
+}
+
 function normalizeItems(items: ItemInput[]) {
   return items.map((item) => ({
     partNumber: item.partNumber?.trim() ?? "",
@@ -211,6 +223,7 @@ export async function GET() {
         dealershipContactEmail: dealerships.contactEmail,
         factoryManagerEmail: dealerships.factoryManagerEmail,
         commercialOwner: proposals.commercialOwner,
+        commercialOwnerEmail: proposals.commercialOwnerEmail,
         status: proposals.status,
         issueDate: proposals.issueDate,
         validUntil: proposals.validUntil,
@@ -274,12 +287,18 @@ export async function GET() {
       documentsByProposal.set(document.proposalId, current);
     }
 
-    const proposalData = rows.map(({ dealershipContactEmail, ...row }) => ({
-      ...row,
-      contactEmail: row.contactEmail || dealershipContactEmail,
-      items: itemsByProposal.get(row.id) ?? [],
-      documents: documentsByProposal.get(row.id) ?? [],
-    }));
+    const dealerById = new Map(allDealers.map((dealer) => [dealer.id, dealer]));
+    const proposalData = rows.map(({ dealershipContactEmail, ...row }) => {
+      const actionOwnerEmail = proposalActionOwnerEmail(row, dealerById.get(row.dealershipId) || { id: row.dealershipId, contactEmail: dealershipContactEmail }, allUsers);
+      return {
+        ...row,
+        contactEmail: row.contactEmail || dealershipContactEmail,
+        isActionOwner: actionOwnerEmail === profile.email.trim().toLowerCase(),
+        commercialOwnerEmail: row.commercialOwnerEmail || row.createdByEmail,
+        items: itemsByProposal.get(row.id) ?? [],
+        documents: documentsByProposal.get(row.id) ?? [],
+      };
+    });
     const dealershipData = visibleDealers.map((dealer) => {
       const dealerProposals = rows.filter((row) => row.dealershipId === dealer.id);
       const factoryManager = activeUserWithRole(
@@ -496,6 +515,7 @@ export async function POST(request: Request) {
       contactName,
       contactEmail,
       commercialOwner,
+      commercialOwnerEmail: assignedManagerEmail,
       status: "draft",
       issueDate,
       validUntil,
@@ -602,12 +622,18 @@ export async function PATCH(request: Request) {
       return expiredProposalResponse(record.proposal.validUntil);
     }
 
+    const allUsers = await db.select().from(users).orderBy(users.name, users.email);
+    const isActionOwner = proposalActionOwnerEmail(record.proposal, record.dealer, allUsers) === profile.email.trim().toLowerCase();
+    const actionRequired = Boolean(payload.action || payload.status);
+    if (actionRequired && !isActionOwner) {
+      return Response.json({ error: "Esta ação está disponível somente para o responsável atual da proposta." }, { status: 403 });
+    }
+
     if (payload.action === "edit") {
       if (!["general_admin", "global_management", "factory_manager"].includes(profile.role)) return Response.json({ error: "Somente ADM Geral, Gestão Global ou Gestor Fábrica podem editar propostas." }, { status: 403 });
       const editedDealershipId = Math.trunc(Number(payload.dealershipId) || record.dealer.id);
       const [editedDealer] = await db.select().from(dealerships).where(eq(dealerships.id, editedDealershipId)).limit(1);
       if (!editedDealer || !dealerIsVisible(profile, editedDealer)) return forbidden();
-      const allUsers = await db.select().from(users).orderBy(users.name, users.email);
       const requestedManagerEmail = payload.factoryManagerEmail?.trim().toLowerCase() || editedDealer.factoryManagerEmail.toLowerCase();
       const assignedManager = allUsers.find((candidate) => {
         const role = normalizeUserRole(candidate.email, candidate.role);
@@ -626,7 +652,7 @@ export async function PATCH(request: Request) {
       const customerSaleValueCents = normalizeOptionalCents(payload.customerSaleValueCents);
       const now = new Date().toISOString();
       await db.batch([
-        db.update(proposals).set({ dealershipId: editedDealer.id, contactName: payload.contactName?.trim() || editedDealer.contactName, contactEmail: (payload.contactEmail?.trim() || editedDealer.contactEmail).toLowerCase(), commercialOwner: assignedManager.name, status: "draft", validUntil, totalCents, customerName, customerSaleValueCents, counterofferCents: null, decisionNote: "", decidedByEmail: "", counterofferPaymentTerms: "", counterofferFreightTerms: "", counterofferDeliveryTerms: "", counterofferSubmittedAt: null, counterofferReviewedAt: null, counterofferReviewedByEmail: "", counterofferReviewNote: "", emailStatus: "not_requested", emailSentAt: null, emailError: "Proposta editada; reenvio necessário.", updatedAt: now }).where(eq(proposals.id, record.proposal.id)),
+        db.update(proposals).set({ dealershipId: editedDealer.id, contactName: payload.contactName?.trim() || editedDealer.contactName, contactEmail: (payload.contactEmail?.trim() || editedDealer.contactEmail).toLowerCase(), commercialOwner: assignedManager.name, commercialOwnerEmail: assignedManager.email.toLowerCase(), status: "draft", validUntil, totalCents, customerName, customerSaleValueCents, counterofferCents: null, decisionNote: "", decidedByEmail: "", counterofferPaymentTerms: "", counterofferFreightTerms: "", counterofferDeliveryTerms: "", counterofferSubmittedAt: null, counterofferReviewedAt: null, counterofferReviewedByEmail: "", counterofferReviewNote: "", emailStatus: "not_requested", emailSentAt: null, emailError: "Proposta editada; reenvio necessário.", updatedAt: now }).where(eq(proposals.id, record.proposal.id)),
         db.delete(proposalItems).where(eq(proposalItems.proposalId, record.proposal.id)),
         db.insert(proposalItems).values(validItems.map((item) => ({ proposalId: record.proposal.id, ...item }))),
       ]);
