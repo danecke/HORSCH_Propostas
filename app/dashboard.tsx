@@ -90,6 +90,31 @@ type Quote = {
   factoryActionAt: string | null; updatedAt: string;
 };
 
+type ProposalRequest = {
+  id: string;
+  dealershipId: number;
+  dealership: string;
+  city: string;
+  state: string;
+  requestedByEmail: string;
+  requestedByName: string;
+  partNumber: string;
+  description: string;
+  targetNetPriceCents: number;
+  observation: string;
+  status: "requested" | "responded" | "rejected";
+  statusLabel: string;
+  actionOwnerName: string;
+  actionOwnerEmail: string;
+  isActionOwner: boolean;
+  responseNetPriceCents: number | null;
+  responseObservation: string;
+  respondedByEmail: string;
+  respondedAt: string | null;
+  requestedAt: string;
+  updatedAt: string;
+};
+
 type Dealership = {
   id: number;
   name: string;
@@ -151,6 +176,7 @@ type CurrentAccess = {
 
 type DashboardData = {
   proposals: Proposal[];
+  proposalRequests: ProposalRequest[];
   quotes: Quote[];
   dealerships: Dealership[];
   users: AccessUser[];
@@ -253,6 +279,7 @@ export function Dashboard({ user }: { user: AppUser }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | ProposalStatus>("all");
   const [showNewProposal, setShowNewProposal] = useState(false);
+  const [showNewProposalRequest, setShowNewProposalRequest] = useState(false);
   const [showNewAccess, setShowNewAccess] = useState(false);
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [editProposal, setEditProposal] = useState<Proposal | null>(null);
@@ -269,7 +296,10 @@ export function Dashboard({ user }: { user: AppUser }) {
       const quoteResponse = payload.me.role === "concession" ? null : await fetch("/api/quotes", { cache: "no-store" });
       const quotePayload = quoteResponse ? ((await quoteResponse.json()) as { quotes?: Quote[]; error?: string }) : { quotes: [] };
       if (quoteResponse && !quoteResponse.ok) throw new Error(quotePayload.error || "Não foi possível carregar as cotações.");
-      setData({ ...payload, quotes: quotePayload.quotes ?? [] });
+      const requestResponse = payload.me.role === "concession" ? null : await fetch("/api/proposal-requests", { cache: "no-store" });
+      const requestPayload = requestResponse ? ((await requestResponse.json()) as { requests?: ProposalRequest[]; error?: string }) : { requests: [] };
+      if (requestResponse && !requestResponse.ok) throw new Error(requestPayload.error || "Não foi possível carregar as solicitações de proposta.");
+      setData({ ...payload, proposalRequests: requestPayload.requests ?? [], quotes: quotePayload.quotes ?? [] });
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Erro ao carregar dados.");
     } finally {
@@ -296,6 +326,7 @@ export function Dashboard({ user }: { user: AppUser }) {
   if (loading) return <LoadingState />;
   if (error || !data) return <ErrorState message={error || "Acesso não disponível."} retry={loadData} />;
   const canCreate = data.me.permissions.createProposal;
+  const canRequestProposal = data.me.role === "dealer_manager";
   const concessionOnly = data.me.role === "concession";
   const proposalResponsibles = data.proposalResponsibles.filter((item) => item.active);
   async function refreshed(message: string) { setNotice(message); await loadData(); }
@@ -317,7 +348,7 @@ export function Dashboard({ user }: { user: AppUser }) {
         <nav className="sidebar-nav" aria-label="Navegação principal">
           {concessionOnly ? <NavButton active icon="file" onClick={() => setView("overview")}>Lista de preços</NavButton> : <><NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão geral</NavButton><NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton><NavButton active={view === "quotes"} icon="clock" onClick={() => setView("quotes")}>Cotações</NavButton><NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Concessionárias</NavButton>{data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}</>}
         </nav>
-        {canCreate && <button className="sidebar-new" onClick={() => setShowNewProposal(true)}><Icon name="plus" size={17} />Nova proposta</button>}
+        {(canCreate || canRequestProposal) && <button className="sidebar-new" onClick={() => canRequestProposal ? setShowNewProposalRequest(true) : setShowNewProposal(true)}><Icon name="plus" size={17} />{canRequestProposal ? "Solicitar proposta" : "Nova proposta"}</button>}
         <div className="sidebar-account-actions"><button type="button" onClick={() => setShowChangePassword(true)}><Icon name="key" size={15} />Alterar senha</button></div>
         <div className="sidebar-footer"><div className="user-avatar">{initials(user.displayName)}</div><div className="user-copy"><strong>{user.displayName}</strong><span>{user.email}</span></div><button className="signout-link" type="button" onClick={() => void signOut()} title="Sair" aria-label="Sair">↗</button></div>
       </aside>
@@ -329,7 +360,7 @@ export function Dashboard({ user }: { user: AppUser }) {
         {concessionOnly ? <PriceListView /> : view === "overview" ? (
           <Overview data={data} onNew={() => setShowNewProposal(true)} onOpen={setPreview} onHistory={openHistory} onAll={() => setView("proposals")} />
         ) : view === "proposals" ? (
-          <ProposalsView proposals={filteredProposals} allCount={data.proposals.length} search={search} onSearch={setSearch} status={statusFilter} onStatus={setStatusFilter} canCreate={canCreate} onNew={() => setShowNewProposal(true)} onOpen={setPreview} canViewHistory={data.me.role === "general_admin"} onHistory={openHistory} />
+          <ProposalsView proposals={filteredProposals} proposalRequests={data.proposalRequests} me={data.me} allCount={data.proposals.length} search={search} onSearch={setSearch} status={statusFilter} onStatus={setStatusFilter} canCreate={canCreate} canRequestProposal={canRequestProposal} onNew={() => setShowNewProposal(true)} onNewRequest={() => setShowNewProposalRequest(true)} onOpen={setPreview} canViewHistory={data.me.role === "general_admin"} onHistory={openHistory} onChanged={() => refreshed("Solicitação de proposta atualizada.")} />
         ) : view === "quotes" ? (
           <QuotesView quotes={data.quotes} me={data.me} onChanged={() => refreshed("Cotação atualizada com sucesso.")} />
         ) : view === "dealerships" ? (
@@ -345,6 +376,7 @@ export function Dashboard({ user }: { user: AppUser }) {
       </section>
 
       {showNewProposal && <NewProposalModal userEmail={data.me.email} role={data.me.role} dealerships={data.dealerships} proposalResponsibles={proposalResponsibles} onClose={() => setShowNewProposal(false)} onSaved={async (message) => { setShowNewProposal(false); await refreshed(message); }} />}
+      {showNewProposalRequest && <NewProposalRequestModal onClose={() => setShowNewProposalRequest(false)} onSaved={async (message) => { setShowNewProposalRequest(false); await refreshed(message); }} />}
       {showNewAccess && <NewAccessModal me={data.me} dealerships={data.dealerships} onClose={() => setShowNewAccess(false)} onSaved={async () => { setShowNewAccess(false); await refreshed("Novo acesso criado com sucesso."); }} />}
       {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} onSaved={() => { setShowChangePassword(false); setNotice("Senha alterada com sucesso."); }} />}
       {editProposal && <NewProposalModal userEmail={data.me.email} role={data.me.role} dealerships={data.dealerships} proposalResponsibles={proposalResponsibles} proposal={editProposal} onClose={() => setEditProposal(null)} onSaved={async (message) => { setEditProposal(null); await refreshed(message); }} />}
@@ -500,22 +532,22 @@ function QuoteAnalysisDetail({ insight, canManagePriceList, updating, onToggle }
 
 function QuotesView({ quotes, me, onChanged }: { quotes: Quote[]; me: CurrentAccess; onChanged: () => Promise<void> }) {
   const [section, setSection] = useState<"flow" | "analysis">("flow");
-  const [pn, setPn] = useState(""); const [quantity, setQuantity] = useState("1"); const [targetNetPrice, setTargetNetPrice] = useState(""); const [observation, setObservation] = useState(""); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
+  const [pn, setPn] = useState(""); const [quantity, setQuantity] = useState("1"); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
   const returnedQuotes = quotes.filter((quote) => quote.status === "returned");
   const globalView = ["general_admin", "global_management"].includes(me.role);
   async function submit(event: FormEvent) {
     event.preventDefault(); setSaving(true); setError("");
-    const response = await fetch("/api/quotes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ partNumber: pn, quantity: Number(quantity), targetNetPriceCents: parseMoneyToCents(targetNetPrice), observation }) });
+    const response = await fetch("/api/quotes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ partNumber: pn, quantity: Number(quantity) }) });
     const payload = (await response.json()) as { error?: string };
     if (!response.ok) { setError(payload.error || "Não foi possível solicitar a cotação."); setSaving(false); return; }
-    setPn(""); setQuantity("1"); setTargetNetPrice(""); setObservation(""); setSaving(false); await onChanged();
+    setPn(""); setQuantity("1"); setSaving(false); await onChanged();
   }
   const canRequestQuote = me.role === "dealer_manager";
   return <div className="content-frame quotes-shell"><header className="page-heading quote-page-heading"><div><span className="eyebrow">Peças</span><h1>Cotações</h1></div><div className="quotes-tabs" role="tablist"><button type="button" className={section === "flow" ? "active" : ""} onClick={() => setSection("flow")}>Fluxo</button>{me.permissions.analyzeQuotes && <button type="button" className={section === "analysis" ? "active" : ""} onClick={() => setSection("analysis")}>360º</button>}</div></header>
     {section === "analysis" ? <QuoteAnalysisView quotes={quotes} me={me} onChanged={onChanged} /> : <>
     {me.role === "dealer_manager" && returnedQuotes.length > 0 && <QuoteReturnAlert quotes={returnedQuotes} />}
     {globalView && <QuoteMetrics quotes={quotes} />}
-    {canRequestQuote && <form className="panel quote-request-panel" onSubmit={(event) => void submit(event)}><div className="quote-request-copy"><span className="eyebrow">Nova solicitação</span><strong>Solicitar cotação</strong></div><div className="quote-request-fields"><label className="field"><span>PN</span><input value={pn} onChange={(event) => setPn(event.target.value)} placeholder="Ex.: 34061200" required /></label><label className="field"><span>Qtd.</span><input type="number" min="1" value={quantity} onChange={(event) => setQuantity(event.target.value)} required /></label><label className="field"><span>Net price alvo</span><input inputMode="decimal" value={targetNetPrice} onChange={(event) => setTargetNetPrice(event.target.value)} placeholder="R$ 0,00" required /></label><button className="primary-button" disabled={saving}>{saving ? "Enviando..." : "Solicitar"}</button></div><label className="field quote-observation-field"><span>Observação</span><textarea value={observation} onChange={(event) => setObservation(event.target.value)} placeholder="Cliente ou condição da negociação (opcional)" rows={2} /></label>{error && <p className="form-error">{error}</p>}</form>}
+    {canRequestQuote && <form className="panel quote-request-panel" onSubmit={(event) => void submit(event)}><div className="quote-request-copy"><span className="eyebrow">Nova solicitação</span><strong>Solicitar cotação</strong></div><div className="quote-request-fields"><label className="field"><span>PN necessário</span><input value={pn} onChange={(event) => setPn(event.target.value)} placeholder="Ex.: 34061200" required /></label><label className="field"><span>Qtd.</span><input type="number" min="1" value={quantity} onChange={(event) => setQuantity(event.target.value)} required /></label><button className="primary-button" disabled={saving}>{saving ? "Enviando..." : "Solicitar"}</button></div>{error && <p className="form-error">{error}</p>}</form>}
     <section className="quote-list">{quotes.length ? quotes.map((quote) => <QuoteCard key={quote.id} quote={quote} me={me} onChanged={onChanged} />) : <article className="panel"><EmptyState title="Nenhuma cotação registrada" text={me.permissions.requestQuote ? "Solicite o primeiro PN para iniciar o fluxo." : "As cotações do seu escopo aparecerão aqui."} /></article>}</section>
     </>}
   </div>;
@@ -543,7 +575,7 @@ function QuoteCard({ quote, me, onChanged }: { quote: Quote; me: CurrentAccess; 
     if (!response.ok) { setError(payload.error || "Não foi possível atualizar a cotação."); setSaving(false); return; }
     setSaving(false); await onChanged();
   }
-  return <article className="panel quote-card"><header className="quote-card-header"><div><span className="eyebrow">{quote.id}</span><h2>PN {quote.partNumber}</h2><p>{quote.dealership + " · " + quote.city + (quote.state ? " · " + quote.state : "")}</p></div><span className={"status-badge quote-status " + quote.status}><i />{quote.statusLabel}</span></header><div className="quote-meta-grid"><div><span>Solicitada por</span><strong>{quote.requestedByName || quote.requestedByEmail}</strong><small>{formatDateTime(quote.requestedAt)}</small></div><div><span>Quantidade</span><strong>{quote.approvedQuantity ?? quote.requestedQuantity} un.</strong><small>{quote.approvedQuantity ? "Aprovada" : "Solicitada"}</small></div><div><span>Net price alvo</span><strong>{quote.targetNetPriceCents ? formatBRL(quote.targetNetPriceCents) : "—"}</strong><small>Definido pela concessionária</small></div>{quote.isActionOwner ? <div><span>Próxima ação</span><strong>{quote.actionOwnerLabel || "Encerrada"}</strong><small>Responsabilidade atribuída a você</small></div> : <div><span>Acompanhamento</span><strong>Somente consulta</strong><small>Sem ação atribuída a este perfil</small></div>}</div>{quote.requestObservation && <div className="quote-request-observation"><span>Contexto da solicitação</span><p>{quote.requestObservation}</p></div>}{quote.description && <div className="quote-return-grid"><div><span>Descrição</span><strong>{quote.description}</strong></div><div><span>VT</span><strong>{quote.vt || "—"}</strong></div><div><span>Origem</span><strong>{quote.origin || "—"}</strong></div><div><span>Net price retornado</span><strong>{quote.netPriceCents ? formatBRL(quote.netPriceCents) : "—"}</strong></div></div>}
+  return <article className="panel quote-card"><header className="quote-card-header"><div><span className="eyebrow">{quote.id}</span><h2>PN {quote.partNumber}</h2><p>{quote.dealership + " · " + quote.city + (quote.state ? " · " + quote.state : "")}</p></div><span className={"status-badge quote-status " + quote.status}><i />{quote.statusLabel}</span></header><div className="quote-meta-grid"><div><span>Solicitada por</span><strong>{quote.requestedByName || quote.requestedByEmail}</strong><small>{formatDateTime(quote.requestedAt)}</small></div><div><span>Quantidade</span><strong>{quote.approvedQuantity ?? quote.requestedQuantity} un.</strong><small>{quote.approvedQuantity ? "Aprovada" : "Solicitada"}</small></div>{quote.isActionOwner ? <div><span>Próxima ação</span><strong>{quote.actionOwnerLabel || "Encerrada"}</strong><small>Responsabilidade atribuída a você</small></div> : <div><span>Acompanhamento</span><strong>Somente consulta</strong><small>Sem ação atribuída a este perfil</small></div>}</div>{quote.description && <div className="quote-return-grid"><div><span>Descrição</span><strong>{quote.description}</strong></div><div><span>VT</span><strong>{quote.vt || "—"}</strong></div><div><span>Origem</span><strong>{quote.origin || "—"}</strong></div><div><span>Net price retornado</span><strong>{quote.netPriceCents ? formatBRL(quote.netPriceCents) : "—"}</strong></div></div>}
     {review && <div className="quote-action-box"><strong>Resposta da Gestão Global</strong><p>Confira os dados, solicite imputação/revisão quando necessário ou retorne a cotação para aprovação da concessionária.</p><div className="quote-edit-grid"><label className="field"><span>Descrição</span><input value={description} onChange={(event) => setDescription(event.target.value)} /></label><label className="field"><span>VT</span><input value={vt} onChange={(event) => setVt(event.target.value)} /></label><label className="field"><span>Origem</span><input value={origin} onChange={(event) => setOrigin(event.target.value)} /></label><label className="field"><span>Net price</span><input value={price} onChange={(event) => setPrice(event.target.value)} /></label></div><label className="field"><span>Observação</span><input value={note} onChange={(event) => setNote(event.target.value)} /></label><div className="quote-action-buttons"><button type="button" className="outline-button" disabled={saving} onClick={() => void action("needs_action")}>Solicitar imputação/revisão</button><button type="button" className="primary-button" disabled={saving} onClick={() => void action("return_quote")}>Enviar para aprovação</button></div></div>}
     {decide && <div className="quote-action-box"><strong>Aprovação da Gestão Concessionária</strong><p>Analise o retorno da Gestão Global. Se reprovar, a cotação será encerrada e continuará visível aos níveis superiores.</p><label className="field"><span>Quantidade aprovada</span><input type="number" min="1" value={approvedQuantity} onChange={(event) => setApprovedQuantity(event.target.value)} /></label><label className="field"><span>Observação</span><input value={note} onChange={(event) => setNote(event.target.value)} /></label><div className="quote-action-buttons"><button type="button" className="outline-button danger-button" disabled={saving} onClick={() => void action("reject")}>Reprovar e encerrar</button><button type="button" className="primary-button" disabled={saving} onClick={() => void action("approve")}>Aprovar e enviar à fábrica</button></div></div>}
     {place && <div className="quote-action-box factory-decision"><strong>Input do pedido</strong><p>Cotação aprovada e aguardando lançamento em carteira.</p><label className="field"><span>Referência do pedido</span><input value={note} onChange={(event) => setNote(event.target.value)} /></label><button type="button" className="primary-button" disabled={saving} onClick={() => void action("place_order")}>Marcar input realizado</button></div>}{error && <p className="form-error">{error}</p>}</article>;
@@ -641,8 +673,29 @@ function Pipeline({ proposals }: { proposals: Proposal[] }) {
   return <div className="pipeline-list">{stages.map((stage) => { const matches = proposals.filter((proposal) => proposal.status === stage.status); const count = matches.length; const value = matches.reduce((sum, proposal) => sum + proposal.totalCents, 0); return <div className="pipeline-row" key={stage.status}><div className="pipeline-label"><span>{stage.label}</span><strong>{count}</strong></div><div className="pipeline-track"><span className={`pipeline-fill ${stage.status}`} style={{ width: `${Math.max(count ? 10 : 0, (count / max) * 100)}%` }} /></div><small>{formatBRL(value)}</small></div>; })}</div>;
 }
 
-function ProposalsView({ proposals, allCount, search, onSearch, status, onStatus, canCreate, onNew, onOpen, canViewHistory, onHistory }: { proposals: Proposal[]; allCount: number; search: string; onSearch: (value: string) => void; status: "all" | ProposalStatus; onStatus: (value: "all" | ProposalStatus) => void; canCreate: boolean; onNew: () => void; onOpen: (proposal: Proposal) => void; canViewHistory: boolean; onHistory: (proposalId: string) => void }) {
-  return <div className="content-frame"><header className="page-heading"><div><span className="eyebrow">Operação comercial</span><h1>Propostas</h1><p>{allCount} registros dentro do seu nível de acesso.</p></div>{canCreate && <button className="primary-button" onClick={onNew}><Icon name="plus" size={18} />Nova proposta</button>}</header><article className="panel full-list-panel"><div className="list-toolbar"><label className="search-field"><Icon name="search" size={18} /><input value={search} onChange={(event) => onSearch(event.target.value)} placeholder="Buscar proposta, concessionária ou responsável" /></label><select value={status} onChange={(event) => onStatus(event.target.value as "all" | ProposalStatus)} aria-label="Filtrar por status"><option value="all">Todos os status</option>{STATUS_ORDER.map((item) => <option key={item} value={item}>{STATUS_LABELS[item]}</option>)}</select></div><ProposalTable proposals={proposals} onOpen={onOpen} canViewHistory={canViewHistory} onHistory={onHistory} /></article></div>;
+function ProposalsView({ proposals, proposalRequests, me, allCount, search, onSearch, status, onStatus, canCreate, canRequestProposal, onNew, onNewRequest, onOpen, canViewHistory, onHistory, onChanged }: { proposals: Proposal[]; proposalRequests: ProposalRequest[]; me: CurrentAccess; allCount: number; search: string; onSearch: (value: string) => void; status: "all" | ProposalStatus; onStatus: (value: "all" | ProposalStatus) => void; canCreate: boolean; canRequestProposal: boolean; onNew: () => void; onNewRequest: () => void; onOpen: (proposal: Proposal) => void; canViewHistory: boolean; onHistory: (proposalId: string) => void; onChanged: () => Promise<void> }) {
+  return <div className="content-frame"><header className="page-heading"><div><span className="eyebrow">Operação comercial</span><h1>Propostas</h1><p>{allCount} propostas comerciais no seu nível de acesso.</p></div><div className="heading-actions">{canRequestProposal && <button className="outline-button" onClick={onNewRequest}><Icon name="plus" size={18} />Solicitar proposta</button>}{canCreate && <button className="primary-button" onClick={onNew}><Icon name="plus" size={18} />Nova proposta</button>}</div></header><ProposalRequestsSection requests={proposalRequests} me={me} canRequest={canRequestProposal} onNew={onNewRequest} onChanged={onChanged} /><article className="panel full-list-panel"><div className="list-toolbar"><label className="search-field"><Icon name="search" size={18} /><input value={search} onChange={(event) => onSearch(event.target.value)} placeholder="Buscar proposta, concessionária ou responsável" /></label><select value={status} onChange={(event) => onStatus(event.target.value as "all" | ProposalStatus)} aria-label="Filtrar por status"><option value="all">Todos os status</option>{STATUS_ORDER.map((item) => <option key={item} value={item}>{STATUS_LABELS[item]}</option>)}</select></div><ProposalTable proposals={proposals} onOpen={onOpen} canViewHistory={canViewHistory} onHistory={onHistory} /></article></div>;
+}
+
+function ProposalRequestsSection({ requests, me, canRequest, onNew, onChanged }: { requests: ProposalRequest[]; me: CurrentAccess; canRequest: boolean; onNew: () => void; onChanged: () => Promise<void> }) {
+  const pending = requests.filter((request) => request.status === "requested").length;
+  return <section className="proposal-requests-section"><header className="section-heading"><div><span className="eyebrow">Fluxo separado de cotações</span><h2>Solicitações de proposta comercial</h2><p>Envie a necessidade ao Gestor Global e acompanhe a resposta neste fluxo.</p></div>{canRequest && <button className="primary-button compact" type="button" onClick={onNew}><Icon name="plus" size={15} />Nova solicitação</button>}{!canRequest && <span className="request-counter">{pending} pendente{pending === 1 ? "" : "s"}</span>}</header>{requests.length ? <div className="proposal-request-list">{requests.map((request) => <ProposalRequestCard key={request.id} request={request} me={me} onChanged={onChanged} />)}</div> : <article className="panel proposal-request-empty"><strong>{canRequest ? "Solicite uma proposta comercial" : "Nenhuma solicitação pendente"}</strong><span>{canRequest ? "Informe o PN, a descrição, o net price objetivo e o contexto da negociação." : "As solicitações enviadas pelos concessionários aparecerão aqui."}</span></article>}</section>;
+}
+
+function ProposalRequestCard({ request, me, onChanged }: { request: ProposalRequest; me: CurrentAccess; onChanged: () => Promise<void> }) {
+  const [responsePrice, setResponsePrice] = useState(request.responseNetPriceCents ? formatMoneyInput(String(request.responseNetPriceCents / 100).replace(".", ",")) : "");
+  const [responseObservation, setResponseObservation] = useState(request.responseObservation);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const canRespond = request.isActionOwner && ["general_admin", "global_management"].includes(me.role) && request.status === "requested";
+  async function respond(action: "respond" | "reject") {
+    setSaving(true); setError("");
+    const response = await fetch("/api/proposal-requests", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: request.id, action, responseNetPriceCents: parseMoneyToCents(responsePrice), responseObservation }) });
+    const payload = (await response.json()) as { error?: string };
+    if (!response.ok) { setError(payload.error || "Não foi possível atualizar a solicitação."); setSaving(false); return; }
+    await onChanged();
+  }
+  return <article className={`panel proposal-request-card ${request.status}`}><header><div><span className="eyebrow">{request.id}</span><h3>PN {request.partNumber}</h3><p>{request.dealership} · {request.requestedByName}</p></div><span className={`status-badge request-status ${request.status}`}><i />{request.statusLabel}</span></header><div className="proposal-request-data"><div><span>Descrição</span><strong>{request.description}</strong></div><div><span>Net price objetivo</span><strong>{formatBRL(request.targetNetPriceCents)}</strong></div><div><span>Solicitada em</span><strong>{formatDateTime(request.requestedAt)}</strong></div></div>{request.observation && <div className="proposal-request-note"><span>Observações</span><p>{request.observation}</p></div>}{request.status === "responded" && <div className="proposal-response-return"><span>Retorno da Gestão Global</span><strong>{request.responseNetPriceCents ? formatBRL(request.responseNetPriceCents) : "—"}</strong>{request.responseObservation && <p>{request.responseObservation}</p>}</div>}{request.status === "rejected" && request.responseObservation && <div className="proposal-response-return rejected"><span>Encerramento</span><p>{request.responseObservation}</p></div>}{canRespond && <div className="proposal-request-response"><strong>Responder solicitação</strong><div className="form-grid two-columns"><label className="field"><span>Net price retornado</span><input inputMode="decimal" value={responsePrice} onChange={(event) => setResponsePrice(event.target.value)} placeholder="R$ 0,00" /></label><label className="field"><span>Observação da resposta</span><input value={responseObservation} onChange={(event) => setResponseObservation(event.target.value)} placeholder="Condição ou orientação comercial" /></label></div><div className="quote-action-buttons"><button type="button" className="outline-button danger-button" disabled={saving} onClick={() => void respond("reject")}>Encerrar</button><button type="button" className="primary-button" disabled={saving || !responsePrice.trim()} onClick={() => void respond("respond")}>{saving ? "Salvando..." : "Retornar ao concessionário"}</button></div>{error && <p className="form-error">{error}</p>}</div>}</article>;
 }
 
 function ProposalTable({ proposals, onOpen, canViewHistory, onHistory }: { proposals: Proposal[]; onOpen: (proposal: Proposal) => void; canViewHistory: boolean; onHistory: (proposalId: string) => void }) {
@@ -779,6 +832,23 @@ type DeliveryResponse = {
   recipientEmail: string;
   error?: string;
 };
+
+function NewProposalRequestModal({ onClose, onSaved }: { onClose: () => void; onSaved: (message: string) => Promise<void> }) {
+  const [partNumber, setPartNumber] = useState("");
+  const [description, setDescription] = useState("");
+  const [targetNetPrice, setTargetNetPrice] = useState("");
+  const [observation, setObservation] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  async function submit(event: FormEvent) {
+    event.preventDefault(); setSaving(true); setError("");
+    const response = await fetch("/api/proposal-requests", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ partNumber, description, targetNetPriceCents: parseMoneyToCents(targetNetPrice), observation }) });
+    const payload = (await response.json()) as { error?: string };
+    if (!response.ok) { setError(payload.error || "Não foi possível enviar a solicitação."); setSaving(false); return; }
+    await onSaved("Solicitação de proposta enviada à Gestão Global.");
+  }
+  return <div className="modal-backdrop" role="dialog" aria-modal="true"><form className="proposal-request-modal" onSubmit={(event) => void submit(event)}><header className="modal-header"><div><span className="eyebrow">Propostas comerciais</span><h2>Solicitar proposta</h2><p>Envie somente a necessidade comercial para a Gestão Global analisar.</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Fechar"><Icon name="close" /></button></header><div className="form-scroll"><div className="request-form-grid"><label className="field"><span>PN necessário</span><input value={partNumber} onChange={(event) => setPartNumber(event.target.value)} placeholder="Ex.: 34061200" required /></label><label className="field"><span>Net price objetivo</span><input inputMode="decimal" value={targetNetPrice} onChange={(event) => setTargetNetPrice(event.target.value)} onBlur={(event) => setTargetNetPrice(formatMoneyInput(event.target.value))} placeholder="R$ 0,00" required /></label><label className="field request-description-field"><span>Descrição do item</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ex.: Tampa transparente do conjunto" required /></label><label className="field request-observation-field"><span>Observações</span><textarea value={observation} onChange={(event) => setObservation(event.target.value)} placeholder="Cliente, situação da negociação e contexto comercial" rows={5} /></label></div>{error && <p className="form-error">{error}</p>}</div><footer className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button type="submit" className="primary-button" disabled={saving}>{saving ? "Enviando..." : "Enviar para Gestão Global"}</button></footer></form></div>;
+}
 
 function NewProposalModal({
   userEmail,

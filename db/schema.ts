@@ -214,3 +214,26 @@ export const quotePriceListControl = sqliteTable("quote_price_list_control", {
   includedAt: text("included_at").notNull(),
   includedByEmail: text("included_by_email").notNull(),
 });
+
+export const proposalRequests = sqliteTable("proposal_requests", {
+  id: text("id").primaryKey(),
+  dealershipId: integer("dealership_id").notNull().references(() => dealerships.id),
+  requestedByEmail: text("requested_by_email").notNull(),
+  requestedByName: text("requested_by_name").notNull().default(""),
+  partNumber: text("part_number").notNull(),
+  description: text("description").notNull(),
+  targetNetPriceCents: integer("target_net_price_cents").notNull(),
+  observation: text("observation").notNull().default(""),
+  status: text("status").notNull().default("requested"),
+  actionOwnerEmail: text("action_owner_email").notNull().default(""),
+  responseNetPriceCents: integer("response_net_price_cents"),
+  responseObservation: text("response_observation").notNull().default(""),
+  respondedByEmail: text("responded_by_email").notNull().default(""),
+  respondedAt: text("responded_at"),
+  requestedAt: text("requested_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("proposal_requests_dealership_idx").on(table.dealershipId),
+  index("proposal_requests_status_idx").on(table.status),
+  index("proposal_requests_updated_at_idx").on(table.updatedAt),
+]);

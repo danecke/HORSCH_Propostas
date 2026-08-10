@@ -543,14 +543,53 @@ button { cursor: pointer; }
 .quote-page-heading p { display: none; }
 .quote-request-panel { grid-template-columns: minmax(150px, .45fr) minmax(0, 1.55fr); }
 .quote-request-copy span:last-child { display: none; }
-.quote-request-fields { grid-template-columns: minmax(130px, 1fr) 78px minmax(130px, 1fr) auto; }
+.quote-request-fields { grid-template-columns: minmax(0, 1fr) 90px auto; }
 .quote-request-panel .quote-observation-field { margin-top: 0; }
 .quote-request-observation { padding: 9px 11px; }
 .quote-card-header p { display: none; }
 .quote-meta-grid small { color: #85898e; }
+.quote-meta-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .analysis-item-data + .analysis-detail-metrics { margin-top: 0; border-top: 0; }
+.heading-actions { display: flex; align-items: center; gap: 9px; }
+.proposal-requests-section { margin-bottom: 18px; }
+.proposal-requests-section > .section-heading { display: flex; align-items: end; justify-content: space-between; gap: 15px; }
+.request-counter { padding: 7px 9px; color: #8a5a0c; background: #fff2d9; font-size: 9px; font-weight: 800; }
+.proposal-request-list { display: grid; gap: 10px; }
+.proposal-request-card { padding: 17px 19px; border-left: 3px solid #d6a03b; }
+.proposal-request-card.responded { border-left-color: var(--green); }
+.proposal-request-card.rejected { border-left-color: #9b4350; }
+.proposal-request-card > header { display: flex; align-items: start; justify-content: space-between; gap: 15px; }
+.proposal-request-card h3 { margin: 3px 0 0; font-size: 16px; }
+.proposal-request-card header p { margin: 4px 0 0; color: var(--muted); font-size: 10px; }
+.request-status.requested { color: #8a5d13; background: #fff7e4; }
+.request-status.responded { color: #267348; background: #eaf7ef; }
+.request-status.rejected { color: #922433; background: #f9e7ea; }
+.proposal-request-data { margin-top: 14px; display: grid; grid-template-columns: minmax(0, 1.4fr) 190px 150px; gap: 12px; padding: 11px 13px; border: 1px solid #edf0f2; background: #fbfcfc; }
+.proposal-request-data span, .proposal-request-note > span, .proposal-response-return > span { display: block; color: var(--muted); font-size: 8px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
+.proposal-request-data strong { display: block; margin-top: 4px; font-size: 10px; line-height: 1.35; }
+.proposal-request-note { margin-top: 10px; padding: 10px 12px; border-left: 3px solid #d6a03b; background: #fffaf0; }
+.proposal-request-note p, .proposal-response-return p { margin: 5px 0 0; color: #5d533d; font-size: 10px; line-height: 1.5; white-space: pre-wrap; }
+.proposal-response-return { margin-top: 10px; padding: 11px 13px; border-left: 3px solid var(--green); background: #f2fbf6; }
+.proposal-response-return strong { display: block; margin-top: 4px; color: #176746; font-size: 15px; }
+.proposal-response-return p { color: #547064; }
+.proposal-response-return.rejected { border-left-color: #9b4350; background: #fff7f8; }
+.proposal-response-return.rejected p { color: #7f4d55; }
+.proposal-request-response { margin-top: 12px; padding-top: 13px; display: grid; gap: 10px; border-top: 1px solid var(--line); }
+.proposal-request-response > strong { font-size: 11px; }
+.proposal-request-empty { padding: 15px 18px; display: grid; gap: 4px; }
+.proposal-request-empty strong { font-size: 12px; }
+.proposal-request-empty span { color: var(--muted); font-size: 10px; }
+.proposal-request-modal { width: min(680px, 100%); max-height: calc(100vh - 48px); display: flex; flex-direction: column; overflow: hidden; background: white; box-shadow: 0 28px 90px rgb(0 0 0 / 30%); }
+.proposal-request-modal .form-scroll { padding-top: 22px; }
+.request-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; }
+.request-description-field, .request-observation-field { grid-column: 1 / -1; }
+.request-observation-field textarea { min-height: 112px; resize: vertical; }
 @media (max-width:780px) {
   .quote-request-panel, .quote-request-fields { grid-template-columns: 1fr; }
+  .heading-actions, .proposal-requests-section > .section-heading { align-items: stretch; flex-direction: column; }
+  .proposal-request-data, .request-form-grid { grid-template-columns: 1fr; }
+  .proposal-request-card > header { align-items: stretch; flex-direction: column; }
+  .proposal-request-modal { width: 100%; height: 100vh; max-height: none; }
 }
 
 /* Loading and error */

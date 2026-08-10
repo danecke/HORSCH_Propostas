@@ -92,6 +92,13 @@
       "when": 1786371373500,
       "tag": "0012_strong_dagger",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1786372249509,
+      "tag": "0013_shallow_abomination",
+      "breakpoints": true
     }
   ]
 }
