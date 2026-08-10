@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 const DAY = 86400000;
 function forbidden() { return Response.json({ error: "Seu perfil não possui acesso às cotações." }, { status: 403 }); }
 function actionForStatus(status: string) { return ["global_review", "data_pending"].includes(status) ? "global_management" : status === "returned" ? "dealer_manager" : status === "order_pending" ? "factory_manager" : ""; }
-function statusLabel(status: string) { return ({ global_review: "Aguardando Gestão Global", data_pending: "Ação da Gestão Global", returned: "Aguardando aprovação", approved: "Aprovada", rejected: "Reprovada e encerrada", order_pending: "Aguardando Gestor Fábrica", order_input: "Pedido colocado" } as Record<string, string>)[status] || status; }
+function statusLabel(status: string) { return ({ global_review: "Aguardando Gestão Global", data_pending: "Ação da Gestão Global", returned: "Aguardando ação do Gestor Concessionária", approved: "Aprovada", rejected: "Reprovada e encerrada", order_pending: "Aguardando Gestor Fábrica", order_input: "Pedido colocado" } as Record<string, string>)[status] || status; }
 function canSee(profile: NonNullable<Awaited<ReturnType<typeof getAccessProfile>>>, dealer: { id: number; factoryManagerEmail: string }) {
   if (["general_admin", "global_management"].includes(profile.role)) return true;
   if (profile.role === "factory_manager") return dealer.factoryManagerEmail.toLowerCase() === profile.email.toLowerCase();
@@ -31,12 +31,14 @@ export async function GET() {
       const ownerRole = actionForStatus(quote.status);
       const owner = allUsers.find((user) => user.email.toLowerCase() === quote.actionOwnerEmail.toLowerCase());
       const requester = allUsers.find((user) => user.email.toLowerCase() === quote.requestedByEmail.toLowerCase());
-      const actionNote = quote.actionNote
-        .replace(/dados do PN encontrados na base e retornados automaticamente:?/gi, "Informações do PN encontradas e retornadas automaticamente:")
-        .replace(/base de dados/gi, "informações disponíveis")
-        .replace(/\bbase\b/gi, "informações disponíveis");
-      const returnSource = quote.status === "returned" ? (/automaticamente/i.test(quote.actionNote) ? "automatic" : "global") : null;
-      return { ...quote, returnSource, actionNote, dealership: dealership.name, city: dealership.city, state: dealership.state, statusLabel: statusLabel(quote.status), actionOwnerRole: ownerRole, actionOwnerLabel: ownerRole ? roleLabel(ownerRole as "global_management" | "factory_manager" | "dealer_manager") : "", actionOwnerName: owner?.name || quote.actionOwnerEmail || "—", requestedByName: requester?.name || quote.requestedByName };
+      const actionNote = quote.status === "returned"
+        ? "Cotação retornada; aguardando ação do Gestor Concessionária."
+        : quote.actionNote
+          .replace(/dados do PN encontrados na base e retornados automaticamente:?/gi, "Informações disponíveis:")
+          .replace(/base de dados/gi, "informações disponíveis")
+          .replace(/\bbase\b/gi, "informações disponíveis")
+          .replace(/retornad[oa]s? automaticamente/gi, "retornadas");
+      return { ...quote, actionNote, dealership: dealership.name, city: dealership.city, state: dealership.state, statusLabel: statusLabel(quote.status), actionOwnerRole: ownerRole, actionOwnerLabel: ownerRole ? roleLabel(ownerRole as "global_management" | "factory_manager" | "dealer_manager") : "", actionOwnerName: owner?.name || quote.actionOwnerEmail || "—", requestedByName: requester?.name || quote.requestedByName };
     }) });
   } catch (error) { return Response.json({ error: errorMessage(error) }, { status: 500 }); }
 }
@@ -69,7 +71,7 @@ export async function POST(request: Request) {
     const actionOwnerRole = autoReturned ? "dealer_manager" : "global_management";
     const actionOwnerEmail = autoReturned ? profile.email : globalUser?.email || "";
     const actionNote = autoReturned
-      ? "Informações do PN encontradas e retornadas automaticamente: descrição, VT, origem e net price."
+      ? "Cotação retornada; aguardando ação do Gestor Concessionária."
       : catalog
         ? "Informações disponíveis, mas precisam de revisão antes do retorno."
         : "Não foi possível completar o retorno automaticamente. A Gestão Global deve revisar antes de responder.";

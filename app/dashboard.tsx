@@ -81,7 +81,6 @@ type QuoteStatus = "global_review" | "data_pending" | "returned" | "approved" | 
 type Quote = {
   id: string; partNumber: string; dealershipId: number; dealership: string; city: string; state: string;
   requestedByEmail: string; requestedByName: string; status: QuoteStatus; statusLabel: string;
-  returnSource: "automatic" | "global" | null;
   actionOwnerRole: string; actionOwnerLabel: string; actionOwnerName: string; actionOwnerEmail: string;
   description: string; vt: string; origin: string; netPriceCents: number | null; catalogImportedAt: string | null;
   actionNote: string; requestedAt: string; returnedAt: string | null; decidedAt: string | null; decidedByEmail: string;
@@ -369,9 +368,7 @@ function QuotesView({ quotes, me, onChanged }: { quotes: Quote[]; me: CurrentAcc
   </div>;
 }
 function QuoteReturnAlert({ quotes }: { quotes: Quote[] }) {
-  const automatic = quotes.filter((quote) => quote.returnSource === "automatic").length;
-  const global = quotes.length - automatic;
-  return <section className="quote-return-alert" role="status"><div className="quote-alert-icon"><Icon name="check" size={20} /></div><div className="quote-alert-copy"><span className="eyebrow">Retorno disponível</span><h2>As informações solicitadas já foram retornadas</h2><p>{automatic > 0 && `${automatic} ${automatic === 1 ? "cotação retornada automaticamente" : "cotações retornadas automaticamente"}`}{automatic > 0 && global > 0 && " e "}{global > 0 && `${global} ${global === 1 ? "respondida pela Gestão Global" : "respondidas pela Gestão Global"}`}. Confira os dados e aprove ou reprove cada cotação.</p><div className="quote-alert-list">{quotes.slice(0, 4).map((quote) => <div key={quote.id}><strong>PN {quote.partNumber}</strong><span>{quote.returnSource === "automatic" ? "Retorno automático" : "Resposta da Gestão Global"}</span></div>)}</div>{quotes.length > 4 && <small>+{quotes.length - 4} retornos disponíveis abaixo.</small>}</div></section>;
+  return <section className="quote-return-alert" role="status"><div className="quote-alert-icon"><Icon name="check" size={20} /></div><div className="quote-alert-copy"><span className="eyebrow">Retorno disponível</span><h2>As informações solicitadas já foram retornadas</h2><p>As cotações abaixo estão aguardando sua ação. Confira os dados e aprove ou reprove cada uma.</p><div className="quote-alert-list">{quotes.slice(0, 4).map((quote) => <div key={quote.id}><strong>PN {quote.partNumber}</strong><span>Aguardando sua ação</span></div>)}</div>{quotes.length > 4 && <small>+{quotes.length - 4} retornos disponíveis abaixo.</small>}</div></section>;
 }
 function QuoteMetrics({ quotes }: { quotes: Quote[] }) {
   const orders = quotes.filter((quote) => quote.status === "order_input").length;
