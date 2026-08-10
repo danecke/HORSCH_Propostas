@@ -35,7 +35,8 @@ export async function GET() {
         .replace(/dados do PN encontrados na base e retornados automaticamente:?/gi, "Informações do PN encontradas e retornadas automaticamente:")
         .replace(/base de dados/gi, "informações disponíveis")
         .replace(/\bbase\b/gi, "informações disponíveis");
-      return { ...quote, actionNote, dealership: dealership.name, city: dealership.city, state: dealership.state, statusLabel: statusLabel(quote.status), actionOwnerRole: ownerRole, actionOwnerLabel: ownerRole ? roleLabel(ownerRole as "global_management" | "factory_manager" | "dealer_manager") : "", actionOwnerName: owner?.name || quote.actionOwnerEmail || "—", requestedByName: requester?.name || quote.requestedByName };
+      const returnSource = quote.status === "returned" ? (/automaticamente/i.test(quote.actionNote) ? "automatic" : "global") : null;
+      return { ...quote, returnSource, actionNote, dealership: dealership.name, city: dealership.city, state: dealership.state, statusLabel: statusLabel(quote.status), actionOwnerRole: ownerRole, actionOwnerLabel: ownerRole ? roleLabel(ownerRole as "global_management" | "factory_manager" | "dealer_manager") : "", actionOwnerName: owner?.name || quote.actionOwnerEmail || "—", requestedByName: requester?.name || quote.requestedByName };
     }) });
   } catch (error) { return Response.json({ error: errorMessage(error) }, { status: 500 }); }
 }

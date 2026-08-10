@@ -81,6 +81,7 @@ type QuoteStatus = "global_review" | "data_pending" | "returned" | "approved" | 
 type Quote = {
   id: string; partNumber: string; dealershipId: number; dealership: string; city: string; state: string;
   requestedByEmail: string; requestedByName: string; status: QuoteStatus; statusLabel: string;
+  returnSource: "automatic" | "global" | null;
   actionOwnerRole: string; actionOwnerLabel: string; actionOwnerName: string; actionOwnerEmail: string;
   description: string; vt: string; origin: string; netPriceCents: number | null; catalogImportedAt: string | null;
   actionNote: string; requestedAt: string; returnedAt: string | null; decidedAt: string | null; decidedByEmail: string;
@@ -351,6 +352,8 @@ export function Dashboard({ user }: { user: AppUser }) {
 
 function QuotesView({ quotes, me, onChanged }: { quotes: Quote[]; me: CurrentAccess; onChanged: () => Promise<void> }) {
   const [pn, setPn] = useState(""); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
+  const returnedQuotes = quotes.filter((quote) => quote.status === "returned");
+  const globalView = ["general_admin", "global_management"].includes(me.role);
   async function submit(event: FormEvent) {
     event.preventDefault(); setSaving(true); setError("");
     const response = await fetch("/api/quotes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ partNumber: pn }) });
@@ -359,9 +362,26 @@ function QuotesView({ quotes, me, onChanged }: { quotes: Quote[]; me: CurrentAcc
     setPn(""); setSaving(false); await onChanged();
   }
   return <div className="content-frame"><header className="page-heading quote-page-heading"><div><span className="eyebrow">Atendimento de peças</span><h1>Cotações</h1><p>Solicite um PN, acompanhe o retorno e avance cada etapa com o responsável indicado.</p></div></header>
+    {me.role === "dealer_manager" && returnedQuotes.length > 0 && <QuoteReturnAlert quotes={returnedQuotes} />}
+    {globalView && <QuoteMetrics quotes={quotes} />}
     {me.permissions.requestQuote && <form className="panel quote-request-panel" onSubmit={(event) => void submit(event)}><div className="quote-request-copy"><span className="eyebrow">Nova solicitação</span><strong>Consulte um PN</strong><span>Quando houver informações disponíveis, descrição, VT, origem e net price serão preenchidos automaticamente.</span></div><div className="quote-request-fields"><label className="field"><span>PN</span><input value={pn} onChange={(event) => setPn(event.target.value)} placeholder="Ex.: 34061200" required /></label><button className="primary-button" disabled={saving}>{saving ? "Solicitando..." : "Solicitar cotação"}</button></div>{error && <p className="form-error">{error}</p>}</form>}
     <section className="quote-list">{quotes.length ? quotes.map((quote) => <QuoteCard key={quote.id} quote={quote} me={me} onChanged={onChanged} />) : <article className="panel"><EmptyState title="Nenhuma cotação registrada" text={me.permissions.requestQuote ? "Solicite o primeiro PN para iniciar o fluxo." : "As cotações do seu escopo aparecerão aqui."} /></article>}</section>
   </div>;
+}
+function QuoteReturnAlert({ quotes }: { quotes: Quote[] }) {
+  const automatic = quotes.filter((quote) => quote.returnSource === "automatic").length;
+  const global = quotes.length - automatic;
+  return <section className="quote-return-alert" role="status"><div className="quote-alert-icon"><Icon name="check" size={20} /></div><div className="quote-alert-copy"><span className="eyebrow">Retorno disponível</span><h2>As informações solicitadas já foram retornadas</h2><p>{automatic > 0 && `${automatic} ${automatic === 1 ? "cotação retornada automaticamente" : "cotações retornadas automaticamente"}`}{automatic > 0 && global > 0 && " e "}{global > 0 && `${global} ${global === 1 ? "respondida pela Gestão Global" : "respondidas pela Gestão Global"}`}. Confira os dados e aprove ou reprove cada cotação.</p><div className="quote-alert-list">{quotes.slice(0, 4).map((quote) => <div key={quote.id}><strong>PN {quote.partNumber}</strong><span>{quote.returnSource === "automatic" ? "Retorno automático" : "Resposta da Gestão Global"}</span></div>)}</div>{quotes.length > 4 && <small>+{quotes.length - 4} retornos disponíveis abaixo.</small>}</div></section>;
+}
+function QuoteMetrics({ quotes }: { quotes: Quote[] }) {
+  const orders = quotes.filter((quote) => quote.status === "order_input").length;
+  const rejected = quotes.filter((quote) => quote.status === "rejected").length;
+  const decided = quotes.filter((quote) => ["approved", "rejected", "order_pending", "order_input"].includes(quote.status)).length;
+  const approved = quotes.filter((quote) => ["approved", "order_pending", "order_input"].includes(quote.status)).length;
+  const conversion = quotes.length ? Math.round((orders / quotes.length) * 100) : 0;
+  const approval = decided ? Math.round((approved / decided) * 100) : 0;
+  const pending = quotes.filter((quote) => ["global_review", "data_pending"].includes(quote.status)).length;
+  return <section className="quote-metrics-block"><div className="section-heading"><div><span className="eyebrow">Gestão Global</span><h2>Indicadores de cotações</h2><p>Acompanhe o volume solicitado, a conversão em pedido e os pontos de atenção.</p></div></div><div className="metric-grid quote-metrics"><MetricCard label="PNs solicitados" value={String(quotes.length)} meta="Cotações registradas" icon="file" tone="red" /><MetricCard label="Viraram pedido" value={String(orders)} meta={`${conversion}% do total solicitado`} icon="check" tone="green" /><MetricCard label="Negativa para pedido" value={String(rejected)} meta="Reprovadas pela concessionária" icon="close" tone="amber" /><MetricCard label="Taxa de aprovação" value={`${approval}%`} meta={`${approved} aprovadas ou em pedido`} icon="trend" tone="dark" /><MetricCard label="Em análise" value={String(pending)} meta="Aguardando ação global" icon="clock" tone="amber" /></div></section>;
 }
 function QuoteCard({ quote, me, onChanged }: { quote: Quote; me: CurrentAccess; onChanged: () => Promise<void> }) {
   const [description, setDescription] = useState(quote.description); const [vt, setVt] = useState(quote.vt); const [origin, setOrigin] = useState(quote.origin); const [price, setPrice] = useState(quote.netPriceCents ? formatMoneyInput(String(quote.netPriceCents / 100).replace(".", ",")) : ""); const [note, setNote] = useState(""); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
