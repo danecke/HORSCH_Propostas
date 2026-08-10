@@ -246,21 +246,22 @@ button { cursor: pointer; }
 .search-field { width: min(470px, 100%); min-height: 42px; padding: 0 13px; display: flex; align-items: center; gap: 10px; border: 1px solid #d8dade; color: #8a8d91; background: white; }
 .search-field input { width: 100%; border: 0; outline: 0; color: var(--ink); background: transparent; font-size: 12px; }
 .list-toolbar select, .preview-actions select { min-height: 42px; padding: 0 38px 0 12px; border: 1px solid #d8dade; color: var(--ink); background: white; font-size: 12px; }
-.dealership-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
-.dealer-card { min-height: 250px; padding: 23px; display: flex; flex-direction: column; border: 1px solid var(--line); background: white; box-shadow: 0 4px 14px rgb(27 31 35 / 3%); }
+.dealership-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.dealer-card { min-height: 250px; padding: 24px; display: flex; flex-direction: column; border: 1px solid #e3e6e8; border-radius: 14px; background: white; box-shadow: 0 8px 24px rgb(27 31 35 / 4%); transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
+.dealer-card:hover { border-color: #d3d8dc; box-shadow: 0 14px 32px rgb(27 31 35 / 8%); transform: translateY(-2px); }
 .dealer-card > header { display: flex; gap: 13px; align-items: center; }
-.dealer-large-monogram { width: 46px; height: 46px; display: grid; place-items: center; flex: 0 0 auto; color: white; background: var(--graphite); font-size: 11px; font-weight: 900; }
+.dealer-large-monogram { width: 46px; height: 46px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 12px; color: var(--red); background: #fdebed; font-size: 11px; font-weight: 900; }
 .dealer-card h2 { margin: 0; font-size: 15px; }
 .dealer-card header p { margin: 5px 0 0; color: var(--muted); font-size: 10px; }
-.dealer-card dl { margin: 27px 0 20px; display: grid; grid-template-columns: .8fr .8fr 1.4fr; }
+.dealer-card dl { margin: 25px 0 20px; display: grid; grid-template-columns: .8fr .8fr 1.4fr; }
 .dealer-registration-meta { margin-top: 13px; display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 9px; }
 .dealer-registration-meta strong { color: var(--ink); font-size: 9px; }
 .dealer-card dl div { padding: 0 13px; border-left: 1px solid var(--line); }
 .dealer-card dl div:first-child { padding-left: 0; border-left: 0; }
 .dealer-card dt { color: var(--muted); font-size: 9px; }
 .dealer-card dd { margin: 7px 0 0; font-size: 15px; font-weight: 800; }
-.dealer-card > footer { margin-top: auto; padding-top: 15px; display: flex; justify-content: space-between; align-items: end; gap: 10px; border-top: 1px solid var(--line); }
-.dealer-manager { margin: -8px 0 18px; padding: 11px 12px; background: #f6f7f8; }
+.dealer-card > footer { margin-top: auto; padding-top: 16px; display: flex; justify-content: space-between; align-items: end; gap: 14px; border-top: 1px solid var(--line); }
+.dealer-manager { margin: -8px 0 18px; padding: 12px; border: 1px solid #edf0f2; border-radius: 10px; background: #f8f9fa; }
 .dealer-manager span, .dealer-manager strong, .dealer-manager small { display: block; }
 .dealer-manager span { color: var(--muted); font-size: 8px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .dealer-manager strong { margin-top: 4px; overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
@@ -268,7 +269,9 @@ button { cursor: pointer; }
 .dealer-card footer span, .dealer-card footer strong, .dealer-card footer small { display: block; }
 .dealer-card footer span { color: var(--muted); font-size: 9px; }
 .dealer-card footer strong { margin-top: 4px; font-size: 10px; }
-.dealer-card-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.dealer-card-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.dealer-card-actions .text-button { min-height: 30px; padding: 0 9px; border: 1px solid #e1c1c6; border-radius: 7px; color: var(--red); background: #fff9fa; font-size: 10px; }
+.dealer-card-actions .text-button:hover { border-color: var(--red); background: #fdebed; }
 .empty-state { min-height: 270px; padding: 30px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
 .empty-state > span { width: 52px; height: 52px; display: grid; place-items: center; color: var(--red); background: #fdebed; }
 .empty-state h3 { margin: 17px 0 0; font-size: 16px; }
