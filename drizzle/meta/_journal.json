@@ -78,6 +78,13 @@
       "when": 1786358400000,
       "tag": "0010_quote_price_list_control",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1786368000000,
+      "tag": "0011_quote_request_context",
+      "breakpoints": true
     }
   ]
 }

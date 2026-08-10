@@ -51,10 +51,13 @@ export async function POST(request: Request) {
   const profile = await getAccessProfile();
   if (!profile || profile.role !== "dealer_manager") return forbidden();
   try {
-    const payload = (await request.json()) as { partNumber?: string; quantity?: number };
+    const payload = (await request.json()) as { partNumber?: string; quantity?: number; targetNetPriceCents?: number; observation?: string };
     const partNumber = payload.partNumber?.trim();
     if (!partNumber) return Response.json({ error: "Informe o PN para solicitar a cotação." }, { status: 400 });
     const requestedQuantity = Math.max(1, Math.trunc(Number(payload.quantity) || 1));
+    const targetNetPriceCents = Math.trunc(Number(payload.targetNetPriceCents) || 0);
+    if (targetNetPriceCents <= 0) return Response.json({ error: "Informe o net price alvo para solicitar a cotação." }, { status: 400 });
+    const requestObservation = payload.observation?.trim() || "";
     if (!profile.dealershipId) return Response.json({ error: "Usuário sem concessionária vinculada." }, { status: 400 });
     const db = await getDb();
     const [dealer] = await db.select().from(dealerships).where(eq(dealerships.id, profile.dealershipId)).limit(1);
@@ -81,9 +84,9 @@ export async function POST(request: Request) {
       : catalog
         ? "Informações disponíveis, mas precisam de revisão antes do retorno."
         : "Não foi possível completar o retorno automaticamente. A Gestão Global deve revisar antes de responder.";
-    await db.insert(quoteRequests).values({ id, partNumber, dealershipId: profile.dealershipId, requestedByEmail: profile.email, requestedByName: profile.name, requestedQuantity, status, actionOwnerRole, actionOwnerEmail, description: catalog?.description || "", vt: catalog?.vt || "", origin: catalog?.origin || "", netPriceCents: catalog?.netPriceCents || null, catalogImportedAt: catalog?.importedAt || null, actionNote, requestedAt: now, createdAt: now, updatedAt: now });
-    await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: autoReturned ? "quote_auto_returned" : "quote_requested", entity: "quote", details: autoReturned ? "Cotação " + id + " retornada automaticamente para aprovação da concessionária após localizar o PN " + partNumber + "." : "Cotação " + id + " solicitada para o PN " + partNumber + ".", after: { id, partNumber, status, dealership: dealer.name, fresh, catalogReady, autoReturned } });
-    return Response.json({ id, status, fresh, autoReturned, requestedQuantity });
+    await db.insert(quoteRequests).values({ id, partNumber, dealershipId: profile.dealershipId, requestedByEmail: profile.email, requestedByName: profile.name, requestedQuantity, targetNetPriceCents, requestObservation, status, actionOwnerRole, actionOwnerEmail, description: catalog?.description || "", vt: catalog?.vt || "", origin: catalog?.origin || "", netPriceCents: catalog?.netPriceCents || null, catalogImportedAt: catalog?.importedAt || null, actionNote, requestedAt: now, createdAt: now, updatedAt: now });
+    await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: autoReturned ? "quote_auto_returned" : "quote_requested", entity: "quote", details: autoReturned ? "Cotação " + id + " retornada automaticamente para aprovação da concessionária após localizar o PN " + partNumber + "." : "Cotação " + id + " solicitada para o PN " + partNumber + ".", after: { id, partNumber, status, dealership: dealer.name, targetNetPriceCents, requestObservation, fresh, catalogReady, autoReturned } });
+    return Response.json({ id, status, fresh, autoReturned, requestedQuantity, targetNetPriceCents });
   } catch (error) { return Response.json({ error: errorMessage(error) }, { status: 500 }); }
 }
 export async function PATCH(request: Request) {
