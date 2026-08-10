@@ -2,12 +2,12 @@ import { desc, eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { dealerships, quoteCatalog, quotePriceListControl, quoteRequests, users } from "../../../db/schema";
 import { recordAudit } from "../../../lib/audit";
-import { getAccessProfile, isModuleEnabled, normalizeUserRole, roleLabel } from "../../../lib/access";
+import { getAccessProfile, isModuleEnabled, normalizeUserRole } from "../../../lib/access";
 export const dynamic = "force-dynamic";
 const DAY = 86400000;
 function forbidden() { return Response.json({ error: "Seu perfil não possui acesso às cotações." }, { status: 403 }); }
 function actionForStatus(status: string) { return ["global_review", "data_pending"].includes(status) ? "global_management" : status === "returned" ? "dealer_manager" : status === "order_pending" ? "factory_manager" : ""; }
-function statusLabel(status: string) { return ({ global_review: "Aguardando Gestão Global", data_pending: "Ação da Gestão Global", returned: "Aguardando ação do Gestor Concessionária", approved: "Aprovada", rejected: "Reprovada e encerrada", order_pending: "Aguardando Gestor Fábrica", order_input: "Pedido colocado" } as Record<string, string>)[status] || status; }
+function statusLabel(status: string) { return ({ global_review: "Aguardando ação da Fábrica", data_pending: "Ação da Fábrica", returned: "Aguardando ação da Concessionária", approved: "Aprovada", rejected: "Reprovada e encerrada", order_pending: "Aguardando ação da Fábrica", order_input: "Pedido colocado" } as Record<string, string>)[status] || status; }
 function canSee(profile: NonNullable<Awaited<ReturnType<typeof getAccessProfile>>>, dealer: { id: number; factoryManagerEmail: string }) {
   if (["general_admin", "global_management"].includes(profile.role)) return true;
   if (profile.role === "factory_manager") return dealer.factoryManagerEmail.toLowerCase() === profile.email.toLowerCase();
@@ -40,7 +40,7 @@ export async function GET() {
       const owner = allUsers.find((user) => user.email.toLowerCase() === quote.actionOwnerEmail.toLowerCase());
       const requester = allUsers.find((user) => user.email.toLowerCase() === quote.requestedByEmail.toLowerCase());
       const actionNote = quote.status === "returned"
-        ? "Cotação retornada; aguardando ação do Gestor Concessionária."
+        ? "Cotação retornada; aguardando ação da Concessionária."
         : quote.actionNote
           .replace(/dados do PN encontrados na base e retornados automaticamente:?/gi, "Informações disponíveis:")
           .replace(/base de dados/gi, "informações disponíveis")
@@ -48,7 +48,7 @@ export async function GET() {
           .replace(/retornad[oa]s? automaticamente/gi, "retornadas");
       const listEntry = priceList.get(quote.partNumber);
       const isActionOwner = Boolean(quote.actionOwnerEmail && quote.actionOwnerEmail.trim().toLowerCase() === profile.email.trim().toLowerCase());
-      return { ...quote, actionNote, dealership: dealership.name, city: dealership.city, state: dealership.state, statusLabel: statusLabel(quote.status), isActionOwner, actionOwnerRole: isActionOwner ? ownerRole : "", actionOwnerLabel: isActionOwner && ownerRole ? roleLabel(ownerRole as "global_management" | "factory_manager" | "dealer_manager") : "", actionOwnerName: isActionOwner ? (owner?.name || "Você") : "", actionOwnerEmail: isActionOwner ? quote.actionOwnerEmail : "", requestedByName: requester?.name || quote.requestedByName, priceListIncluded: Boolean(listEntry), priceListIncludedAt: listEntry?.includedAt || null, priceListIncludedByEmail: listEntry?.includedByEmail || null };
+      return { ...quote, actionNote, dealership: dealership.name, city: dealership.city, state: dealership.state, statusLabel: statusLabel(quote.status), isActionOwner, actionOwnerRole: isActionOwner ? ownerRole : "", actionOwnerLabel: isActionOwner && ownerRole ? ownerRole === "dealer_manager" ? "Concessionária" : "Fábrica" : "", actionOwnerName: isActionOwner ? (owner?.name || "Você") : "", actionOwnerEmail: isActionOwner ? quote.actionOwnerEmail : "", requestedByName: requester?.name || quote.requestedByName, priceListIncluded: Boolean(listEntry), priceListIncludedAt: listEntry?.includedAt || null, priceListIncludedByEmail: listEntry?.includedByEmail || null };
     }) });
   } catch (error) { return Response.json({ error: errorMessage(error) }, { status: 500 }); }
 }
@@ -83,7 +83,7 @@ export async function POST(request: Request) {
     const actionOwnerRole = autoReturned ? "dealer_manager" : "global_management";
     const actionOwnerEmail = autoReturned ? profile.email : globalUser?.email || "";
     const actionNote = autoReturned
-      ? "Cotação retornada; aguardando ação do Gestor Concessionária."
+      ? "Cotação retornada; aguardando ação da Concessionária."
       : "Solicitação recebida e encaminhada para análise.";
     await db.insert(quoteRequests).values({ id, partNumber, dealershipId: profile.dealershipId, requestedByEmail: profile.email, requestedByName: profile.name, requestedQuantity, targetNetPriceCents: null, requestObservation: "", status, actionOwnerRole, actionOwnerEmail, description: catalog?.description || "", vt: catalog?.vt || "", origin: catalog?.origin || "", netPriceCents: catalog?.netPriceCents || null, catalogImportedAt: catalog?.importedAt || null, actionNote, requestedAt: now, createdAt: now, updatedAt: now });
     await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: autoReturned ? "quote_auto_returned" : "quote_requested", entity: "quote", details: autoReturned ? "Cotação " + id + " retornada para aprovação da concessionária após localizar o PN " + partNumber + "." : "Cotação " + id + " solicitada para o PN " + partNumber + ".", after: { id, partNumber, status, dealership: dealer.name, fresh, catalogReady, autoReturned } });
@@ -135,12 +135,12 @@ export async function PATCH(request: Request) {
         });
         if (!factoryUser) return Response.json({ error: "Não há Gestor Fábrica ativo vinculado a esta concessionária." }, { status: 409 });
         const approvedQuantity = Math.max(1, Math.trunc(Number(payload.approvedQuantity) || record.quote.requestedQuantity || 1));
-        patch = { ...patch, status: "order_pending", actionOwnerRole: "factory_manager", actionOwnerEmail: factoryUser.email, approvedQuantity, decidedAt: now, decidedByEmail: profile.email, actionNote: payload.actionNote?.trim() || "Aprovada; encaminhada ao Gestor Fábrica para input do pedido." };
+        patch = { ...patch, status: "order_pending", actionOwnerRole: "factory_manager", actionOwnerEmail: factoryUser.email, approvedQuantity, decidedAt: now, decidedByEmail: profile.email, actionNote: payload.actionNote?.trim() || "Aprovada; encaminhada à Fábrica para input do pedido." };
       } else {
         patch = { ...patch, status: "rejected", actionOwnerRole: "", actionOwnerEmail: "", decidedAt: now, decidedByEmail: profile.email, actionNote: payload.actionNote?.trim() || "Retorno rejeitado pela concessionária." };
       }
     }
-    else if (payload.action === "place_order") patch = { ...patch, status: "order_input", actionOwnerRole: "", actionOwnerEmail: "", factoryActionAt: now, actionNote: payload.actionNote?.trim() || "Input do pedido realizado pelo Gestor Fábrica." };
+    else if (payload.action === "place_order") patch = { ...patch, status: "order_input", actionOwnerRole: "", actionOwnerEmail: "", factoryActionAt: now, actionNote: payload.actionNote?.trim() || "Input do pedido realizado pela Fábrica." };
     else return Response.json({ error: "Ação de cotação não reconhecida." }, { status: 400 });
     await db.update(quoteRequests).set(patch).where(eq(quoteRequests.id, payload.id));
     await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "quote_" + payload.action, entity: "quote", details: "Ação " + payload.action + " registrada na cotação " + payload.id + ".", before: { status: record.quote.status }, after: patch });
