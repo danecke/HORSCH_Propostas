@@ -449,6 +449,9 @@ export async function POST(request: Request) {
 
     let dealer = existingDealer;
     if (!dealer) {
+      if (normalizeUserRole(assignedManager.email, assignedManager.role) !== "factory_manager") {
+        return Response.json({ error: "A nova concessionária deve ser atribuída a um Gestor Fábrica responsável pela carteira." }, { status: 400 });
+      }
       const postalCode = normalizePostalCode(payload.postalCode);
       const state = payload.state?.trim().toUpperCase().slice(0, 2) || "";
       if (postalCode.length !== 8 || state.length !== 2) {
