@@ -274,6 +274,7 @@ export const leads = sqliteTable("leads", {
   stage: text("stage").notNull().default("new"),
   negotiatedValueCents: integer("negotiated_value_cents").notNull().default(0),
   invoiceNumber: text("invoice_number").notNull().default(""),
+  invoiceValueCents: integer("invoice_value_cents").notNull().default(0),
   sellerName: text("seller_name").notNull().default(""),
   sellerEmail: text("seller_email").notNull().default(""),
   closedAt: text("closed_at"),

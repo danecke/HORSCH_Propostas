@@ -1,0 +1,1 @@
+ALTER TABLE `leads` ADD `invoice_value_cents` integer DEFAULT 0 NOT NULL;

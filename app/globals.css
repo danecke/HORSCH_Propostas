@@ -298,6 +298,7 @@ button { cursor: pointer; }
 .form-grid { display: grid; grid-template-columns: 1.45fr 1fr 100px; gap: 14px; }
 .form-grid.two-columns { grid-template-columns: 1fr 1fr; }
 .field { display: grid; gap: 7px; }
+.field-hint { color: var(--muted); font-size: 10px; }
 .field.wide { grid-column: span 1; }
 .field > span { color: #65686d; font-size: 10px; font-weight: 800; }
 .field input, .field select, .field textarea, .items-form-table input { width: 100%; height: 41px; padding: 0 11px; border: 1px solid #d7dade; color: var(--ink); background: white; font-size: 12px; outline: 0; font-family: inherit; }

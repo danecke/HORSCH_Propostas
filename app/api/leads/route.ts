@@ -121,14 +121,17 @@ function payloadValues(payload: Record<string, unknown>, fallback?: typeof leads
   const customerName = String(payload.customerName ?? fallback?.customerName ?? "").trim();
   const sellerName = String(payload.sellerName ?? fallback?.sellerName ?? "").trim();
   const invoiceNumber = String(payload.invoiceNumber ?? fallback?.invoiceNumber ?? "").trim();
-  return { customerName, phone: String(payload.phone ?? fallback?.phone ?? "").trim(), email: String(payload.email ?? fallback?.email ?? "").trim(), machineDomain: String(payload.machineDomain ?? fallback?.machineDomain ?? "").trim(), partsOfInterest: String(payload.partsOfInterest ?? fallback?.partsOfInterest ?? "").trim(), temperature, stage, negotiatedValueCents: normalizeCents(payload.negotiatedValueCents ?? fallback?.negotiatedValueCents), invoiceNumber, sellerName, sellerEmail: String(payload.sellerEmail ?? fallback?.sellerEmail ?? "").trim() };
+  return { customerName, phone: String(payload.phone ?? fallback?.phone ?? "").trim(), email: String(payload.email ?? fallback?.email ?? "").trim(), machineDomain: String(payload.machineDomain ?? fallback?.machineDomain ?? "").trim(), partsOfInterest: String(payload.partsOfInterest ?? fallback?.partsOfInterest ?? "").trim(), temperature, stage, negotiatedValueCents: normalizeCents(payload.negotiatedValueCents ?? fallback?.negotiatedValueCents), invoiceNumber, invoiceValueCents: normalizeCents(payload.invoiceValueCents ?? fallback?.invoiceValueCents), sellerName, sellerEmail: String(payload.sellerEmail ?? fallback?.sellerEmail ?? "").trim() };
 }
 
 function validateLead(values: ReturnType<typeof payloadValues>) {
   if (!values.customerName) return "Informe o nome do cliente.";
   if (!values.phone && !values.email) return "Informe telefone ou e-mail do cliente.";
   if (!values.sellerName) return "Informe o vendedor responsável.";
+  if (values.stage === "won" && !values.negotiatedValueCents) return "Informe o valor negociado para marcar o lead como fechado.";
   if (values.stage === "won" && !values.invoiceNumber) return "Informe a NF para marcar o lead como fechado.";
+  if (values.stage === "won" && !values.invoiceValueCents) return "Informe o valor da NF para marcar o lead como fechado.";
+  if (values.stage === "won" && values.invoiceValueCents !== values.negotiatedValueCents) return "O valor da NF deve ser exatamente igual ao valor negociado. O lead não foi fechado.";
   return "";
 }
 
@@ -170,7 +173,7 @@ export async function PATCH(request: Request) {
     if (error) return Response.json({ error }, { status: 400 });
     const now = new Date().toISOString();
     await db.update(leads).set({ ...values, closedAt: values.stage === "won" ? (row.lead.closedAt || now) : null, updatedAt: now }).where(eq(leads.id, id));
-    await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "lead_updated", entity: "lead", details: `Lead ${id} atualizado.`, before: { stage: row.lead.stage, temperature: row.lead.temperature }, after: { stage: values.stage, temperature: values.temperature, invoiceNumber: values.invoiceNumber } });
+    await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "lead_updated", entity: "lead", details: `Lead ${id} atualizado.`, before: { stage: row.lead.stage, temperature: row.lead.temperature }, after: { stage: values.stage, temperature: values.temperature, invoiceNumber: values.invoiceNumber, invoiceValueCents: values.invoiceValueCents } });
     return Response.json({ ok: true, id });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Não foi possível atualizar o lead." }, { status: 500 });
