@@ -71,6 +71,13 @@
       "when": 1786121742000,
       "tag": "0009_test_accesses",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1786358400000,
+      "tag": "0010_quote_price_list_control",
+      "breakpoints": true
     }
   ]
 }

@@ -181,6 +181,8 @@ export const quoteRequests = sqliteTable("quote_requests", {
   dealershipId: integer("dealership_id").notNull().references(() => dealerships.id),
   requestedByEmail: text("requested_by_email").notNull(),
   requestedByName: text("requested_by_name").notNull().default(""),
+  requestedQuantity: integer("requested_quantity").notNull().default(1),
+  approvedQuantity: integer("approved_quantity"),
   status: text("status").notNull().default("global_review"),
   actionOwnerRole: text("action_owner_role").notNull().default("global_management"),
   actionOwnerEmail: text("action_owner_email").notNull().default(""),
@@ -203,3 +205,9 @@ export const quoteRequests = sqliteTable("quote_requests", {
   index("quote_requests_part_number_idx").on(table.partNumber),
   index("quote_requests_updated_at_idx").on(table.updatedAt),
 ]);
+
+export const quotePriceListControl = sqliteTable("quote_price_list_control", {
+  partNumber: text("part_number").primaryKey(),
+  includedAt: text("included_at").notNull(),
+  includedByEmail: text("included_by_email").notNull(),
+});

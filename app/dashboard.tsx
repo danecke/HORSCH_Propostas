@@ -83,6 +83,7 @@ type Quote = {
   requestedByEmail: string; requestedByName: string; status: QuoteStatus; statusLabel: string;
   actionOwnerRole: string; actionOwnerLabel: string; actionOwnerName: string; actionOwnerEmail: string;
   description: string; vt: string; origin: string; netPriceCents: number | null; catalogImportedAt: string | null;
+  requestedQuantity: number; approvedQuantity: number | null; priceListIncluded: boolean; priceListIncludedAt: string | null; priceListIncludedByEmail: string | null;
   actionNote: string; requestedAt: string; returnedAt: string | null; decidedAt: string | null; decidedByEmail: string;
   factoryActionAt: string | null; updatedAt: string;
 };
@@ -312,7 +313,7 @@ export function Dashboard({ user }: { user: AppUser }) {
         <div className="brand-lockup"><BrandMark className="brand-mark" /><div><strong>HORSCH</strong><span>Brasil</span></div></div>
         <div className="role-card"><span>Perfil ativo</span><strong>{data.me.roleLabel}</strong><small>{scopeDescription(data.me)}</small></div>
         <nav className="sidebar-nav" aria-label="Navegação principal">
-          {concessionOnly ? <NavButton active icon="file" onClick={() => setView("overview")}>Lista de preços</NavButton> : <><NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão geral</NavButton><NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton><NavButton active={view === "quotes"} icon="clock" onClick={() => setView("quotes")}>Cotações</NavButton>{data.me.permissions.analyzeQuotes && <NavButton active={view === "quote-analysis"} icon="trend" onClick={() => setView("quote-analysis")}>Análise 360º</NavButton>}<NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Concessionárias</NavButton>{data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}</>}
+          {concessionOnly ? <NavButton active icon="file" onClick={() => setView("overview")}>Lista de preços</NavButton> : <><NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão geral</NavButton><NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton><NavButton active={view === "quotes"} icon="clock" onClick={() => setView("quotes")}>Cotações</NavButton><NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Concessionárias</NavButton>{data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}</>}
         </nav>
         {canCreate && <button className="sidebar-new" onClick={() => setShowNewProposal(true)}><Icon name="plus" size={17} />Nova proposta</button>}
         <div className="sidebar-account-actions"><button type="button" onClick={() => setShowChangePassword(true)}><Icon name="key" size={15} />Alterar senha</button></div>
@@ -328,8 +329,6 @@ export function Dashboard({ user }: { user: AppUser }) {
           <ProposalsView proposals={filteredProposals} allCount={data.proposals.length} search={search} onSearch={setSearch} status={statusFilter} onStatus={setStatusFilter} canCreate={canCreate} onNew={() => setShowNewProposal(true)} onOpen={setPreview} canViewHistory={data.me.role === "general_admin"} onHistory={openHistory} />
         ) : view === "quotes" ? (
           <QuotesView quotes={data.quotes} me={data.me} onChanged={() => refreshed("Cotação atualizada com sucesso.")} />
-        ) : view === "quote-analysis" ? (
-          <QuoteAnalysisView quotes={data.quotes} />
         ) : view === "dealerships" ? (
           <DealershipsView dealerships={data.dealerships} proposals={data.proposals} onOpen={setPreview} />
         ) : view === "access" ? (
@@ -338,7 +337,7 @@ export function Dashboard({ user }: { user: AppUser }) {
           <HistoryView proposalId={historyProposalId} />
         )}
         <nav className="mobile-nav" aria-label="Navegação móvel">
-          {!concessionOnly && <><NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão</NavButton><NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton><NavButton active={view === "quotes"} icon="clock" onClick={() => setView("quotes")}>Cotações</NavButton>{data.me.permissions.analyzeQuotes && <NavButton active={view === "quote-analysis"} icon="trend" onClick={() => setView("quote-analysis")}>Análise</NavButton>}<NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Rede</NavButton>{data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}</>}
+          {!concessionOnly && <><NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão</NavButton><NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton><NavButton active={view === "quotes"} icon="clock" onClick={() => setView("quotes")}>Cotações</NavButton><NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Rede</NavButton>{data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}</>}
         </nav>
       </section>
 
@@ -362,12 +361,14 @@ type QuoteInsight = {
   dealerships: number;
   returned: number;
   orders: number;
+  approvedQuantity: number;
   rejected: number;
   active: number;
   conversion: number;
   rejectionRate: number;
   averageCycleDays: number | null;
   lastRequest: string;
+  priceListIncluded: boolean;
 };
 
 function buildQuoteInsights(quotes: Quote[]) {
@@ -375,6 +376,7 @@ function buildQuoteInsights(quotes: Quote[]) {
   quotes.forEach((quote) => groups.set(quote.partNumber, [...(groups.get(quote.partNumber) ?? []), quote]));
   return Array.from(groups.entries()).map(([partNumber, items]): QuoteInsight => {
     const ordered = items.filter((quote) => quote.status === "order_input");
+    const approved = items.filter((quote) => ["order_pending", "order_input"].includes(quote.status));
     const rejected = items.filter((quote) => quote.status === "rejected");
     const decided = items.filter((quote) => ["order_input", "rejected"].includes(quote.status));
     const cycleDays = items.flatMap((quote) => {
@@ -394,21 +396,23 @@ function buildQuoteInsights(quotes: Quote[]) {
       dealerships: new Set(items.map((quote) => quote.dealershipId)).size,
       returned: items.filter((quote) => ["returned", "approved", "rejected", "order_pending", "order_input"].includes(quote.status)).length,
       orders: ordered.length,
+      approvedQuantity: approved.reduce((sum, quote) => sum + (quote.approvedQuantity || 0), 0),
       rejected: rejected.length,
       active: items.filter((quote) => ["global_review", "data_pending", "returned", "order_pending"].includes(quote.status)).length,
       conversion: decided.length ? Math.round((ordered.length / decided.length) * 100) : 0,
       rejectionRate: decided.length ? Math.round((rejected.length / decided.length) * 100) : 0,
       averageCycleDays: cycleDays.length ? Math.round(cycleDays.reduce((sum, days) => sum + days, 0) / cycleDays.length) : null,
       lastRequest: items.map((quote) => quote.requestedAt).sort().at(-1) || first.requestedAt,
+      priceListIncluded: items.some((quote) => quote.priceListIncluded),
     };
   }).sort((left, right) => right.requests - left.requests || right.orders - left.orders || right.lastRequest.localeCompare(left.lastRequest));
 }
 
 function quoteRecommendation(insight: QuoteInsight) {
-  if (insight.orders > 0 || (insight.requests >= 3 && insight.conversion >= 50)) {
-    return { label: "Priorizar lista", tone: "positive", reason: "Há evidência de compra ou demanda recorrente com conversão." };
+  if (insight.approvedQuantity > 5) {
+    return { label: "Priorizar lista", tone: "positive", reason: `A quantidade aprovada acumulada é de ${insight.approvedQuantity} unidades, acima do limite de 5.` };
   }
-  if (insight.rejected >= 2 && insight.orders === 0) {
+  if (insight.rejected >= 2 && insight.approvedQuantity === 0) {
     return { label: "Não priorizar", tone: "negative", reason: "As negativas superam a demanda convertida até o momento." };
   }
   if (insight.requests >= 2) {
@@ -417,10 +421,12 @@ function quoteRecommendation(insight: QuoteInsight) {
   return { label: "Manter sob cotação", tone: "neutral", reason: "Ainda não há histórico suficiente para uma decisão estrutural." };
 }
 
-function QuoteAnalysisView({ quotes }: { quotes: Quote[] }) {
+function QuoteAnalysisView({ quotes, me, onChanged }: { quotes: Quote[]; me: CurrentAccess; onChanged: () => Promise<void> }) {
   const [period, setPeriod] = useState<"all" | "30" | "90">("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedPart, setSelectedPart] = useState("");
+  const [selectedParts, setSelectedParts] = useState<string[]>([]);
+  const [updatingPart, setUpdatingPart] = useState("");
   const filteredQuotes = useMemo(() => {
     if (period === "all") return quotes;
     const latestRequest = quotes.reduce((latest, quote) => Math.max(latest, new Date(quote.requestedAt).getTime()), 0);
@@ -434,26 +440,54 @@ function QuoteAnalysisView({ quotes }: { quotes: Quote[] }) {
   }, [insights, searchTerm]);
   const selectedKey = visibleInsights.some((insight) => insight.partNumber === selectedPart) ? selectedPart : visibleInsights[0]?.partNumber || "";
   const selected = visibleInsights.find((insight) => insight.partNumber === selectedKey) || visibleInsights[0];
-  const priorityCount = insights.filter((insight) => quoteRecommendation(insight).tone === "positive").length;
+  const priorityCount = insights.filter((insight) => quoteRecommendation(insight).tone === "positive" && !insight.priceListIncluded).length;
   const validationCount = insights.filter((insight) => quoteRecommendation(insight).tone === "attention").length;
   const orderCount = filteredQuotes.filter((quote) => quote.status === "order_input").length;
   const decidedCount = filteredQuotes.filter((quote) => ["order_input", "rejected"].includes(quote.status)).length;
   const conversion = decidedCount ? Math.round((orderCount / decidedCount) * 100) : 0;
   const pendingCount = filteredQuotes.filter((quote) => ["global_review", "data_pending", "returned", "order_pending"].includes(quote.status)).length;
+  const selectedInsights = visibleInsights.filter((insight) => selectedParts.includes(insight.partNumber));
+  const canManagePriceList = me.permissions.editPriceList;
 
-  if (!quotes.length) return <div className="content-frame"><header className="page-heading"><div><span className="eyebrow">Decisão de portfólio</span><h1>Análise 360º</h1><p>Quando houver cotações registradas, esta tela consolidará os sinais para a lista de preços.</p></div></header><article className="panel"><EmptyState title="Ainda não há dados para analisar" text="As solicitações de cotação aparecerão aqui agrupadas por PN." /></article></div>;
+  function togglePart(partNumber: string) {
+    setSelectedParts((current) => current.includes(partNumber) ? current.filter((item) => item !== partNumber) : [...current, partNumber]);
+  }
+  function selectRecommended() {
+    setSelectedParts(insights.filter((insight) => quoteRecommendation(insight).tone === "positive" && !insight.priceListIncluded).map((insight) => insight.partNumber));
+  }
+  function downloadPriceList() {
+    if (!selectedInsights.length) return;
+    const escapeCsv = (value: string | number) => `"${String(value).replace(/"/g, '""')}"`;
+    const rows = [
+      ["PN", "Descrição", "VT", "Origem", "Net price", "Quantidade aprovada", "Recomendação", "Já incluído na lista"],
+      ...selectedInsights.map((insight) => [insight.partNumber, insight.description, insight.vt, insight.origin, insight.netPriceCents ? formatBRL(insight.netPriceCents) : "", insight.approvedQuantity, quoteRecommendation(insight).label, insight.priceListIncluded ? "Sim" : "Não"]),
+    ];
+    const blob = new Blob(["\ufeff" + rows.map((row) => row.map(escapeCsv).join(";")).join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a"); link.href = url; link.download = "itens-lista-de-precos.csv"; link.click(); URL.revokeObjectURL(url);
+  }
+  async function togglePriceList(insight: QuoteInsight) {
+    if (!canManagePriceList) return;
+    setUpdatingPart(insight.partNumber);
+    const response = await fetch("/api/quotes", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: insight.quotes[0]?.id, action: "toggle_price_list" }) });
+    const payload = (await response.json()) as { error?: string };
+    setUpdatingPart("");
+    if (!response.ok) return;
+    await onChanged();
+    if (payload.error) return;
+  }
 
-  return <div className="content-frame analysis-page">
-    <header className="page-heading analysis-heading"><div><span className="eyebrow">Gestão Global · Decisão de portfólio</span><h1>Análise 360º de cotações</h1><p>Leia a demanda por PN, a conversão em pedido e os sinais de recorrência antes de decidir a entrada na lista de preços.</p></div><div className="analysis-controls"><label><span>Período</span><select value={period} onChange={(event) => setPeriod(event.target.value as "all" | "30" | "90")}><option value="all">Todo o histórico</option><option value="90">Últimos 90 dias</option><option value="30">Últimos 30 dias</option></select></label><label className="analysis-search"><span>Localizar PN</span><input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="PN, descrição ou VT" /></label></div></header>
-    <section className="analysis-summary-grid"><MetricCard label="PNs analisados" value={String(insights.length)} meta="Itens distintos no recorte" icon="file" tone="red" /><MetricCard label="Priorizar lista" value={String(priorityCount)} meta="Com evidência de demanda" icon="check" tone="green" /><MetricCard label="Validar demanda" value={String(validationCount)} meta="Repetição sem conversão suficiente" icon="trend" tone="amber" /><MetricCard label="Conversão em pedido" value={`${conversion}%`} meta={`${orderCount} pedidos de ${decidedCount} decisões`} icon="money" tone="dark" /><MetricCard label="Em andamento" value={String(pendingCount)} meta="Ainda exigem acompanhamento" icon="clock" tone="amber" /></section>
-    <section className="analysis-method panel"><div className="analysis-method-icon"><Icon name="trend" size={20} /></div><div><span className="eyebrow">Como ler a recomendação</span><strong>A recomendação combina demanda, recorrência e resultado.</strong><p>“Priorizar lista” indica compra realizada ou recorrência com conversão. “Validar demanda” sinaliza repetição sem evidência suficiente. A decisão final continua gerencial e pode considerar margem, estoque, estratégia e criticidade do item.</p></div><div className="analysis-method-legend"><span><i className="positive" />Priorizar</span><span><i className="attention" />Validar</span><span><i className="neutral" />Sob cotação</span></div></section>
-    <div className="analysis-layout"><section className="panel analysis-ranking"><header className="analysis-section-header"><div><span className="eyebrow">Matriz de decisão</span><h2>Itens por potencial de lista</h2><p>Selecione um PN para abrir a leitura completa.</p></div><strong>{visibleInsights.length} itens</strong></header><div className="analysis-table-wrap"><table className="analysis-table"><thead><tr><th>PN / item</th><th>Demanda</th><th>Pedidos</th><th>Conversão</th><th>Concessionárias</th><th>Recomendação</th></tr></thead><tbody>{visibleInsights.map((insight) => { const recommendation = quoteRecommendation(insight); return <tr key={insight.partNumber} className={selected?.partNumber === insight.partNumber ? "selected" : ""} onClick={() => setSelectedPart(insight.partNumber)}><td><strong>{insight.partNumber}</strong><small>{insight.description}</small></td><td><strong>{insight.requests}</strong><small>{insight.returned} retornadas</small></td><td><strong>{insight.orders}</strong><small>{insight.rejected} negativas</small></td><td><strong>{insight.conversion}%</strong><span className="analysis-meter"><i style={{ width: `${Math.min(insight.conversion, 100)}%` }} /></span></td><td><strong>{insight.dealerships}</strong><small>{insight.dealerships === 1 ? "rede local" : "rede HORSCH"}</small></td><td><span className={`analysis-recommendation ${recommendation.tone}`}>{recommendation.label}</span></td></tr>; })}</tbody></table>{!visibleInsights.length && <div className="empty-mini">Nenhum PN corresponde ao filtro informado.</div>}</div></section>
-      {selected && <QuoteAnalysisDetail insight={selected} />}
-    </div>
+  if (!quotes.length) return <article className="panel"><EmptyState title="Ainda não há dados para analisar" text="As solicitações de cotação aparecerão aqui agrupadas por PN." /></article>;
+
+  return <div className="analysis-page quote-analysis-embedded">
+    <header className="analysis-heading"><div><span className="eyebrow">Decisão de portfólio</span><h2>Análise 360º</h2><p>Exporte os itens recomendados e marque os PNs já incluídos na lista de preços.</p></div><div className="analysis-controls"><label><span>Período</span><select value={period} onChange={(event) => setPeriod(event.target.value as "all" | "30" | "90")}><option value="all">Todo o histórico</option><option value="90">Últimos 90 dias</option><option value="30">Últimos 30 dias</option></select></label><label className="analysis-search"><span>Localizar PN</span><input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="PN, descrição ou VT" /></label></div></header>
+    <section className="analysis-summary-grid"><MetricCard label="PNs analisados" value={String(insights.length)} meta="Itens distintos no recorte" icon="file" tone="red" /><MetricCard label="Priorizar lista" value={String(priorityCount)} meta="Quantidade aprovada > 5" icon="check" tone="green" /><MetricCard label="Já controlados" value={String(insights.filter((insight) => insight.priceListIncluded).length)} meta="Marcados na lista de preços" icon="history" tone="dark" /><MetricCard label="Unidades aprovadas" value={String(insights.reduce((sum, insight) => sum + insight.approvedQuantity, 0))} meta={`${orderCount} pedidos concluídos`} icon="money" tone="dark" /><MetricCard label="Em andamento" value={String(pendingCount)} meta="Ainda exigem acompanhamento" icon="clock" tone="amber" /></section>
+    <section className="analysis-method panel"><div className="analysis-method-icon"><Icon name="trend" size={20} /></div><div><span className="eyebrow">Critério objetivo</span><strong>Recomendar lista quando a quantidade aprovada superar 5 unidades.</strong><p>A decisão usa a soma das quantidades aprovadas nas cotações do PN. O check registra o controle da lista e evita nova extração do mesmo item.</p></div><div className="analysis-bulk-actions"><button className="outline-button compact" type="button" onClick={selectRecommended}>Selecionar recomendados</button><button className="primary-button compact" type="button" disabled={!selectedInsights.length} onClick={downloadPriceList}>Baixar CSV ({selectedInsights.length})</button></div></section>
+    <div className="analysis-layout"><section className="panel analysis-ranking"><header className="analysis-section-header"><div><span className="eyebrow">Matriz de decisão</span><h2>Itens para lista de preços</h2><p>Marque os itens para exportar em massa. Clique na linha para ver os detalhes.</p></div><strong>{visibleInsights.length} itens</strong></header><div className="analysis-table-wrap"><table className="analysis-table"><thead><tr><th aria-label="Selecionar" /><th>PN / item</th><th>Aprovada</th><th>Pedidos</th><th>Concessionárias</th><th>Recomendação</th><th>Controle</th></tr></thead><tbody>{visibleInsights.map((insight) => { const recommendation = quoteRecommendation(insight); return <tr key={insight.partNumber} className={selected?.partNumber === insight.partNumber ? "selected" : ""} onClick={() => setSelectedPart(insight.partNumber)}><td><input aria-label={`Selecionar PN ${insight.partNumber}`} type="checkbox" checked={selectedParts.includes(insight.partNumber)} onChange={() => togglePart(insight.partNumber)} onClick={(event) => event.stopPropagation()} /></td><td><strong>{insight.partNumber}</strong><small>{insight.description}</small></td><td><strong>{insight.approvedQuantity} un.</strong><small>limite: 5</small></td><td><strong>{insight.orders}</strong><small>{insight.rejected} negativas</small></td><td><strong>{insight.dealerships}</strong><small>{insight.dealerships === 1 ? "rede local" : "rede HORSCH"}</small></td><td><span className={`analysis-recommendation ${recommendation.tone}`}>{recommendation.label}</span></td><td>{insight.priceListIncluded ? <span className="price-list-check"><Icon name="check" size={14} />Incluído</span> : <span className="price-list-pending">Pendente</span>}</td></tr>; })}</tbody></table>{!visibleInsights.length && <div className="empty-mini">Nenhum PN corresponde ao filtro informado.</div>}</div></section>{selected && <QuoteAnalysisDetail insight={selected} canManagePriceList={canManagePriceList} updating={updatingPart === selected.partNumber} onToggle={() => void togglePriceList(selected)} />}</div>
   </div>;
 }
 
-function QuoteAnalysisDetail({ insight }: { insight: QuoteInsight }) {
+function QuoteAnalysisDetail({ insight, canManagePriceList, updating, onToggle }: { insight: QuoteInsight; canManagePriceList: boolean; updating: boolean; onToggle: () => void }) {
   const recommendation = quoteRecommendation(insight);
   const statusCounts = [
     ["Em análise", insight.quotes.filter((quote) => ["global_review", "data_pending"].includes(quote.status)).length],
@@ -462,25 +496,28 @@ function QuoteAnalysisDetail({ insight }: { insight: QuoteInsight }) {
     ["Encerradas", insight.rejected],
   ] as const;
   const orderSignal = insight.orders > 0 ? "O PN já foi convertido em pedido." : insight.requests > 1 ? "O PN foi solicitado mais de uma vez." : "Ainda há pouca repetição de demanda.";
-  return <aside className="panel analysis-detail"><header className="analysis-detail-header"><div><span className="eyebrow">Leitura do item</span><h2>PN {insight.partNumber}</h2><p>{insight.description}</p></div><span className={`analysis-recommendation large ${recommendation.tone}`}>{recommendation.label}</span></header><div className="analysis-item-visual"><div className="analysis-image" role="img" aria-label="Imagem de referência do componente anexada à solicitação" /><div><span className="eyebrow">Identificação comercial</span><dl><div><dt>VT</dt><dd>{insight.vt}</dd></div><div><dt>Origem</dt><dd>{insight.origin}</dd></div><div><dt>Net price</dt><dd>{insight.netPriceCents ? formatBRL(insight.netPriceCents) : "—"}</dd></div></dl><small>Imagem de referência do componente. A identificação oficial permanece vinculada ao PN.</small></div></div><div className="analysis-detail-metrics"><div><span>Solicitações</span><strong>{insight.requests}</strong></div><div><span>Concessionárias</span><strong>{insight.dealerships}</strong></div><div><span>Conversão</span><strong>{insight.conversion}%</strong></div><div><span>Ciclo médio</span><strong>{insight.averageCycleDays === null ? "—" : `${insight.averageCycleDays} d`}</strong></div></div><section className="analysis-evidence"><header><div><span className="eyebrow">Evidências</span><h3>O que sustenta a leitura</h3></div><span className="analysis-confidence">{insight.requests >= 3 || insight.orders > 0 ? "Confiança alta" : "Confiança em formação"}</span></header><div className="analysis-evidence-list"><p><Icon name="trend" size={15} /><span><strong>Demanda:</strong> {orderSignal}</span></p><p><Icon name="building" size={15} /><span><strong>Alcance:</strong> solicitado por {insight.dealerships} {insight.dealerships === 1 ? "concessionária" : "concessionárias"}.</span></p><p><Icon name={insight.rejected > 0 ? "clock" : "check"} size={15} /><span><strong>Risco:</strong> {insight.rejected ? `${insight.rejected} negativa(s) para pedido; valide preço e aplicação.` : "Sem negativa registrada para este PN."}</span></p></div></section><section className="analysis-status-block"><header><span className="eyebrow">Funil do item</span><strong>Distribuição das cotações</strong></header>{statusCounts.map(([label, count]) => <div className="analysis-status-line" key={label}><span>{label}</span><div><i style={{ width: `${insight.requests ? Math.max((count / insight.requests) * 100, count ? 7 : 0) : 0}%` }} /></div><strong>{count}</strong></div>)}</section><section className="analysis-decision-note"><Icon name="eye" size={16} /><div><strong>Leitura gerencial</strong><p>{recommendation.reason} Antes de publicar, confirme margem, disponibilidade, aplicação e impacto na experiência da rede.</p></div></section></aside>;
+  return <aside className="panel analysis-detail"><header className="analysis-detail-header"><div><span className="eyebrow">Leitura do item</span><h2>PN {insight.partNumber}</h2><p>{insight.description}</p></div><span className={`analysis-recommendation large ${recommendation.tone}`}>{recommendation.label}</span></header><div className="analysis-item-visual"><div className="analysis-image" role="img" aria-label="Imagem de referência do componente anexada à solicitação" /><div><span className="eyebrow">Identificação comercial</span><dl><div><dt>VT</dt><dd>{insight.vt}</dd></div><div><dt>Origem</dt><dd>{insight.origin}</dd></div><div><dt>Net price</dt><dd>{insight.netPriceCents ? formatBRL(insight.netPriceCents) : "—"}</dd></div></dl><small>Imagem de referência do componente anexada à solicitação.</small></div></div><div className="analysis-detail-metrics"><div><span>Solicitações</span><strong>{insight.requests}</strong></div><div><span>Aprovada</span><strong>{insight.approvedQuantity} un.</strong></div><div><span>Concessionárias</span><strong>{insight.dealerships}</strong></div><div><span>Conversão</span><strong>{insight.conversion}%</strong></div></div><div className="analysis-list-control"><div><span className="eyebrow">Controle da lista</span><strong>{insight.priceListIncluded ? "PN já incluído na lista de preços" : "PN ainda não marcado"}</strong></div>{canManagePriceList && <button className={insight.priceListIncluded ? "outline-button compact" : "primary-button compact"} type="button" disabled={updating} onClick={onToggle}>{updating ? "Salvando..." : insight.priceListIncluded ? "Desmarcar check" : "Marcar como incluído"}</button>}</div><section className="analysis-evidence"><header><div><span className="eyebrow">Evidências</span><h3>O que sustenta a leitura</h3></div><span className="analysis-confidence">{insight.approvedQuantity > 5 ? "Critério atendido" : "Abaixo do limite"}</span></header><div className="analysis-evidence-list"><p><Icon name="trend" size={15} /><span><strong>Quantidade:</strong> {insight.approvedQuantity} unidades aprovadas no PN.</span></p><p><Icon name="building" size={15} /><span><strong>Alcance:</strong> solicitado por {insight.dealerships} {insight.dealerships === 1 ? "concessionária" : "concessionárias"}.</span></p><p><Icon name={insight.rejected > 0 ? "clock" : "check"} size={15} /><span><strong>Risco:</strong> {insight.rejected ? `${insight.rejected} negativa(s) para pedido; valide preço e aplicação.` : "Sem negativa registrada para este PN."}</span></p></div></section><section className="analysis-status-block"><header><span className="eyebrow">Funil do item</span><strong>Distribuição das cotações</strong></header>{statusCounts.map(([label, count]) => <div className="analysis-status-line" key={label}><span>{label}</span><div><i style={{ width: `${insight.requests ? Math.max((count / insight.requests) * 100, count ? 7 : 0) : 0}%` }} /></div><strong>{count}</strong></div>)}</section><section className="analysis-decision-note"><Icon name="eye" size={16} /><div><strong>Leitura gerencial</strong><p>{recommendation.reason} A exportação inclui os campos comerciais necessários para a lista de preços.</p></div></section></aside>;
 }
 
 function QuotesView({ quotes, me, onChanged }: { quotes: Quote[]; me: CurrentAccess; onChanged: () => Promise<void> }) {
-  const [pn, setPn] = useState(""); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
+  const [section, setSection] = useState<"flow" | "analysis">("flow");
+  const [pn, setPn] = useState(""); const [quantity, setQuantity] = useState("1"); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
   const returnedQuotes = quotes.filter((quote) => quote.status === "returned");
   const globalView = ["general_admin", "global_management"].includes(me.role);
   async function submit(event: FormEvent) {
     event.preventDefault(); setSaving(true); setError("");
-    const response = await fetch("/api/quotes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ partNumber: pn }) });
+    const response = await fetch("/api/quotes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ partNumber: pn, quantity: Number(quantity) }) });
     const payload = (await response.json()) as { error?: string };
     if (!response.ok) { setError(payload.error || "Não foi possível solicitar a cotação."); setSaving(false); return; }
-    setPn(""); setSaving(false); await onChanged();
+    setPn(""); setQuantity("1"); setSaving(false); await onChanged();
   }
-  return <div className="content-frame"><header className="page-heading quote-page-heading"><div><span className="eyebrow">Atendimento de peças</span><h1>Cotações</h1><p>Solicite um PN, acompanhe o retorno e avance cada etapa com o responsável indicado.</p></div></header>
+  return <div className="content-frame quotes-shell"><header className="page-heading quote-page-heading"><div><span className="eyebrow">Atendimento de peças</span><h1>Cotações</h1><p>Solicite um PN, acompanhe o retorno e avance cada etapa com o responsável indicado.</p></div><div className="quotes-tabs" role="tablist"><button type="button" className={section === "flow" ? "active" : ""} onClick={() => setSection("flow")}>Fluxo de cotações</button>{me.permissions.analyzeQuotes && <button type="button" className={section === "analysis" ? "active" : ""} onClick={() => setSection("analysis")}>Análise 360º</button>}</div></header>
+    {section === "analysis" ? <QuoteAnalysisView quotes={quotes} me={me} onChanged={onChanged} /> : <>
     {me.role === "dealer_manager" && returnedQuotes.length > 0 && <QuoteReturnAlert quotes={returnedQuotes} />}
     {globalView && <QuoteMetrics quotes={quotes} />}
-    {me.permissions.requestQuote && <form className="panel quote-request-panel" onSubmit={(event) => void submit(event)}><div className="quote-request-copy"><span className="eyebrow">Nova solicitação</span><strong>Consulte um PN</strong><span>Quando houver informações disponíveis, descrição, VT, origem e net price serão preenchidos automaticamente.</span></div><div className="quote-request-fields"><label className="field"><span>PN</span><input value={pn} onChange={(event) => setPn(event.target.value)} placeholder="Ex.: 34061200" required /></label><button className="primary-button" disabled={saving}>{saving ? "Solicitando..." : "Solicitar cotação"}</button></div>{error && <p className="form-error">{error}</p>}</form>}
+    {me.permissions.requestQuote && <form className="panel quote-request-panel" onSubmit={(event) => void submit(event)}><div className="quote-request-copy"><span className="eyebrow">Nova solicitação</span><strong>Consulte um PN</strong><span>Quando houver informações disponíveis, descrição, VT, origem e net price serão preenchidos automaticamente.</span></div><div className="quote-request-fields"><label className="field"><span>PN</span><input value={pn} onChange={(event) => setPn(event.target.value)} placeholder="Ex.: 34061200" required /></label><label className="field"><span>Quantidade solicitada</span><input type="number" min="1" value={quantity} onChange={(event) => setQuantity(event.target.value)} required /></label><button className="primary-button" disabled={saving}>{saving ? "Solicitando..." : "Solicitar cotação"}</button></div>{error && <p className="form-error">{error}</p>}</form>}
     <section className="quote-list">{quotes.length ? quotes.map((quote) => <QuoteCard key={quote.id} quote={quote} me={me} onChanged={onChanged} />) : <article className="panel"><EmptyState title="Nenhuma cotação registrada" text={me.permissions.requestQuote ? "Solicite o primeiro PN para iniciar o fluxo." : "As cotações do seu escopo aparecerão aqui."} /></article>}</section>
+    </>}
   </div>;
 }
 function QuoteReturnAlert({ quotes }: { quotes: Quote[] }) {
@@ -497,18 +534,18 @@ function QuoteMetrics({ quotes }: { quotes: Quote[] }) {
   return <section className="quote-metrics-block"><div className="section-heading"><div><span className="eyebrow">Gestão Global</span><h2>Indicadores de cotações</h2><p>Acompanhe o volume solicitado, a conversão em pedido e os pontos de atenção.</p></div></div><div className="metric-grid quote-metrics"><MetricCard label="PNs solicitados" value={String(quotes.length)} meta="Cotações registradas" icon="file" tone="red" /><MetricCard label="Viraram pedido" value={String(orders)} meta={`${conversion}% do total solicitado`} icon="check" tone="green" /><MetricCard label="Negativa para pedido" value={String(rejected)} meta="Reprovadas pela concessionária" icon="close" tone="amber" /><MetricCard label="Taxa de aprovação" value={`${approval}%`} meta={`${approved} aprovadas ou em pedido`} icon="trend" tone="dark" /><MetricCard label="Em análise" value={String(pending)} meta="Aguardando ação global" icon="clock" tone="amber" /></div></section>;
 }
 function QuoteCard({ quote, me, onChanged }: { quote: Quote; me: CurrentAccess; onChanged: () => Promise<void> }) {
-  const [description, setDescription] = useState(quote.description); const [vt, setVt] = useState(quote.vt); const [origin, setOrigin] = useState(quote.origin); const [price, setPrice] = useState(quote.netPriceCents ? formatMoneyInput(String(quote.netPriceCents / 100).replace(".", ",")) : ""); const [note, setNote] = useState(""); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
+  const [description, setDescription] = useState(quote.description); const [vt, setVt] = useState(quote.vt); const [origin, setOrigin] = useState(quote.origin); const [price, setPrice] = useState(quote.netPriceCents ? formatMoneyInput(String(quote.netPriceCents / 100).replace(".", ",")) : ""); const [approvedQuantity, setApprovedQuantity] = useState(String(quote.approvedQuantity ?? quote.requestedQuantity ?? 1)); const [note, setNote] = useState(""); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
   const review = ["general_admin", "global_management"].includes(me.role) && ["global_review", "data_pending"].includes(quote.status); const decide = ["general_admin", "dealer_manager"].includes(me.role) && quote.status === "returned"; const place = ["general_admin", "factory_manager"].includes(me.role) && quote.status === "order_pending";
   async function action(name: string) {
     setSaving(true); setError("");
-    const response = await fetch("/api/quotes", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: quote.id, action: name, description, vt, origin, netPriceCents: parseMoneyToCents(price), actionNote: note }) });
+    const response = await fetch("/api/quotes", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: quote.id, action: name, description, vt, origin, netPriceCents: parseMoneyToCents(price), approvedQuantity: Number(approvedQuantity), actionNote: note }) });
     const payload = (await response.json()) as { error?: string };
     if (!response.ok) { setError(payload.error || "Não foi possível atualizar a cotação."); setSaving(false); return; }
     setSaving(false); await onChanged();
   }
-  return <article className="panel quote-card"><header className="quote-card-header"><div><span className="eyebrow">{quote.id}</span><h2>PN {quote.partNumber}</h2><p>{quote.dealership + " · " + quote.city + (quote.state ? " · " + quote.state : "")}</p></div><span className={"status-badge quote-status " + quote.status}><i />{quote.statusLabel}</span></header><div className="quote-meta-grid"><div><span>Solicitada por</span><strong>{quote.requestedByName || quote.requestedByEmail}</strong><small>{formatDateTime(quote.requestedAt)}</small></div><div><span>Próxima ação</span><strong>{quote.actionOwnerLabel || "Encerrada"}</strong><small>{quote.actionOwnerName}</small></div><div><span>Atualizada em</span><strong>{formatDateTime(quote.updatedAt)}</strong><small>{quote.actionNote || "Sem observação"}</small></div></div>{quote.description && <div className="quote-return-grid"><div><span>Descrição</span><strong>{quote.description}</strong></div><div><span>VT</span><strong>{quote.vt || "—"}</strong></div><div><span>Origem</span><strong>{quote.origin || "—"}</strong></div><div><span>Net price</span><strong>{quote.netPriceCents ? formatBRL(quote.netPriceCents) : "—"}</strong></div></div>}
+  return <article className="panel quote-card"><header className="quote-card-header"><div><span className="eyebrow">{quote.id}</span><h2>PN {quote.partNumber}</h2><p>{quote.dealership + " · " + quote.city + (quote.state ? " · " + quote.state : "")}</p></div><span className={"status-badge quote-status " + quote.status}><i />{quote.statusLabel}</span></header><div className="quote-meta-grid"><div><span>Solicitada por</span><strong>{quote.requestedByName || quote.requestedByEmail}</strong><small>{formatDateTime(quote.requestedAt)}</small></div><div><span>Quantidade</span><strong>{quote.approvedQuantity ?? quote.requestedQuantity} un.</strong><small>{quote.approvedQuantity ? "Aprovada" : "Solicitada"}</small></div><div><span>Próxima ação</span><strong>{quote.actionOwnerLabel || "Encerrada"}</strong><small>{quote.actionOwnerName}</small></div><div><span>Atualizada em</span><strong>{formatDateTime(quote.updatedAt)}</strong><small>{quote.actionNote || "Sem observação"}</small></div></div>{quote.description && <div className="quote-return-grid"><div><span>Descrição</span><strong>{quote.description}</strong></div><div><span>VT</span><strong>{quote.vt || "—"}</strong></div><div><span>Origem</span><strong>{quote.origin || "—"}</strong></div><div><span>Net price</span><strong>{quote.netPriceCents ? formatBRL(quote.netPriceCents) : "—"}</strong></div></div>}
     {review && <div className="quote-action-box"><strong>Resposta da Gestão Global</strong><p>Confira os dados, solicite imputação/revisão quando necessário ou retorne a cotação para aprovação da concessionária.</p><div className="quote-edit-grid"><label className="field"><span>Descrição</span><input value={description} onChange={(event) => setDescription(event.target.value)} /></label><label className="field"><span>VT</span><input value={vt} onChange={(event) => setVt(event.target.value)} /></label><label className="field"><span>Origem</span><input value={origin} onChange={(event) => setOrigin(event.target.value)} /></label><label className="field"><span>Net price</span><input value={price} onChange={(event) => setPrice(event.target.value)} /></label></div><label className="field"><span>Observação</span><input value={note} onChange={(event) => setNote(event.target.value)} /></label><div className="quote-action-buttons"><button type="button" className="outline-button" disabled={saving} onClick={() => void action("needs_action")}>Solicitar imputação/revisão</button><button type="button" className="primary-button" disabled={saving} onClick={() => void action("return_quote")}>Enviar para aprovação</button></div></div>}
-    {decide && <div className="quote-action-box"><strong>Aprovação da Gestão Concessionária</strong><p>Analise o retorno da Gestão Global. Se reprovar, a cotação será encerrada e continuará visível aos níveis superiores.</p><label className="field"><span>Observação</span><input value={note} onChange={(event) => setNote(event.target.value)} /></label><div className="quote-action-buttons"><button type="button" className="outline-button danger-button" disabled={saving} onClick={() => void action("reject")}>Reprovar e encerrar</button><button type="button" className="primary-button" disabled={saving} onClick={() => void action("approve")}>Aprovar e enviar à fábrica</button></div></div>}
+    {decide && <div className="quote-action-box"><strong>Aprovação da Gestão Concessionária</strong><p>Analise o retorno da Gestão Global. Se reprovar, a cotação será encerrada e continuará visível aos níveis superiores.</p><label className="field"><span>Quantidade aprovada</span><input type="number" min="1" value={approvedQuantity} onChange={(event) => setApprovedQuantity(event.target.value)} /></label><label className="field"><span>Observação</span><input value={note} onChange={(event) => setNote(event.target.value)} /></label><div className="quote-action-buttons"><button type="button" className="outline-button danger-button" disabled={saving} onClick={() => void action("reject")}>Reprovar e encerrar</button><button type="button" className="primary-button" disabled={saving} onClick={() => void action("approve")}>Aprovar e enviar à fábrica</button></div></div>}
     {place && <div className="quote-action-box factory-decision"><strong>Input do pedido</strong><p>Cotação aprovada e aguardando lançamento em carteira.</p><label className="field"><span>Referência do pedido</span><input value={note} onChange={(event) => setNote(event.target.value)} /></label><button type="button" className="primary-button" disabled={saving} onClick={() => void action("place_order")}>Marcar input realizado</button></div>}{error && <p className="form-error">{error}</p>}</article>;
 }
 

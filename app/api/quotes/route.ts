@@ -1,6 +1,6 @@
 import { desc, eq } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { dealerships, quoteCatalog, quoteRequests, users } from "../../../db/schema";
+import { dealerships, quoteCatalog, quotePriceListControl, quoteRequests, users } from "../../../db/schema";
 import { recordAudit } from "../../../lib/audit";
 import { getAccessProfile, normalizeUserRole, roleLabel } from "../../../lib/access";
 export const dynamic = "force-dynamic";
@@ -18,13 +18,17 @@ function canAct(profile: NonNullable<Awaited<ReturnType<typeof getAccessProfile>
   if (["approve", "reject"].includes(action)) return ["general_admin", "dealer_manager"].includes(profile.role) && status === "returned";
   return action === "place_order" && ["general_admin", "factory_manager"].includes(profile.role) && status === "order_pending";
 }
+function canAnalyze(profile: NonNullable<Awaited<ReturnType<typeof getAccessProfile>>>) {
+  return ["general_admin", "global_management", "factory_manager"].includes(profile.role);
+}
 function errorMessage(error: unknown) { const message = error instanceof Error ? error.message : "Erro inesperado."; return message.includes("no such table") ? "A estrutura de cotações ainda está sendo preparada. Tente novamente." : message; }
 export async function GET() {
   const profile = await getAccessProfile();
   if (!profile || profile.role === "concession") return forbidden();
   try {
     const db = await getDb();
-    const [dealers, allUsers] = await Promise.all([db.select().from(dealerships), db.select().from(users)]);
+    const [dealers, allUsers, priceListRows] = await Promise.all([db.select().from(dealerships), db.select().from(users), db.select().from(quotePriceListControl)]);
+    const priceList = new Map(priceListRows.map((row) => [row.partNumber, row]));
     const visible = new Set(dealers.filter((dealer) => canSee(profile, dealer)).map((dealer) => dealer.id));
     const rows = await db.select({ quote: quoteRequests, dealership: dealerships }).from(quoteRequests).innerJoin(dealerships, eq(quoteRequests.dealershipId, dealerships.id)).orderBy(desc(quoteRequests.updatedAt), desc(quoteRequests.createdAt));
     return Response.json({ quotes: rows.filter((row) => visible.has(row.quote.dealershipId)).map(({ quote, dealership }) => {
@@ -38,7 +42,8 @@ export async function GET() {
           .replace(/base de dados/gi, "informações disponíveis")
           .replace(/\bbase\b/gi, "informações disponíveis")
           .replace(/retornad[oa]s? automaticamente/gi, "retornadas");
-      return { ...quote, actionNote, dealership: dealership.name, city: dealership.city, state: dealership.state, statusLabel: statusLabel(quote.status), actionOwnerRole: ownerRole, actionOwnerLabel: ownerRole ? roleLabel(ownerRole as "global_management" | "factory_manager" | "dealer_manager") : "", actionOwnerName: owner?.name || quote.actionOwnerEmail || "—", requestedByName: requester?.name || quote.requestedByName };
+      const listEntry = priceList.get(quote.partNumber);
+      return { ...quote, actionNote, dealership: dealership.name, city: dealership.city, state: dealership.state, statusLabel: statusLabel(quote.status), actionOwnerRole: ownerRole, actionOwnerLabel: ownerRole ? roleLabel(ownerRole as "global_management" | "factory_manager" | "dealer_manager") : "", actionOwnerName: owner?.name || quote.actionOwnerEmail || "—", requestedByName: requester?.name || quote.requestedByName, priceListIncluded: Boolean(listEntry), priceListIncludedAt: listEntry?.includedAt || null, priceListIncludedByEmail: listEntry?.includedByEmail || null };
     }) });
   } catch (error) { return Response.json({ error: errorMessage(error) }, { status: 500 }); }
 }
@@ -46,9 +51,10 @@ export async function POST(request: Request) {
   const profile = await getAccessProfile();
   if (!profile || profile.role !== "dealer_manager") return forbidden();
   try {
-    const payload = (await request.json()) as { partNumber?: string };
+    const payload = (await request.json()) as { partNumber?: string; quantity?: number };
     const partNumber = payload.partNumber?.trim();
     if (!partNumber) return Response.json({ error: "Informe o PN para solicitar a cotação." }, { status: 400 });
+    const requestedQuantity = Math.max(1, Math.trunc(Number(payload.quantity) || 1));
     if (!profile.dealershipId) return Response.json({ error: "Usuário sem concessionária vinculada." }, { status: 400 });
     const db = await getDb();
     const [dealer] = await db.select().from(dealerships).where(eq(dealerships.id, profile.dealershipId)).limit(1);
@@ -75,20 +81,31 @@ export async function POST(request: Request) {
       : catalog
         ? "Informações disponíveis, mas precisam de revisão antes do retorno."
         : "Não foi possível completar o retorno automaticamente. A Gestão Global deve revisar antes de responder.";
-    await db.insert(quoteRequests).values({ id, partNumber, dealershipId: profile.dealershipId, requestedByEmail: profile.email, requestedByName: profile.name, status, actionOwnerRole, actionOwnerEmail, description: catalog?.description || "", vt: catalog?.vt || "", origin: catalog?.origin || "", netPriceCents: catalog?.netPriceCents || null, catalogImportedAt: catalog?.importedAt || null, actionNote, requestedAt: now, createdAt: now, updatedAt: now });
+    await db.insert(quoteRequests).values({ id, partNumber, dealershipId: profile.dealershipId, requestedByEmail: profile.email, requestedByName: profile.name, requestedQuantity, status, actionOwnerRole, actionOwnerEmail, description: catalog?.description || "", vt: catalog?.vt || "", origin: catalog?.origin || "", netPriceCents: catalog?.netPriceCents || null, catalogImportedAt: catalog?.importedAt || null, actionNote, requestedAt: now, createdAt: now, updatedAt: now });
     await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: autoReturned ? "quote_auto_returned" : "quote_requested", entity: "quote", details: autoReturned ? "Cotação " + id + " retornada automaticamente para aprovação da concessionária após localizar o PN " + partNumber + "." : "Cotação " + id + " solicitada para o PN " + partNumber + ".", after: { id, partNumber, status, dealership: dealer.name, fresh, catalogReady, autoReturned } });
-    return Response.json({ id, status, fresh, autoReturned });
+    return Response.json({ id, status, fresh, autoReturned, requestedQuantity });
   } catch (error) { return Response.json({ error: errorMessage(error) }, { status: 500 }); }
 }
 export async function PATCH(request: Request) {
   const profile = await getAccessProfile();
   if (!profile || profile.role === "concession") return forbidden();
   try {
-    const payload = (await request.json()) as { id?: string; action?: string; description?: string; vt?: string; origin?: string; netPriceCents?: number | null; actionNote?: string };
+    const payload = (await request.json()) as { id?: string; action?: string; description?: string; vt?: string; origin?: string; netPriceCents?: number | null; actionNote?: string; approvedQuantity?: number };
     if (!payload.id || !payload.action) return Response.json({ error: "Ação de cotação incompleta." }, { status: 400 });
     const db = await getDb();
     const [record] = await db.select({ quote: quoteRequests, dealership: dealerships }).from(quoteRequests).innerJoin(dealerships, eq(quoteRequests.dealershipId, dealerships.id)).where(eq(quoteRequests.id, payload.id)).limit(1);
     if (!record || !canSee(profile, record.dealership)) return Response.json({ error: "Cotação fora do seu escopo." }, { status: 403 });
+    if (payload.action === "toggle_price_list") {
+      if (!canAnalyze(profile)) return Response.json({ error: "Seu perfil não pode controlar a lista de preços." }, { status: 403 });
+      const [existing] = await db.select().from(quotePriceListControl).where(eq(quotePriceListControl.partNumber, record.quote.partNumber)).limit(1);
+      if (existing) {
+        await db.delete(quotePriceListControl).where(eq(quotePriceListControl.partNumber, record.quote.partNumber));
+      } else {
+        await db.insert(quotePriceListControl).values({ partNumber: record.quote.partNumber, includedAt: new Date().toISOString(), includedByEmail: profile.email });
+      }
+      await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: existing ? "quote_removed_from_price_list" : "quote_added_to_price_list", entity: "quote", details: "Controle da lista de preços atualizado para o PN " + record.quote.partNumber + ".", before: { included: Boolean(existing) }, after: { included: !existing } });
+      return Response.json({ ok: true, included: !existing });
+    }
     if (!canAct(profile, record.quote.status, payload.action)) return Response.json({ error: "Seu perfil não pode executar esta ação nesta etapa." }, { status: 403 });
     const now = new Date().toISOString();
     let patch: Partial<typeof quoteRequests.$inferInsert> = { updatedAt: now };
@@ -112,7 +129,8 @@ export async function PATCH(request: Request) {
           );
         });
         if (!factoryUser) return Response.json({ error: "Não há Gestor Fábrica ativo vinculado a esta concessionária." }, { status: 409 });
-        patch = { ...patch, status: "order_pending", actionOwnerRole: "factory_manager", actionOwnerEmail: factoryUser.email, decidedAt: now, decidedByEmail: profile.email, actionNote: payload.actionNote?.trim() || "Aprovada; encaminhada ao Gestor Fábrica para input do pedido." };
+        const approvedQuantity = Math.max(1, Math.trunc(Number(payload.approvedQuantity) || record.quote.requestedQuantity || 1));
+        patch = { ...patch, status: "order_pending", actionOwnerRole: "factory_manager", actionOwnerEmail: factoryUser.email, approvedQuantity, decidedAt: now, decidedByEmail: profile.email, actionNote: payload.actionNote?.trim() || "Aprovada; encaminhada ao Gestor Fábrica para input do pedido." };
       } else {
         patch = { ...patch, status: "rejected", actionOwnerRole: "", actionOwnerEmail: "", decidedAt: now, decidedByEmail: profile.email, actionNote: payload.actionNote?.trim() || "Retorno rejeitado pela concessionária." };
       }
