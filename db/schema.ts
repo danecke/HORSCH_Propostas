@@ -26,6 +26,24 @@ export const dealerships = sqliteTable(
   (table) => [uniqueIndex("dealerships_name_idx").on(table.name)],
 );
 
+export const dealershipModuleAccess = sqliteTable(
+  "dealership_module_access",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    dealershipId: integer("dealership_id")
+      .notNull()
+      .references(() => dealerships.id, { onDelete: "cascade" }),
+    moduleKey: text("module_key").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    updatedByEmail: text("updated_by_email").notNull().default(""),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("dealership_module_access_unique").on(table.dealershipId, table.moduleKey),
+    index("dealership_module_access_dealership_idx").on(table.dealershipId),
+  ],
+);
+
 export const proposals = sqliteTable(
   "proposals",
   {

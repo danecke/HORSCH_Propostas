@@ -219,6 +219,21 @@ button { cursor: pointer; }
 .status-badge.expired { color: #685b73; background: #eeeaf1; }
 .status-badge.expired i { background: #7b6689; }
 
+.dealer-module-summary { margin: 15px 0 2px; padding-top: 13px; border-top: 1px solid var(--line); }
+.dealer-module-summary > span { display: block; margin-bottom: 8px; color: #9a9da1; font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.dealer-module-summary > div { display: flex; flex-wrap: wrap; gap: 6px; }
+.dealer-module-summary > div > span { padding: 5px 7px; border-radius: 999px; font-size: 9px; font-weight: 800; }
+.dealer-module-summary .module-on { color: #116b4d; background: #e4f4ed; }
+.dealer-module-summary .module-off { color: #777b80; background: #f0f1f2; text-decoration: line-through; }
+.module-access-list { display: grid; gap: 10px; }
+.module-access-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 16px; border: 1px solid var(--line); background: #fff; }
+.module-access-row.enabled { border-color: #cfe8dc; background: #fbfefc; }
+.module-access-row.disabled { background: #fafafa; }
+.module-access-row strong, .module-access-row span { display: block; }
+.module-access-row strong { color: var(--ink); font-size: 12px; }
+.module-access-row span { margin-top: 4px; color: var(--muted); font-size: 10px; }
+.module-access-note { max-width: 300px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+
 .expiry-notice { min-height: 74px; padding: 15px 24px; display: flex; align-items: center; gap: 13px; color: #4f4358; border-bottom: 1px solid #d8cfde; background: #f2eef5; }
 .expiry-notice svg { flex: 0 0 auto; color: #7b6689; }
 .expiry-notice strong, .expiry-notice span { display: block; }

@@ -2,7 +2,7 @@ import { desc, eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { dealerships, quoteCatalog, quotePriceListControl, quoteRequests, users } from "../../../db/schema";
 import { recordAudit } from "../../../lib/audit";
-import { getAccessProfile, normalizeUserRole, roleLabel } from "../../../lib/access";
+import { getAccessProfile, isModuleEnabled, normalizeUserRole, roleLabel } from "../../../lib/access";
 export const dynamic = "force-dynamic";
 const DAY = 86400000;
 function forbidden() { return Response.json({ error: "Seu perfil não possui acesso às cotações." }, { status: 403 }); }
@@ -30,7 +30,10 @@ export async function GET() {
     const db = await getDb();
     const [dealers, allUsers, priceListRows] = await Promise.all([db.select().from(dealerships), db.select().from(users), db.select().from(quotePriceListControl)]);
     const priceList = new Map(priceListRows.map((row) => [row.partNumber, row]));
-    const visible = new Set(dealers.filter((dealer) => canSee(profile, dealer)).map((dealer) => dealer.id));
+    const visibleDealers = dealers.filter((dealer) => canSee(profile, dealer));
+    const visible = new Set((await Promise.all(visibleDealers.map(async (dealer) =>
+      (await isModuleEnabled(db, dealer.id, "quotes")) ? dealer.id : null,
+    ))).filter((id): id is number => id !== null));
     const rows = await db.select({ quote: quoteRequests, dealership: dealerships }).from(quoteRequests).innerJoin(dealerships, eq(quoteRequests.dealershipId, dealerships.id)).orderBy(desc(quoteRequests.updatedAt), desc(quoteRequests.createdAt));
     return Response.json({ quotes: rows.filter((row) => visible.has(row.quote.dealershipId)).map(({ quote, dealership }) => {
       const ownerRole = actionForStatus(quote.status);
@@ -61,6 +64,7 @@ export async function POST(request: Request) {
     const db = await getDb();
     const [dealer] = await db.select().from(dealerships).where(eq(dealerships.id, profile.dealershipId)).limit(1);
     if (!dealer) return Response.json({ error: "Concessionária não encontrada." }, { status: 404 });
+    if (!(await isModuleEnabled(db, dealer.id, "quotes"))) return forbidden("O módulo Cotações não está habilitado para esta concessionária.");
     const [catalog] = await db.select().from(quoteCatalog).where(eq(quoteCatalog.partNumber, partNumber)).limit(1);
     const fresh = Boolean(catalog?.importedAt && Date.now() - new Date(catalog.importedAt).getTime() <= 30 * DAY);
     const catalogReady = Boolean(
@@ -95,6 +99,7 @@ export async function PATCH(request: Request) {
     const db = await getDb();
     const [record] = await db.select({ quote: quoteRequests, dealership: dealerships }).from(quoteRequests).innerJoin(dealerships, eq(quoteRequests.dealershipId, dealerships.id)).where(eq(quoteRequests.id, payload.id)).limit(1);
     if (!record || !canSee(profile, record.dealership)) return Response.json({ error: "Cotação fora do seu escopo." }, { status: 403 });
+    if (!(await isModuleEnabled(db, record.dealership.id, "quotes"))) return forbidden("O módulo Cotações não está habilitado para esta concessionária.");
     if (payload.action === "toggle_price_list") {
       if (!canAnalyze(profile)) return Response.json({ error: "Seu perfil não pode controlar a lista de preços." }, { status: 403 });
       const [existing] = await db.select().from(quotePriceListControl).where(eq(quotePriceListControl.partNumber, record.quote.partNumber)).limit(1);

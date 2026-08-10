@@ -2,7 +2,7 @@ import { desc, eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { dealerships, proposalRequests, users } from "../../../db/schema";
 import { recordAudit } from "../../../lib/audit";
-import { getAccessProfile, normalizeUserRole } from "../../../lib/access";
+import { getAccessProfile, isModuleEnabled, normalizeUserRole } from "../../../lib/access";
 
 export const dynamic = "force-dynamic";
 
@@ -41,9 +41,12 @@ export async function GET() {
       .innerJoin(dealerships, eq(proposalRequests.dealershipId, dealerships.id))
       .orderBy(desc(proposalRequests.updatedAt), desc(proposalRequests.requestedAt));
 
+    const visibleRows = (await Promise.all(rows
+      .filter(({ dealership }) => canSee(profile, dealership))
+      .map(async (row) => (await isModuleEnabled(db, row.dealership.id, "proposals")) ? row : null)))
+      .filter((row): row is (typeof rows)[number] => row !== null);
     return Response.json({
-      requests: rows
-        .filter(({ dealership }) => canSee(profile, dealership))
+      requests: visibleRows
         .map(({ request, dealership }) => {
           const requester = allUsers.find((user) => user.email.toLowerCase() === request.requestedByEmail.toLowerCase());
           const actionOwner = request.actionOwnerEmail.trim().toLowerCase() === profile.email.trim().toLowerCase();
@@ -86,6 +89,7 @@ export async function POST(request: Request) {
     const db = await getDb();
     const [dealer] = await db.select().from(dealerships).where(eq(dealerships.id, profile.dealershipId)).limit(1);
     if (!dealer) return Response.json({ error: "Concessionária não encontrada." }, { status: 404 });
+    if (!(await isModuleEnabled(db, dealer.id, "proposals"))) return forbidden("O módulo Propostas não está habilitado para esta concessionária.");
     const allUsers = await db.select().from(users);
     const globalUser = allUsers.find((user) => user.active && normalizeUserRole(user.email, user.role) === "global_management");
     if (!globalUser) return Response.json({ error: "Não há Gestão Global ativa para receber a solicitação." }, { status: 409 });
@@ -139,6 +143,7 @@ export async function PATCH(request: Request) {
       .where(eq(proposalRequests.id, payload.id))
       .limit(1);
     if (!record || !canSee(profile, record.dealership)) return forbidden();
+    if (!(await isModuleEnabled(db, record.dealership.id, "proposals"))) return forbidden("O módulo Propostas não está habilitado para esta concessionária.");
     if (record.request.actionOwnerEmail.trim().toLowerCase() !== profile.email.trim().toLowerCase()) {
       return Response.json({ error: "Esta solicitação está atribuída a outro responsável." }, { status: 403 });
     }

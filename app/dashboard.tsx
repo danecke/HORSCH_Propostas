@@ -6,6 +6,8 @@ import Link from "next/link";
 import type { AppUser } from "../lib/auth";
 
 type UserRole = "general_admin" | "global_management" | "factory_manager" | "dealer_manager" | "concession";
+type ModuleKey = "proposals" | "quotes" | "price_list";
+type ModuleAccess = { key: ModuleKey; enabled: boolean };
 const PROPOSAL_RESPONSIBLE_ROLES: UserRole[] = ["general_admin", "global_management", "factory_manager"];
 type ProposalStatus =
   | "draft"
@@ -133,6 +135,7 @@ type Dealership = {
   approved: number;
   totalCents: number;
   lastProposalAt: string;
+  modules: ModuleAccess[];
 };
 
 type AccessUser = {
@@ -286,6 +289,7 @@ export function Dashboard({ user }: { user: AppUser }) {
   const [showNewAccess, setShowNewAccess] = useState(false);
   const [showDealershipForm, setShowDealershipForm] = useState(false);
   const [editDealership, setEditDealership] = useState<Dealership | null>(null);
+  const [moduleDealership, setModuleDealership] = useState<Dealership | null>(null);
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [editProposal, setEditProposal] = useState<Proposal | null>(null);
   const [preview, setPreview] = useState<Proposal | null>(null);
@@ -298,10 +302,12 @@ export function Dashboard({ user }: { user: AppUser }) {
       const response = await fetch("/api/proposals", { cache: "no-store" });
       const payload = (await response.json()) as DashboardData & { error?: string };
       if (!response.ok) throw new Error(payload.error || "Não foi possível carregar os dados.");
-      const quoteResponse = payload.me.role === "concession" ? null : await fetch("/api/quotes", { cache: "no-store" });
+      const currentDealer = payload.dealerships.find((dealer) => dealer.id === payload.me.dealershipId);
+      const moduleEnabled = (moduleKey: ModuleKey) => ["general_admin", "global_management", "factory_manager"].includes(payload.me.role) || Boolean(currentDealer?.modules.find((module) => module.key === moduleKey)?.enabled ?? true);
+      const quoteResponse = payload.me.role === "concession" || !moduleEnabled("quotes") ? null : await fetch("/api/quotes", { cache: "no-store" });
       const quotePayload = quoteResponse ? ((await quoteResponse.json()) as { quotes?: Quote[]; error?: string }) : { quotes: [] };
       if (quoteResponse && !quoteResponse.ok) throw new Error(quotePayload.error || "Não foi possível carregar as cotações.");
-      const requestResponse = payload.me.role === "concession" ? null : await fetch("/api/proposal-requests", { cache: "no-store" });
+      const requestResponse = payload.me.role === "concession" || !moduleEnabled("proposals") ? null : await fetch("/api/proposal-requests", { cache: "no-store" });
       const requestPayload = requestResponse ? ((await requestResponse.json()) as { requests?: ProposalRequest[]; error?: string }) : { requests: [] };
       if (requestResponse && !requestResponse.ok) throw new Error(requestPayload.error || "Não foi possível carregar as solicitações de proposta.");
       setData({ ...payload, proposalRequests: requestPayload.requests ?? [], quotes: quotePayload.quotes ?? [] });
@@ -330,8 +336,11 @@ export function Dashboard({ user }: { user: AppUser }) {
 
   if (loading) return <LoadingState />;
   if (error || !data) return <ErrorState message={error || "Acesso não disponível."} retry={loadData} />;
-  const canCreate = data.me.permissions.createProposal;
-  const canRequestProposal = data.me.role === "dealer_manager";
+  const moduleEnabled = (moduleKey: ModuleKey) => ["general_admin", "global_management", "factory_manager"].includes(data.me.role) || Boolean(data.dealerships.find((dealer) => dealer.id === data.me.dealershipId)?.modules.find((module) => module.key === moduleKey)?.enabled ?? true);
+  const proposalsEnabled = moduleEnabled("proposals");
+  const quotesEnabled = moduleEnabled("quotes");
+  const canCreate = data.me.permissions.createProposal && proposalsEnabled;
+  const canRequestProposal = data.me.role === "dealer_manager" && proposalsEnabled;
   const concessionOnly = data.me.role === "concession";
   const proposalResponsibles = data.proposalResponsibles.filter((item) => item.active);
   async function refreshed(message: string) { setNotice(message); await loadData(); }
@@ -351,7 +360,7 @@ export function Dashboard({ user }: { user: AppUser }) {
         <div className="brand-lockup"><BrandMark className="brand-mark" /><div><strong>HORSCH</strong><span>Brasil</span></div></div>
         <div className="role-card"><span>Perfil ativo</span><strong>{data.me.roleLabel}</strong><small>{scopeDescription(data.me)}</small></div>
         <nav className="sidebar-nav" aria-label="Navegação principal">
-          {concessionOnly ? <NavButton active icon="file" onClick={() => setView("overview")}>Lista de preços</NavButton> : <><NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão geral</NavButton><NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton><NavButton active={view === "quotes"} icon="clock" onClick={() => setView("quotes")}>Cotações</NavButton><NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Concessionárias</NavButton>{data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}</>}
+          {concessionOnly ? <NavButton active icon="file" onClick={() => setView("overview")}>Lista de preços</NavButton> : <><NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão geral</NavButton>{proposalsEnabled && <NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton>}{quotesEnabled && <NavButton active={view === "quotes"} icon="clock" onClick={() => setView("quotes")}>Cotações</NavButton>}<NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Concessionárias</NavButton>{data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}</>}
         </nav>
         {(canCreate || canRequestProposal) && <button className="sidebar-new" onClick={() => canRequestProposal ? setShowNewProposalRequest(true) : setShowNewProposal(true)}><Icon name="plus" size={17} />{canRequestProposal ? "Solicitar proposta" : "Nova proposta"}</button>}
         <div className="sidebar-account-actions"><button type="button" onClick={() => setShowChangePassword(true)}><Icon name="key" size={15} />Alterar senha</button></div>
@@ -361,32 +370,35 @@ export function Dashboard({ user }: { user: AppUser }) {
       <section className="workspace">
         <header className="mobile-header"><div className="mobile-lockup"><BrandMark className="mobile-mark" /><strong>HORSCH</strong></div><span className="mobile-role">{data.me.roleLabel}</span></header>
         {notice && <div className="toast" role="status"><Icon name="check" size={17} />{notice}</div>}
-        {view === "history" && <button type="button" className="outline-button compact back-button workspace-back-button" onClick={() => { setView("proposals"); setHistoryProposalId(null); }}>← Voltar às propostas</button>}
+        {view === "history" && <button type="button" className="outline-button compact back-button workspace-back-button" onClick={() => { setView(proposalsEnabled ? "proposals" : "overview"); setHistoryProposalId(null); }}>← Voltar</button>}
         {concessionOnly ? <PriceListView /> : view === "overview" ? (
           <Overview data={data} onNew={() => setShowNewProposal(true)} onOpen={setPreview} onHistory={openHistory} onAll={() => setView("proposals")} />
-        ) : view === "proposals" ? (
+        ) : view === "proposals" && proposalsEnabled ? (
           <ProposalsView proposals={filteredProposals} proposalRequests={data.proposalRequests} me={data.me} allCount={data.proposals.length} search={search} onSearch={setSearch} status={statusFilter} onStatus={setStatusFilter} canCreate={canCreate} canRequestProposal={canRequestProposal} onNew={() => setShowNewProposal(true)} onNewRequest={() => setShowNewProposalRequest(true)} onOpen={setPreview} canViewHistory={data.me.role === "general_admin"} onHistory={openHistory} onChanged={() => refreshed("Solicitação de proposta atualizada.")} />
-        ) : view === "quotes" ? (
+        ) : view === "quotes" && quotesEnabled ? (
           <QuotesView quotes={data.quotes} me={data.me} onChanged={() => refreshed("Cotação atualizada com sucesso.")} />
         ) : view === "dealerships" ? (
-          <DealershipsView dealerships={data.dealerships} proposals={data.proposals} me={data.me} onOpen={setPreview} onNew={() => setShowDealershipForm(true)} onEdit={setEditDealership} />
+          <DealershipsView dealerships={data.dealerships} proposals={data.proposals} me={data.me} onOpen={setPreview} onNew={() => setShowDealershipForm(true)} onEdit={setEditDealership} onModules={setModuleDealership} />
         ) : view === "access" ? (
           <AccessView data={data} onNew={() => setShowNewAccess(true)} onChanged={() => refreshed("Acesso atualizado com segurança.")} />
-        ) : (
+        ) : view === "history" ? (
           <HistoryView proposalId={historyProposalId} />
+        ) : (
+          <Overview data={data} onNew={() => setShowNewProposal(true)} onOpen={setPreview} onHistory={openHistory} onAll={() => setView("proposals")} />
         )}
         <nav className="mobile-nav" aria-label="Navegação móvel">
-          {!concessionOnly && <><NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão</NavButton><NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton><NavButton active={view === "quotes"} icon="clock" onClick={() => setView("quotes")}>Cotações</NavButton><NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Rede</NavButton>{data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}</>}
+          {!concessionOnly && <><NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão</NavButton>{proposalsEnabled && <NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton>}{quotesEnabled && <NavButton active={view === "quotes"} icon="clock" onClick={() => setView("quotes")}>Cotações</NavButton>}<NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Rede</NavButton>{data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}</>}
         </nav>
       </section>
 
-      {showNewProposal && <NewProposalModal userEmail={data.me.email} role={data.me.role} dealerships={data.dealerships} proposalResponsibles={proposalResponsibles} onClose={() => setShowNewProposal(false)} onSaved={async (message) => { setShowNewProposal(false); await refreshed(message); }} />}
+      {showNewProposal && <NewProposalModal userEmail={data.me.email} role={data.me.role} dealerships={data.dealerships.filter((dealer) => dealer.modules.find((module) => module.key === "proposals")?.enabled ?? true)} proposalResponsibles={proposalResponsibles} onClose={() => setShowNewProposal(false)} onSaved={async (message) => { setShowNewProposal(false); await refreshed(message); }} />}
       {showNewProposalRequest && <NewProposalRequestModal onClose={() => setShowNewProposalRequest(false)} onSaved={async (message) => { setShowNewProposalRequest(false); await refreshed(message); }} />}
       {showNewAccess && <NewAccessModal me={data.me} dealerships={data.dealerships} onClose={() => setShowNewAccess(false)} onSaved={async () => { setShowNewAccess(false); await refreshed("Novo acesso criado com sucesso."); }} />}
       {showDealershipForm && <DealershipRegistrationModal me={data.me} dealerships={data.dealerships} managers={proposalResponsibles.filter((item) => item.role === "factory_manager")} onClose={() => setShowDealershipForm(false)} onSaved={async (message) => { setShowDealershipForm(false); await refreshed(message); }} />}
       {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} onSaved={() => { setShowChangePassword(false); setNotice("Senha alterada com sucesso."); }} />}
       {editProposal && <NewProposalModal userEmail={data.me.email} role={data.me.role} dealerships={data.dealerships} proposalResponsibles={proposalResponsibles} proposal={editProposal} onClose={() => setEditProposal(null)} onSaved={async (message) => { setEditProposal(null); await refreshed(message); }} />}
       {editDealership && <DealershipRegistrationModal me={data.me} dealerships={data.dealerships} managers={proposalResponsibles.filter((item) => item.role === "factory_manager")} dealership={editDealership} onClose={() => setEditDealership(null)} onSaved={async (message) => { setEditDealership(null); await refreshed(message); }} />}
+      {moduleDealership && <ModuleAccessModal dealership={moduleDealership} onClose={() => setModuleDealership(null)} onSaved={async () => { setModuleDealership(null); await refreshed("Módulos da concessionária atualizados."); }} />}
       {preview && <ProposalPreview proposal={preview} me={data.me} onClose={() => setPreview(null)} onEdit={() => { setEditProposal(preview); setPreview(null); }} onDeleted={async () => { setPreview(null); await refreshed("Proposta excluída com sucesso."); }} onUpdated={async (status, counterofferCents) => { setPreview({ ...preview, status, counterofferCents: counterofferCents ?? null }); await refreshed("Proposta atualizada com sucesso."); }} />}
     </main>
   );
@@ -710,9 +722,9 @@ function ProposalTable({ proposals, onOpen, canViewHistory, onHistory }: { propo
   return <div className="table-scroll"><table className="data-table"><thead><tr><th>Proposta</th><th>Concessionária</th><th>Emissão</th><th>Vigência</th><th>Responsável</th><th>Status</th><th className="align-right">Valor</th><th aria-label="Abrir" /></tr></thead><tbody>{proposals.map((proposal) => <tr key={proposal.id} onClick={() => onOpen(proposal)}><td><div className="proposal-id-line"><strong className="proposal-id">{proposal.id}</strong>{canViewHistory && <button type="button" className="history-row-action" onClick={(event) => { event.stopPropagation(); onHistory(proposal.id); }} aria-label={`Ver histórico de ${proposal.id}`} title="Ver histórico"><Icon name="eye" size={14} /></button>}</div><small>{proposal.items.length} {proposal.items.length === 1 ? "item" : "itens"}</small></td><td><strong>{proposal.dealership}</strong><small>{proposal.city}{proposal.state ? ` · ${proposal.state}` : ""}</small></td><td>{formatDate(proposal.issueDate)}</td><td><strong>{formatDate(proposal.validUntil)}</strong>{proposal.status === "expired" && <small>Expirada automaticamente</small>}</td><td>{proposal.commercialOwner}</td><td><StatusBadge status={proposal.status} /></td><td className="align-right value-cell"><strong>{formatBRL(proposal.totalCents)}</strong>{proposal.status === "counteroffer" && proposal.counterofferCents && <small>Proposto: {formatBRL(proposal.counterofferCents)}</small>}</td><td><button className="row-action" onClick={(event) => { event.stopPropagation(); onOpen(proposal); }} aria-label={`Abrir ${proposal.id}`}><Icon name="arrow" size={16} /></button></td></tr>)}</tbody></table></div>;
 }
 
-function DealershipsView({ dealerships, proposals, me, onOpen, onNew, onEdit }: { dealerships: Dealership[]; proposals: Proposal[]; me: CurrentAccess; onOpen: (proposal: Proposal) => void; onNew: () => void; onEdit: (dealer: Dealership) => void }) {
+function DealershipsView({ dealerships, proposals, me, onOpen, onNew, onEdit, onModules }: { dealerships: Dealership[]; proposals: Proposal[]; me: CurrentAccess; onOpen: (proposal: Proposal) => void; onNew: () => void; onEdit: (dealer: Dealership) => void; onModules: (dealer: Dealership) => void }) {
   const canManage = ["general_admin", "global_management", "factory_manager"].includes(me.role);
-  return <div className="content-frame"><header className="page-heading"><div><span className="eyebrow">Carteira comercial</span><h1>Concessionárias</h1><p>CEP, UF, matriz/filial e Gestor Fábrica definem a carteira de atuação.</p></div>{canManage && <button className="primary-button" onClick={onNew}><Icon name="plus" size={18} />Cadastrar concessionária</button>}</header>{!dealerships.length ? <article className="panel"><EmptyState title="Nenhuma concessionária vinculada" text="Cadastre a primeira unidade para iniciar a carteira." /></article> : <section className="dealership-grid">{dealerships.map((dealer) => { const latest = proposals.find((proposal) => proposal.dealershipId === dealer.id); return <article className="dealer-card" key={dealer.id}><header><span className="dealer-large-monogram">{initials(dealer.name)}</span><div><h2>{dealer.name}</h2><p>{dealer.city}{dealer.state ? ` · ${dealer.state}` : ""}</p></div></header><div className="dealer-registration-meta"><span>{dealer.parentDealershipName ? `Filial de ${dealer.parentDealershipName}` : "Matriz"}</span><strong>CEP {formatPostalCode(dealer.postalCode) || "não cadastrado"}</strong></div><dl><div><dt>Propostas</dt><dd>{dealer.proposals}</dd></div><div><dt>Aceitas</dt><dd>{dealer.approved}</dd></div><div><dt>Valor</dt><dd>{formatBRL(dealer.totalCents)}</dd></div></dl><div className="dealer-manager"><span>Gestor Fábrica</span><strong>{dealer.factoryManagerName || "Não atribuído"}</strong><small>{dealer.factoryManagerEmail}</small></div><footer><div><span>Responsável da concessionária</span><strong>{dealer.dealerManagerName || "Não informado"}</strong><small>{dealer.dealerManagerEmail}</small></div><div className="dealer-card-actions">{canManage && <button className="text-button" onClick={() => onEdit(dealer)}>Editar cadastro</button>}{latest && <button className="text-button" onClick={() => onOpen(latest)}>Abrir última <Icon name="arrow" size={14} /></button>}</div></footer></article>; })}</section>}</div>;
+  return <div className="content-frame"><header className="page-heading"><div><span className="eyebrow">Carteira comercial</span><h1>Concessionárias</h1><p>CEP, UF, matriz/filial e Gestor Fábrica definem a carteira de atuação.</p></div>{canManage && <button className="primary-button" onClick={onNew}><Icon name="plus" size={18} />Cadastrar concessionária</button>}</header>{!dealerships.length ? <article className="panel"><EmptyState title="Nenhuma concessionária vinculada" text="Cadastre a primeira unidade para iniciar a carteira." /></article> : <section className="dealership-grid">{dealerships.map((dealer) => { const latest = proposals.find((proposal) => proposal.dealershipId === dealer.id); return <article className="dealer-card" key={dealer.id}><header><span className="dealer-large-monogram">{initials(dealer.name)}</span><div><h2>{dealer.name}</h2><p>{dealer.city}{dealer.state ? ` · ${dealer.state}` : ""}</p></div></header><div className="dealer-registration-meta"><span>{dealer.parentDealershipName ? `Filial de ${dealer.parentDealershipName}` : "Matriz"}</span><strong>CEP {formatPostalCode(dealer.postalCode) || "não cadastrado"}</strong></div><dl><div><dt>Propostas</dt><dd>{dealer.proposals}</dd></div><div><dt>Aceitas</dt><dd>{dealer.approved}</dd></div><div><dt>Valor</dt><dd>{formatBRL(dealer.totalCents)}</dd></div></dl><div className="dealer-module-summary"><span>Módulos</span><div>{dealer.modules.map((module) => <span className={module.enabled ? "module-on" : "module-off"} key={module.key}>{module.key === "proposals" ? "Propostas" : module.key === "quotes" ? "Cotações" : "Preços"}</span>)}</div></div><div className="dealer-manager"><span>Gestor Fábrica</span><strong>{dealer.factoryManagerName || "Não atribuído"}</strong><small>{dealer.factoryManagerEmail}</small></div><footer><div><span>Responsável da concessionária</span><strong>{dealer.dealerManagerName || "Não informado"}</strong><small>{dealer.dealerManagerEmail}</small></div><div className="dealer-card-actions">{canManage && <><button className="text-button" onClick={() => onModules(dealer)}>Módulos</button><button className="text-button" onClick={() => onEdit(dealer)}>Editar cadastro</button></>}{latest && <button className="text-button" onClick={() => onOpen(latest)}>Abrir última <Icon name="arrow" size={14} /></button>}</div></footer></article>; })}</section>}</div>;
 }
 
 function DealershipRegistrationModal({ me, dealerships, managers, dealership, onClose, onSaved }: { me: CurrentAccess; dealerships: Dealership[]; managers: AccessUser[]; dealership?: Dealership; onClose: () => void; onSaved: (message: string) => Promise<void> }) {
@@ -735,6 +747,39 @@ function DealershipRegistrationModal({ me, dealerships, managers, dealership, on
     await onSaved(dealership ? "Cadastro da concessionária atualizado." : "Concessionária cadastrada com sucesso.");
   }
   return <div className="modal-backdrop" role="dialog" aria-modal="true"><form className="access-modal dealership-modal" onSubmit={(event) => void submit(event)}><header className="modal-header"><div><span className="eyebrow">Rede HORSCH</span><h2>{dealership ? "Editar concessionária" : "Cadastrar concessionária"}</h2><p>O cadastro define CEP, UF, vínculo de matriz/filial e a carteira do Gestor Fábrica.</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Fechar"><Icon name="close" /></button></header><div className="form-scroll"><div className="access-form-grid"><label className="field"><span>Nome</span><input value={name} onChange={(event) => setName(event.target.value)} required /></label><label className="field"><span>Cidade</span><input value={city} onChange={(event) => setCity(event.target.value)} /></label><label className="field"><span>UF de atuação</span><input maxLength={2} value={state} onChange={(event) => setState(event.target.value.toUpperCase())} required /></label><label className="field"><span>CEP</span><input inputMode="numeric" maxLength={9} value={postalCode} onChange={(event) => setPostalCode(formatPostalCode(event.target.value))} placeholder="00000-000" required /></label><label className="field"><span>Estrutura</span><select value={parentDealershipId ?? ""} onChange={(event) => setParentDealershipId(Number(event.target.value) || null)}><option value="">Matriz</option>{matrices.map((item) => <option key={item.id} value={item.id}>Filial de {item.name}</option>)}</select></label><label className="field"><span>Gestor Fábrica</span><select value={factoryManagerEmail} onChange={(event) => setFactoryManagerEmail(event.target.value)} required><option value="">Selecione</option>{managers.map((manager) => <option key={manager.email} value={manager.email}>{manager.name}</option>)}</select></label><label className="field"><span>Responsável</span><input value={contactName} onChange={(event) => setContactName(event.target.value)} /></label><label className="field"><span>E-mail do responsável</span><input type="email" value={contactEmail} onChange={(event) => setContactEmail(event.target.value)} /></label></div>{error && <p className="form-error">{error}</p>}</div><footer className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button type="submit" className="primary-button" disabled={saving}>{saving ? "Salvando..." : "Salvar cadastro"}</button></footer></form></div>;
+}
+
+function ModuleAccessModal({ dealership, onClose, onSaved }: { dealership: Dealership; onClose: () => void; onSaved: () => Promise<void> }) {
+  const [modules, setModules] = useState<ModuleAccess[]>(dealership.modules);
+  const [busy, setBusy] = useState<ModuleKey | "">("");
+  const [error, setError] = useState("");
+  const labels: Record<ModuleKey, string> = { proposals: "Propostas", quotes: "Cotações", price_list: "Lista de preços" };
+  const descriptions: Record<ModuleKey, string> = {
+    proposals: "Solicitações, propostas comerciais e retornos.",
+    quotes: "Cotações de PN, análise 360º e encaminhamento.",
+    price_list: "Consulta e controle da lista de preços.",
+  };
+
+  async function toggle(moduleKey: ModuleKey) {
+    const current = modules.find((module) => module.key === moduleKey)?.enabled ?? true;
+    setBusy(moduleKey);
+    setError("");
+    const response = await fetch("/api/dealership-modules", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dealershipId: dealership.id, moduleKey, enabled: !current }),
+    });
+    const payload = (await response.json()) as { error?: string; enabled?: boolean };
+    if (!response.ok) {
+      setError(payload.error || "Não foi possível atualizar o módulo.");
+      setBusy("");
+      return;
+    }
+    setModules((currentModules) => currentModules.map((module) => module.key === moduleKey ? { ...module, enabled: Boolean(payload.enabled) } : module));
+    setBusy("");
+  }
+
+  return <div className="modal-backdrop" role="dialog" aria-modal="true"><section className="access-modal module-access-modal"><header className="modal-header"><div><span className="eyebrow">Acesso por concessionária</span><h2>Módulos de {dealership.name}</h2><p>Desative um módulo sem interferir nos demais fluxos.</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Fechar"><Icon name="close" /></button></header><div className="form-scroll"><div className="module-access-list">{(Object.keys(labels) as ModuleKey[]).map((moduleKey) => { const enabled = modules.find((module) => module.key === moduleKey)?.enabled ?? true; return <div className={`module-access-row ${enabled ? "enabled" : "disabled"}`} key={moduleKey}><div><strong>{labels[moduleKey]}</strong><span>{descriptions[moduleKey]}</span></div><button type="button" className={enabled ? "outline-button compact" : "primary-button compact"} disabled={busy === moduleKey} onClick={() => void toggle(moduleKey)}>{busy === moduleKey ? "Salvando..." : enabled ? "Desativar" : "Habilitar"}</button></div>; })}</div>{error && <p className="form-error">{error}</p>}</div><footer className="modal-actions"><span className="module-access-note">Gestão Global e níveis superiores continuam com visão gerencial da rede.</span><button type="button" className="primary-button" onClick={() => void onSaved()}>Concluir</button></footer></section></div>;
 }
 
 function AccessView({ data, onNew, onChanged }: { data: DashboardData; onNew: () => void; onChanged: () => Promise<void> }) {

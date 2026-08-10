@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { dealerships, users } from "../../../db/schema";
 import { recordAudit } from "../../../lib/audit";
-import { getAccessProfile, normalizeUserRole } from "../../../lib/access";
+import { ensureDealershipModules, getAccessProfile, normalizeUserRole } from "../../../lib/access";
 
 export const dynamic = "force-dynamic";
 
@@ -92,6 +92,7 @@ export async function POST(request: Request) {
       contactEmail: payload.contactEmail?.trim().toLowerCase() || "",
       factoryManagerEmail: manager.email.toLowerCase(),
     }).returning();
+    await ensureDealershipModules(db, created.id, profile.email);
     await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "dealership_created", entity: "dealership", details: `Concessionária ${created.name} cadastrada.`, after: created });
     return Response.json({ dealership: created }, { status: 201 });
   } catch (error) {
@@ -131,6 +132,7 @@ export async function PATCH(request: Request) {
       contactEmail: payload.contactEmail?.trim().toLowerCase() || "",
       factoryManagerEmail: manager.email.toLowerCase(),
     }).where(eq(dealerships.id, id)).returning();
+    await ensureDealershipModules(db, updated.id, profile.email);
     await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "dealership_updated", entity: "dealership", details: `Cadastro da concessionária ${updated.name} atualizado.`, before: current, after: updated });
     return Response.json({ dealership: updated });
   } catch (error) {

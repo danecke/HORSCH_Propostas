@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getDb } from "../db";
-import { users } from "../db/schema";
+import { dealershipModuleAccess, users } from "../db/schema";
 import { getAuthenticatedUser } from "./auth";
 
 export const MASTER_ADMIN_EMAIL = "mateus.mazieiro@horsch.com";
@@ -17,6 +17,14 @@ export const PROPOSAL_RESPONSIBLE_ROLES = [
   "factory_manager",
 ] as const;
 export type UserRole = (typeof ROLES)[number];
+
+export const MODULE_KEYS = ["proposals", "quotes", "price_list"] as const;
+export type ModuleKey = (typeof MODULE_KEYS)[number];
+export const MODULE_LABELS: Record<ModuleKey, string> = {
+  proposals: "Propostas",
+  quotes: "Cotações",
+  price_list: "Lista de preços",
+};
 
 export const LOWER_MANAGED_ROLES: Record<UserRole, readonly UserRole[]> = {
   general_admin: ROLES,
@@ -115,4 +123,39 @@ export function normalizeUserRole(email: string, role: string): UserRole | null 
   if (role === "admin") return "concession";
   if (role === "user") return "concession";
   return ROLES.includes(role as UserRole) ? (role as UserRole) : null;
+}
+
+export async function isModuleEnabled(
+  db: Awaited<ReturnType<typeof getDb>>,
+  dealershipId: number,
+  moduleKey: ModuleKey,
+) {
+  const [access] = await db
+    .select({ enabled: dealershipModuleAccess.enabled })
+    .from(dealershipModuleAccess)
+    .where(and(
+      eq(dealershipModuleAccess.dealershipId, dealershipId),
+      eq(dealershipModuleAccess.moduleKey, moduleKey),
+    ))
+    .limit(1);
+  return access?.enabled ?? true;
+}
+
+export async function ensureDealershipModules(
+  db: Awaited<ReturnType<typeof getDb>>,
+  dealershipId: number,
+  updatedByEmail = "",
+) {
+  const now = new Date().toISOString();
+  for (const moduleKey of MODULE_KEYS) {
+    await db.insert(dealershipModuleAccess).values({
+      dealershipId,
+      moduleKey,
+      enabled: true,
+      updatedByEmail,
+      updatedAt: now,
+    }).onConflictDoNothing({
+      target: [dealershipModuleAccess.dealershipId, dealershipModuleAccess.moduleKey],
+    });
+  }
 }

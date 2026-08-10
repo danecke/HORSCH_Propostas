@@ -1,11 +1,14 @@
 import { and, desc, eq, inArray, lt } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { dealerships, proposalDocuments, proposalItems, proposals, users } from "../../../db/schema";
+import { dealershipModuleAccess, dealerships, proposalDocuments, proposalItems, proposals, users } from "../../../db/schema";
 import { recordAudit } from "../../../lib/audit";
 import {
   canCreateProposal,
   canBeProposalResponsible,
   getAccessProfile,
+  ensureDealershipModules,
+  isModuleEnabled,
+  MODULE_KEYS,
   normalizeUserRole,
   rolePermissions,
   roleLabel,
@@ -210,12 +213,15 @@ export async function GET() {
   try {
     const db = await getDb();
     await expireOverdueProposals(db);
-    const [allDealers, allUsers] = await Promise.all([
+    const [allDealers, allUsers, moduleRows] = await Promise.all([
       db.select().from(dealerships).orderBy(dealerships.name),
       db.select().from(users).orderBy(users.name, users.email),
+      db.select().from(dealershipModuleAccess),
     ]);
     const visibleDealers = allDealers.filter((dealer) => dealerIsVisible(profile, dealer));
-    const visibleDealerIds = new Set(visibleDealers.map((dealer) => dealer.id));
+    const proposalDealerIds = new Set((await Promise.all(visibleDealers.map(async (dealer) =>
+      (await isModuleEnabled(db, dealer.id, "proposals")) ? dealer.id : null,
+    ))).filter((id): id is number => id !== null));
 
     const allRows = await db
       .select({
@@ -258,7 +264,8 @@ export async function GET() {
       .from(proposals)
       .innerJoin(dealerships, eq(proposals.dealershipId, dealerships.id))
       .orderBy(desc(proposals.createdAt), desc(proposals.id));
-    const rows = allRows.filter((row) => visibleDealerIds.has(row.dealershipId));
+    const rows = allRows.filter((row) => proposalDealerIds.has(row.dealershipId));
+    const visibleDealerIds = new Set(visibleDealers.map((dealer) => dealer.id));
 
     const itemRows = rows.length
       ? await db
@@ -332,6 +339,10 @@ export async function GET() {
         approved: dealerProposals.filter((row) => row.status === "approved").length,
         totalCents: dealerProposals.reduce((sum, row) => sum + row.totalCents, 0),
         lastProposalAt: dealerProposals[0]?.createdAt ?? dealer.createdAt,
+        modules: MODULE_KEYS.map((moduleKey) => ({
+          key: moduleKey,
+          enabled: moduleRows.find((row) => row.dealershipId === dealer.id && row.moduleKey === moduleKey)?.enabled ?? true,
+        })),
       };
     });
 
@@ -448,6 +459,9 @@ export async function POST(request: Request) {
     }
 
     let dealer = existingDealer;
+    if (dealer && !(await isModuleEnabled(db, dealer.id, "proposals"))) {
+      return Response.json({ error: "O módulo Propostas não está habilitado para esta concessionária." }, { status: 403 });
+    }
     if (!dealer) {
       if (normalizeUserRole(assignedManager.email, assignedManager.role) !== "factory_manager") {
         return Response.json({ error: "A nova concessionária deve ser atribuída a um Gestor Fábrica responsável pela carteira." }, { status: 400 });
@@ -477,6 +491,7 @@ export async function POST(request: Request) {
         })
         .returning();
       dealer = createdDealer;
+      await ensureDealershipModules(db, dealer.id, profile.email);
     } else if (
       (!dealer.factoryManagerEmail && assignedManagerEmail) ||
       (!dealer.contactName && payload.contactName?.trim()) ||
@@ -644,6 +659,7 @@ export async function PATCH(request: Request) {
       return Response.json({ error: "Proposta não encontrada." }, { status: 404 });
     }
     if (!dealerIsVisible(profile, record.dealer)) return forbidden();
+    if (!(await isModuleEnabled(db, record.dealer.id, "proposals"))) return forbidden("O módulo Propostas não está habilitado para esta concessionária.");
     const expiredEdit = record.proposal.status === "expired" && payload.action === "edit" && ["general_admin", "global_management"].includes(profile.role);
     if (record.proposal.status === "expired" && !expiredEdit) {
       return expiredProposalResponse(record.proposal.validUntil);
@@ -662,6 +678,7 @@ export async function PATCH(request: Request) {
       const editedDealershipId = Math.trunc(Number(payload.dealershipId) || record.dealer.id);
       const [editedDealer] = await db.select().from(dealerships).where(eq(dealerships.id, editedDealershipId)).limit(1);
       if (!editedDealer || !dealerIsVisible(profile, editedDealer)) return forbidden();
+      if (!(await isModuleEnabled(db, editedDealer.id, "proposals"))) return forbidden("O módulo Propostas não está habilitado para esta concessionária.");
       const requestedManagerEmail = payload.factoryManagerEmail?.trim().toLowerCase() || editedDealer.factoryManagerEmail.toLowerCase();
       const assignedManager = allUsers.find((candidate) => {
         const role = normalizeUserRole(candidate.email, candidate.role);
@@ -921,6 +938,7 @@ export async function DELETE(request: Request) {
       return Response.json({ error: "Proposta não encontrada." }, { status: 404 });
     }
     if (!dealerIsVisible(profile, record.dealer)) return forbidden();
+    if (!(await isModuleEnabled(db, record.dealer.id, "proposals"))) return forbidden("O módulo Propostas não está habilitado para esta concessionária.");
 
     const canDelete =
       ["general_admin", "global_management"].includes(profile.role) ||
