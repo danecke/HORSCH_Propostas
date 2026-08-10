@@ -14,6 +14,10 @@ export const dealerships = sqliteTable(
     name: text("name").notNull(),
     city: text("city").notNull().default(""),
     state: text("state").notNull().default(""),
+    postalCode: text("postal_code").notNull().default(""),
+    parentDealershipId: integer("parent_dealership_id").references(() => dealerships.id, {
+      onDelete: "set null",
+    }),
     contactName: text("contact_name").notNull().default(""),
     contactEmail: text("contact_email").notNull().default(""),
     factoryManagerEmail: text("factory_manager_email").notNull().default(""),

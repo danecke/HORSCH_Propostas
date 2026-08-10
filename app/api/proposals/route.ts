@@ -44,6 +44,8 @@ type ProposalInput = {
   dealership?: string;
   city?: string;
   state?: string;
+  postalCode?: string;
+  parentDealershipId?: number | null;
   contactName?: string;
   contactEmail?: string;
   factoryManagerEmail?: string;
@@ -134,6 +136,10 @@ function normalizeOptionalCents(value: unknown) {
   return Number.isFinite(cents) && cents > 0 ? cents : null;
 }
 
+function normalizePostalCode(value: unknown) {
+  return String(value ?? "").replace(/\D/g, "").slice(0, 8);
+}
+
 function itemValidationError(items: ReturnType<typeof normalizeItems>) {
   if (!items.length) return "Adicione ao menos um item à proposta.";
   const incomplete = items.find(
@@ -218,6 +224,8 @@ export async function GET() {
         dealership: dealerships.name,
         city: dealerships.city,
         state: dealerships.state,
+        postalCode: dealerships.postalCode,
+        parentDealershipId: dealerships.parentDealershipId,
         contactName: proposals.contactName,
         contactEmail: proposals.contactEmail,
         dealershipContactEmail: dealerships.contactEmail,
@@ -293,6 +301,7 @@ export async function GET() {
       return {
         ...row,
         contactEmail: row.contactEmail || dealershipContactEmail,
+        parentDealershipName: row.parentDealershipId ? dealerById.get(row.parentDealershipId)?.name || "" : "",
         isActionOwner: actionOwnerEmail === profile.email.trim().toLowerCase(),
         commercialOwnerEmail: row.commercialOwnerEmail || row.createdByEmail,
         items: itemsByProposal.get(row.id) ?? [],
@@ -313,6 +322,7 @@ export async function GET() {
       );
       return {
         ...dealer,
+        parentDealershipName: dealer.parentDealershipId ? dealerById.get(dealer.parentDealershipId)?.name || "" : "",
         contactName: dealerManager?.name || dealer.contactName,
         contactEmail: dealerManager?.email || dealer.contactEmail,
         factoryManagerName: factoryManager?.name || "",
@@ -439,12 +449,25 @@ export async function POST(request: Request) {
 
     let dealer = existingDealer;
     if (!dealer) {
+      const postalCode = normalizePostalCode(payload.postalCode);
+      const state = payload.state?.trim().toUpperCase().slice(0, 2) || "";
+      if (postalCode.length !== 8 || state.length !== 2) {
+        return Response.json({ error: "Cadastre CEP válido e UF de atuação antes de criar a proposta." }, { status: 400 });
+      }
+      const parentDealershipId = payload.parentDealershipId ? Math.trunc(Number(payload.parentDealershipId)) : null;
+      if (parentDealershipId) {
+        const [parent] = await db.select().from(dealerships).where(eq(dealerships.id, parentDealershipId)).limit(1);
+        if (!parent || parent.parentDealershipId !== null) return Response.json({ error: "Selecione uma matriz válida para a filial." }, { status: 400 });
+        if (!dealerIsVisible(profile, parent)) return forbidden();
+      }
       const [createdDealer] = await db
         .insert(dealerships)
         .values({
           name: dealershipName,
           city: payload.city?.trim() ?? "",
-          state: payload.state?.trim().toUpperCase().slice(0, 2) ?? "",
+          state,
+          postalCode,
+          parentDealershipId,
           contactName: payload.contactName?.trim() ?? "",
           contactEmail: payload.contactEmail?.trim().toLowerCase() ?? "",
           factoryManagerEmail: assignedManagerEmail,
@@ -618,19 +641,21 @@ export async function PATCH(request: Request) {
       return Response.json({ error: "Proposta não encontrada." }, { status: 404 });
     }
     if (!dealerIsVisible(profile, record.dealer)) return forbidden();
-    if (record.proposal.status === "expired") {
+    const expiredEdit = record.proposal.status === "expired" && payload.action === "edit" && ["general_admin", "global_management"].includes(profile.role);
+    if (record.proposal.status === "expired" && !expiredEdit) {
       return expiredProposalResponse(record.proposal.validUntil);
     }
 
     const allUsers = await db.select().from(users).orderBy(users.name, users.email);
     const isActionOwner = proposalActionOwnerEmail(record.proposal, record.dealer, allUsers) === profile.email.trim().toLowerCase();
     const actionRequired = Boolean(payload.action || payload.status);
-    if (actionRequired && !isActionOwner) {
+    if (actionRequired && !isActionOwner && !expiredEdit) {
       return Response.json({ error: "Esta ação está disponível somente para o responsável atual da proposta." }, { status: 403 });
     }
 
     if (payload.action === "edit") {
       if (!["general_admin", "global_management", "factory_manager"].includes(profile.role)) return Response.json({ error: "Somente ADM Geral, Gestão Global ou Gestor Fábrica podem editar propostas." }, { status: 403 });
+      if (record.proposal.status === "expired" && !["general_admin", "global_management"].includes(profile.role)) return Response.json({ error: "Propostas expiradas podem ser reabertas somente pela Gestão Global ou níveis superiores." }, { status: 403 });
       const editedDealershipId = Math.trunc(Number(payload.dealershipId) || record.dealer.id);
       const [editedDealer] = await db.select().from(dealerships).where(eq(dealerships.id, editedDealershipId)).limit(1);
       if (!editedDealer || !dealerIsVisible(profile, editedDealer)) return forbidden();

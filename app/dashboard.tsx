@@ -120,6 +120,9 @@ type Dealership = {
   name: string;
   city: string;
   state: string;
+  postalCode: string;
+  parentDealershipId: number | null;
+  parentDealershipName: string;
   contactName: string;
   contactEmail: string;
   factoryManagerEmail: string;
@@ -281,6 +284,8 @@ export function Dashboard({ user }: { user: AppUser }) {
   const [showNewProposal, setShowNewProposal] = useState(false);
   const [showNewProposalRequest, setShowNewProposalRequest] = useState(false);
   const [showNewAccess, setShowNewAccess] = useState(false);
+  const [showDealershipForm, setShowDealershipForm] = useState(false);
+  const [editDealership, setEditDealership] = useState<Dealership | null>(null);
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [editProposal, setEditProposal] = useState<Proposal | null>(null);
   const [preview, setPreview] = useState<Proposal | null>(null);
@@ -364,7 +369,7 @@ export function Dashboard({ user }: { user: AppUser }) {
         ) : view === "quotes" ? (
           <QuotesView quotes={data.quotes} me={data.me} onChanged={() => refreshed("Cotação atualizada com sucesso.")} />
         ) : view === "dealerships" ? (
-          <DealershipsView dealerships={data.dealerships} proposals={data.proposals} onOpen={setPreview} />
+          <DealershipsView dealerships={data.dealerships} proposals={data.proposals} me={data.me} onOpen={setPreview} onNew={() => setShowDealershipForm(true)} onEdit={setEditDealership} />
         ) : view === "access" ? (
           <AccessView data={data} onNew={() => setShowNewAccess(true)} onChanged={() => refreshed("Acesso atualizado com segurança.")} />
         ) : (
@@ -378,8 +383,10 @@ export function Dashboard({ user }: { user: AppUser }) {
       {showNewProposal && <NewProposalModal userEmail={data.me.email} role={data.me.role} dealerships={data.dealerships} proposalResponsibles={proposalResponsibles} onClose={() => setShowNewProposal(false)} onSaved={async (message) => { setShowNewProposal(false); await refreshed(message); }} />}
       {showNewProposalRequest && <NewProposalRequestModal onClose={() => setShowNewProposalRequest(false)} onSaved={async (message) => { setShowNewProposalRequest(false); await refreshed(message); }} />}
       {showNewAccess && <NewAccessModal me={data.me} dealerships={data.dealerships} onClose={() => setShowNewAccess(false)} onSaved={async () => { setShowNewAccess(false); await refreshed("Novo acesso criado com sucesso."); }} />}
+      {showDealershipForm && <DealershipRegistrationModal me={data.me} dealerships={data.dealerships} managers={proposalResponsibles.filter((item) => item.role === "factory_manager")} onClose={() => setShowDealershipForm(false)} onSaved={async (message) => { setShowDealershipForm(false); await refreshed(message); }} />}
       {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} onSaved={() => { setShowChangePassword(false); setNotice("Senha alterada com sucesso."); }} />}
       {editProposal && <NewProposalModal userEmail={data.me.email} role={data.me.role} dealerships={data.dealerships} proposalResponsibles={proposalResponsibles} proposal={editProposal} onClose={() => setEditProposal(null)} onSaved={async (message) => { setEditProposal(null); await refreshed(message); }} />}
+      {editDealership && <DealershipRegistrationModal me={data.me} dealerships={data.dealerships} managers={proposalResponsibles.filter((item) => item.role === "factory_manager")} dealership={editDealership} onClose={() => setEditDealership(null)} onSaved={async (message) => { setEditDealership(null); await refreshed(message); }} />}
       {preview && <ProposalPreview proposal={preview} me={data.me} onClose={() => setPreview(null)} onEdit={() => { setEditProposal(preview); setPreview(null); }} onDeleted={async () => { setPreview(null); await refreshed("Proposta excluída com sucesso."); }} onUpdated={async (status, counterofferCents) => { setPreview({ ...preview, status, counterofferCents: counterofferCents ?? null }); await refreshed("Proposta atualizada com sucesso."); }} />}
     </main>
   );
@@ -703,8 +710,31 @@ function ProposalTable({ proposals, onOpen, canViewHistory, onHistory }: { propo
   return <div className="table-scroll"><table className="data-table"><thead><tr><th>Proposta</th><th>Concessionária</th><th>Emissão</th><th>Vigência</th><th>Responsável</th><th>Status</th><th className="align-right">Valor</th><th aria-label="Abrir" /></tr></thead><tbody>{proposals.map((proposal) => <tr key={proposal.id} onClick={() => onOpen(proposal)}><td><div className="proposal-id-line"><strong className="proposal-id">{proposal.id}</strong>{canViewHistory && <button type="button" className="history-row-action" onClick={(event) => { event.stopPropagation(); onHistory(proposal.id); }} aria-label={`Ver histórico de ${proposal.id}`} title="Ver histórico"><Icon name="eye" size={14} /></button>}</div><small>{proposal.items.length} {proposal.items.length === 1 ? "item" : "itens"}</small></td><td><strong>{proposal.dealership}</strong><small>{proposal.city}{proposal.state ? ` · ${proposal.state}` : ""}</small></td><td>{formatDate(proposal.issueDate)}</td><td><strong>{formatDate(proposal.validUntil)}</strong>{proposal.status === "expired" && <small>Expirada automaticamente</small>}</td><td>{proposal.commercialOwner}</td><td><StatusBadge status={proposal.status} /></td><td className="align-right value-cell"><strong>{formatBRL(proposal.totalCents)}</strong>{proposal.status === "counteroffer" && proposal.counterofferCents && <small>Proposto: {formatBRL(proposal.counterofferCents)}</small>}</td><td><button className="row-action" onClick={(event) => { event.stopPropagation(); onOpen(proposal); }} aria-label={`Abrir ${proposal.id}`}><Icon name="arrow" size={16} /></button></td></tr>)}</tbody></table></div>;
 }
 
-function DealershipsView({ dealerships, proposals, onOpen }: { dealerships: Dealership[]; proposals: Proposal[]; onOpen: (proposal: Proposal) => void }) {
-  return <div className="content-frame"><header className="page-heading"><div><span className="eyebrow">Carteira comercial</span><h1>Concessionárias</h1><p>Parceiros disponíveis dentro do seu nível de permissão.</p></div></header>{!dealerships.length ? <article className="panel"><EmptyState title="Nenhuma concessionária vinculada" text="Crie uma proposta para iniciar a carteira ou solicite a vinculação ao ADM." /></article> : <section className="dealership-grid">{dealerships.map((dealer) => { const latest = proposals.find((proposal) => proposal.dealershipId === dealer.id); return <article className="dealer-card" key={dealer.id}><header><span className="dealer-large-monogram">{initials(dealer.name)}</span><div><h2>{dealer.name}</h2><p>{dealer.city}{dealer.state ? ` · ${dealer.state}` : ""}</p></div></header><dl><div><dt>Propostas</dt><dd>{dealer.proposals}</dd></div><div><dt>Aceitas</dt><dd>{dealer.approved}</dd></div><div><dt>Valor</dt><dd>{formatBRL(dealer.totalCents)}</dd></div></dl><div className="dealer-manager"><span>Gestor Fábrica</span><strong>{dealer.factoryManagerName || "Não atribuído"}</strong><small>{dealer.factoryManagerEmail}</small></div><footer><div><span>Responsável da concessionária</span><strong>{dealer.dealerManagerName || "Não informado"}</strong><small>{dealer.dealerManagerEmail}</small></div>{latest && <button className="text-button" onClick={() => onOpen(latest)}>Abrir última <Icon name="arrow" size={14} /></button>}</footer></article>; })}</section>}</div>;
+function DealershipsView({ dealerships, proposals, me, onOpen, onNew, onEdit }: { dealerships: Dealership[]; proposals: Proposal[]; me: CurrentAccess; onOpen: (proposal: Proposal) => void; onNew: () => void; onEdit: (dealer: Dealership) => void }) {
+  const canManage = ["general_admin", "global_management", "factory_manager"].includes(me.role);
+  return <div className="content-frame"><header className="page-heading"><div><span className="eyebrow">Carteira comercial</span><h1>Concessionárias</h1><p>CEP, UF, matriz/filial e Gestor Fábrica definem a carteira de atuação.</p></div>{canManage && <button className="primary-button" onClick={onNew}><Icon name="plus" size={18} />Cadastrar concessionária</button>}</header>{!dealerships.length ? <article className="panel"><EmptyState title="Nenhuma concessionária vinculada" text="Cadastre a primeira unidade para iniciar a carteira." /></article> : <section className="dealership-grid">{dealerships.map((dealer) => { const latest = proposals.find((proposal) => proposal.dealershipId === dealer.id); return <article className="dealer-card" key={dealer.id}><header><span className="dealer-large-monogram">{initials(dealer.name)}</span><div><h2>{dealer.name}</h2><p>{dealer.city}{dealer.state ? ` · ${dealer.state}` : ""}</p></div></header><div className="dealer-registration-meta"><span>{dealer.parentDealershipName ? `Filial de ${dealer.parentDealershipName}` : "Matriz"}</span><strong>CEP {formatPostalCode(dealer.postalCode) || "não cadastrado"}</strong></div><dl><div><dt>Propostas</dt><dd>{dealer.proposals}</dd></div><div><dt>Aceitas</dt><dd>{dealer.approved}</dd></div><div><dt>Valor</dt><dd>{formatBRL(dealer.totalCents)}</dd></div></dl><div className="dealer-manager"><span>Gestor Fábrica</span><strong>{dealer.factoryManagerName || "Não atribuído"}</strong><small>{dealer.factoryManagerEmail}</small></div><footer><div><span>Responsável da concessionária</span><strong>{dealer.dealerManagerName || "Não informado"}</strong><small>{dealer.dealerManagerEmail}</small></div><div className="dealer-card-actions">{canManage && <button className="text-button" onClick={() => onEdit(dealer)}>Editar cadastro</button>}{latest && <button className="text-button" onClick={() => onOpen(latest)}>Abrir última <Icon name="arrow" size={14} /></button>}</div></footer></article>; })}</section>}</div>;
+}
+
+function DealershipRegistrationModal({ me, dealerships, managers, dealership, onClose, onSaved }: { me: CurrentAccess; dealerships: Dealership[]; managers: AccessUser[]; dealership?: Dealership; onClose: () => void; onSaved: (message: string) => Promise<void> }) {
+  const [name, setName] = useState(dealership?.name || "");
+  const [city, setCity] = useState(dealership?.city || "");
+  const [state, setState] = useState(dealership?.state || "");
+  const [postalCode, setPostalCode] = useState(formatPostalCode(dealership?.postalCode || ""));
+  const [parentDealershipId, setParentDealershipId] = useState<number | null>(dealership?.parentDealershipId ?? null);
+  const [factoryManagerEmail, setFactoryManagerEmail] = useState(dealership?.factoryManagerEmail || (me.role === "factory_manager" ? me.email : ""));
+  const [contactName, setContactName] = useState(dealership?.contactName || "");
+  const [contactEmail, setContactEmail] = useState(dealership?.contactEmail || "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const matrices = dealerships.filter((item) => item.parentDealershipId === null && item.id !== dealership?.id);
+  async function submit(event: FormEvent) {
+    event.preventDefault(); setSaving(true); setError("");
+    const response = await fetch("/api/dealerships", { method: dealership ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: dealership?.id, name, city, state, postalCode, parentDealershipId, factoryManagerEmail, contactName, contactEmail }) });
+    const payload = (await response.json()) as { error?: string };
+    if (!response.ok) { setError(payload.error || "Não foi possível salvar o cadastro."); setSaving(false); return; }
+    await onSaved(dealership ? "Cadastro da concessionária atualizado." : "Concessionária cadastrada com sucesso.");
+  }
+  return <div className="modal-backdrop" role="dialog" aria-modal="true"><form className="access-modal dealership-modal" onSubmit={(event) => void submit(event)}><header className="modal-header"><div><span className="eyebrow">Rede HORSCH</span><h2>{dealership ? "Editar concessionária" : "Cadastrar concessionária"}</h2><p>O cadastro define CEP, UF, vínculo de matriz/filial e a carteira do Gestor Fábrica.</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Fechar"><Icon name="close" /></button></header><div className="form-scroll"><div className="access-form-grid"><label className="field"><span>Nome</span><input value={name} onChange={(event) => setName(event.target.value)} required /></label><label className="field"><span>Cidade</span><input value={city} onChange={(event) => setCity(event.target.value)} /></label><label className="field"><span>UF de atuação</span><input maxLength={2} value={state} onChange={(event) => setState(event.target.value.toUpperCase())} required /></label><label className="field"><span>CEP</span><input inputMode="numeric" maxLength={9} value={postalCode} onChange={(event) => setPostalCode(formatPostalCode(event.target.value))} placeholder="00000-000" required /></label><label className="field"><span>Estrutura</span><select value={parentDealershipId ?? ""} onChange={(event) => setParentDealershipId(Number(event.target.value) || null)}><option value="">Matriz</option>{matrices.map((item) => <option key={item.id} value={item.id}>Filial de {item.name}</option>)}</select></label><label className="field"><span>Gestor Fábrica</span><select value={factoryManagerEmail} onChange={(event) => setFactoryManagerEmail(event.target.value)} required><option value="">Selecione</option>{managers.map((manager) => <option key={manager.email} value={manager.email}>{manager.name}</option>)}</select></label><label className="field"><span>Responsável</span><input value={contactName} onChange={(event) => setContactName(event.target.value)} /></label><label className="field"><span>E-mail do responsável</span><input type="email" value={contactEmail} onChange={(event) => setContactEmail(event.target.value)} /></label></div>{error && <p className="form-error">{error}</p>}</div><footer className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button type="submit" className="primary-button" disabled={saving}>{saving ? "Salvando..." : "Salvar cadastro"}</button></footer></form></div>;
 }
 
 function AccessView({ data, onNew, onChanged }: { data: DashboardData; onNew: () => void; onChanged: () => Promise<void> }) {
@@ -873,6 +903,8 @@ function NewProposalModal({
   const [dealership, setDealership] = useState(proposal?.dealership ?? "");
   const [city, setCity] = useState(proposal?.city ?? "");
   const [state, setState] = useState(proposal?.state ?? "");
+  const [postalCode, setPostalCode] = useState(formatPostalCode(proposal?.postalCode ?? ""));
+  const [parentDealershipId, setParentDealershipId] = useState<number | null>(proposal?.parentDealershipId ?? null);
   const [contactName, setContactName] = useState(proposal?.contactName ?? "");
   const [contactEmail, setContactEmail] = useState(proposal?.contactEmail ?? "");
   const [customerName, setCustomerName] = useState(proposal?.customerName ?? "");
@@ -884,7 +916,7 @@ function NewProposalModal({
   const [factoryManagerEmail, setFactoryManagerEmail] = useState(
     proposal?.factoryManagerEmail || (PROPOSAL_RESPONSIBLE_ROLES.includes(role) ? userEmail : ""),
   );
-  const [validUntil, setValidUntil] = useState(proposal?.validUntil ?? defaultValidity());
+  const [validUntil, setValidUntil] = useState(proposal?.status === "expired" ? defaultValidity() : proposal?.validUntil ?? defaultValidity());
   const [items, setItems] = useState<FormItem[]>(proposal ? proposal.items.map((item) => ({ partNumber: item.partNumber, description: item.description, vt: item.vt, origin: item.origin, ncm: item.ncm, quantity: item.quantity, price: formatMoneyInput(String(item.unitPriceCents / 100).replace(".", ",")) })) : [blankItem()]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -905,6 +937,8 @@ function NewProposalModal({
       setDealership("");
       setCity("");
       setState("");
+      setPostalCode("");
+      setParentDealershipId(null);
       setContactName("");
       setContactEmail("");
       setFactoryManagerEmail(
@@ -915,6 +949,8 @@ function NewProposalModal({
     setDealership(record.name);
     setCity(record.city);
     setState(record.state);
+    setPostalCode(formatPostalCode(record.postalCode));
+    setParentDealershipId(record.parentDealershipId);
     setContactName(record.dealerManagerName || record.contactName);
     setContactEmail(record.dealerManagerEmail || record.contactEmail);
     setFactoryManagerEmail(record.factoryManagerEmail);
@@ -945,6 +981,8 @@ function NewProposalModal({
         dealership,
         city,
         state,
+        postalCode,
+        parentDealershipId,
         contactName,
         contactEmail,
         customerName,
@@ -1042,6 +1080,8 @@ function NewProposalModal({
                   <label className="field"><span>Nome da concessionária</span><input value={dealership} onChange={(event) => setDealership(event.target.value)} required /></label>
                   <label className="field"><span>Cidade</span><input value={city} onChange={(event) => setCity(event.target.value)} /></label>
                   <label className="field small"><span>UF</span><input maxLength={2} value={state} onChange={(event) => setState(event.target.value.toUpperCase())} /></label>
+                  <label className="field"><span>CEP</span><input inputMode="numeric" maxLength={9} value={postalCode} onChange={(event) => setPostalCode(formatPostalCode(event.target.value))} placeholder="00000-000" required /></label>
+                  <label className="field"><span>Estrutura</span><select value={parentDealershipId ?? ""} onChange={(event) => setParentDealershipId(Number(event.target.value) || null)}><option value="">Matriz</option>{dealerships.filter((item) => item.parentDealershipId === null).map((item) => <option key={item.id} value={item.id}>Filial de {item.name}</option>)}</select></label>
                 </>
               )}
             </div>
@@ -1271,7 +1311,7 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
     (me.permissions.deleteOwnDraft &&
       status === "draft" &&
       proposal.createdByEmail === me.email);
-  const canEdit = proposal.isActionOwner && ["general_admin", "global_management", "factory_manager"].includes(me.role) && status !== "expired";
+  const canEdit = (status === "expired" && ["general_admin", "global_management"].includes(me.role)) || (proposal.isActionOwner && ["general_admin", "global_management", "factory_manager"].includes(me.role) && status !== "expired");
   const canManageStatus = proposal.isActionOwner && (me.role === "dealer_manager" || ["general_admin", "global_management", "factory_manager"].includes(me.role));
 
   function updateCounterItem(
@@ -1499,7 +1539,7 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
             <Icon name="clock" size={21} />
             <div>
               <strong>Proposta expirada automaticamente</strong>
-              <span>A vigência terminou em {formatDate(proposal.validUntil)}. O envio e as decisões comerciais foram bloqueados.</span>
+              <span>A vigência terminou em {formatDate(proposal.validUntil)}. O envio e as decisões comerciais estão bloqueados até uma reedição pela Gestão Global ou níveis superiores.</span>
             </div>
           </section>
         )}
@@ -1724,6 +1764,7 @@ function EmptyMini({ text }: { text: string }) { return <div className="empty-mi
 function formatBRL(cents: number) { return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 2 }).format(cents / 100); }
 function formatDate(value: string) { if (!value) return "—"; const date = value.length === 10 ? new Date(`${value}T12:00:00`) : new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("pt-BR"); }
 function formatDateTime(value: string) { if (!value) return "—"; const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }); }
+function formatPostalCode(value: string) { const digits = value.replace(/\D/g, "").slice(0, 8); return digits.length > 5 ? `${digits.slice(0, 5)}-${digits.slice(5)}` : digits; }
 function initials(value: string) { return value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part.charAt(0)).join("").toUpperCase() || "HB"; }
 function firstName(value: string) { const name = value.trim().split(/\s+/)[0]; return name && !name.includes("@") ? name : "bem-vindo"; }
 function defaultValidity() { const date = new Date(); date.setDate(date.getDate() + 30); return date.toISOString().slice(0, 10); }
