@@ -40,7 +40,7 @@ type ItemInput = {
   ncm?: string;
   quantity?: number;
   unitPriceCents?: number;
-  invoiceTotalCents?: number | null;
+  invoiceUnitPriceCents?: number | null;
 };
 
 type ProposalInput = {
@@ -131,7 +131,7 @@ function normalizeItems(items: ItemInput[]) {
     ncm: item.ncm?.trim() ?? "",
     quantity: Math.max(1, Math.trunc(Number(item.quantity) || 1)),
     unitPriceCents: Math.max(0, Math.trunc(Number(item.unitPriceCents) || 0)),
-    invoiceTotalCents: normalizeOptionalCents(item.invoiceTotalCents),
+    invoiceUnitPriceCents: normalizeOptionalCents(item.invoiceUnitPriceCents),
   }));
 }
 
@@ -163,9 +163,9 @@ function itemValidationError(items: ReturnType<typeof normalizeItems>) {
 }
 
 function invoiceTotalValidationError(items: ReturnType<typeof normalizeItems>) {
-  const hasInvoiceTotals = items.some((item) => item.invoiceTotalCents !== null);
-  return hasInvoiceTotals && items.some((item) => item.invoiceTotalCents === null)
-    ? "Preencha o valor total da NF em todos os itens ou remova a coluna opcional."
+  const hasInvoiceUnitPrices = items.some((item) => item.invoiceUnitPriceCents !== null);
+  return hasInvoiceUnitPrices && items.some((item) => item.invoiceUnitPriceCents === null)
+    ? "Preencha o valor unitário da NF em todos os itens ou remova a coluna opcional."
     : "";
 }
 
@@ -590,7 +590,7 @@ export async function POST(request: Request) {
         ncm: item.ncm,
         quantity: item.quantity,
         unitPriceCents: item.unitPriceCents,
-        invoiceTotalCents: item.invoiceTotalCents,
+        invoiceUnitPriceCents: item.invoiceUnitPriceCents,
       })),
     );
     await recordAudit(db, {

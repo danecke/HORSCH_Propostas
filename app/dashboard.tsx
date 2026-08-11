@@ -28,7 +28,7 @@ type ProposalItem = {
   ncm: string;
   quantity: number;
   unitPriceCents: number;
-  invoiceTotalCents: number | null;
+  invoiceUnitPriceCents: number | null;
   counterofferQuantity: number | null;
   counterofferUnitPriceCents: number | null;
 };
@@ -904,7 +904,7 @@ type FormItem = {
   ncm: string;
   quantity: number;
   price: string;
-  invoiceTotal: string;
+  invoiceUnitPrice: string;
 };
 
 const blankItem = (): FormItem => ({
@@ -915,7 +915,7 @@ const blankItem = (): FormItem => ({
   ncm: "",
   quantity: 1,
   price: "",
-  invoiceTotal: "",
+  invoiceUnitPrice: "",
 });
 
 type DeliveryResponse = {
@@ -975,13 +975,13 @@ function NewProposalModal({
   const [documentCategory, setDocumentCategory] = useState<ProposalDocument["category"]>("invoice");
   const [selectedDocuments, setSelectedDocuments] = useState<File[]>([]);
   const [includeInvoiceTotal, setIncludeInvoiceTotal] = useState(
-    proposal?.items.some((item) => item.invoiceTotalCents !== null) ?? false,
+    proposal?.items.some((item) => item.invoiceUnitPriceCents !== null) ?? false,
   );
   const [factoryManagerEmail, setFactoryManagerEmail] = useState(
     proposal?.factoryManagerEmail || (PROPOSAL_RESPONSIBLE_ROLES.includes(role) ? userEmail : ""),
   );
   const [validUntil, setValidUntil] = useState(proposal?.status === "expired" ? defaultValidity() : proposal?.validUntil ?? defaultValidity());
-  const [items, setItems] = useState<FormItem[]>(proposal ? proposal.items.map((item) => ({ partNumber: item.partNumber, description: item.description, vt: item.vt, origin: item.origin, ncm: item.ncm, quantity: item.quantity, price: formatMoneyInput(String(item.unitPriceCents / 100).replace(".", ",")), invoiceTotal: item.invoiceTotalCents === null ? "" : formatMoneyInput(String(item.invoiceTotalCents / 100).replace(".", ",")) })) : [blankItem()]);
+  const [items, setItems] = useState<FormItem[]>(proposal ? proposal.items.map((item) => ({ partNumber: item.partNumber, description: item.description, vt: item.vt, origin: item.origin, ncm: item.ncm, quantity: item.quantity, price: formatMoneyInput(String(item.unitPriceCents / 100).replace(".", ",")), invoiceUnitPrice: item.invoiceUnitPriceCents === null ? "" : formatMoneyInput(String(item.invoiceUnitPriceCents / 100).replace(".", ",")) })) : [blankItem()]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -994,7 +994,7 @@ function NewProposalModal({
     0,
   );
   const invoiceTotalCents = items.reduce(
-    (sum, item) => sum + parseMoneyToCents(item.invoiceTotal),
+    (sum, item) => sum + item.quantity * parseMoneyToCents(item.invoiceUnitPrice),
     0,
   );
 
@@ -1038,8 +1038,8 @@ function NewProposalModal({
       setError("Selecione uma concessionária ou escolha cadastrar uma nova.");
       return;
     }
-    if (includeInvoiceTotal && items.some((item) => !parseMoneyToCents(item.invoiceTotal))) {
-      setError("Preencha o valor total da NF em todos os itens ou desative a coluna opcional.");
+    if (includeInvoiceTotal && items.some((item) => !parseMoneyToCents(item.invoiceUnitPrice))) {
+      setError("Preencha o valor unitário da NF em todos os itens ou desative a coluna opcional.");
       return;
     }
     setSaving(true);
@@ -1065,7 +1065,7 @@ function NewProposalModal({
         items: items.map((item) => ({
           ...item,
           unitPriceCents: parseMoneyToCents(item.price),
-          invoiceTotalCents: includeInvoiceTotal ? parseMoneyToCents(item.invoiceTotal) : null,
+          invoiceUnitPriceCents: includeInvoiceTotal ? parseMoneyToCents(item.invoiceUnitPrice) : null,
         })),
       }),
     });
@@ -1193,14 +1193,14 @@ function NewProposalModal({
               <label className="optional-column-toggle">
                 <input type="checkbox" checked={includeInvoiceTotal} onChange={(event) => setIncludeInvoiceTotal(event.target.checked)} />
                 <span>
-                  <strong>Incluir coluna opcional “Valor total da NF”</strong>
-                  <small>Ative somente quando a proposta precisar apresentar o valor fiscal por item.</small>
+                  <strong>Incluir coluna opcional “Valor unitário de NF”</strong>
+                  <small>Ative somente quando a proposta precisar apresentar o valor fiscal unitário por item.</small>
                 </span>
               </label>
             </div>
             <div className="items-table-wrap">
               <table className={`items-form-table ${includeInvoiceTotal ? "invoice-enabled" : ""}`}>
-                <thead><tr><th>PN</th><th>Descrição</th><th>VT</th><th>Origem</th><th>NCM</th><th>Qtd.</th><th>Net price (R$)</th>{includeInvoiceTotal && <th>Valor total NF (R$)</th>}<th /></tr></thead>
+                <thead><tr><th>PN</th><th>Descrição</th><th>VT</th><th>Origem</th><th>NCM</th><th>Qtd.</th><th>Netprice unitário (R$)</th>{includeInvoiceTotal && <th>Valor unitário de NF (R$)</th>}<th /></tr></thead>
                 <tbody>
                   {items.map((item, index) => (
                     <tr key={index}>
@@ -1211,14 +1211,14 @@ function NewProposalModal({
                       <td><input value={item.ncm} onChange={(event) => updateItem(index, { ncm: event.target.value })} required /></td>
                       <td><input type="number" min={1} value={item.quantity} onChange={(event) => updateItem(index, { quantity: Math.max(1, Number(event.target.value) || 1) })} required /></td>
                       <td><input inputMode="decimal" value={item.price} onChange={(event) => updateItem(index, { price: event.target.value })} onBlur={(event) => updateItem(index, { price: formatMoneyInput(event.target.value) })} required /></td>
-                      {includeInvoiceTotal && <td><input inputMode="decimal" value={item.invoiceTotal} onChange={(event) => updateItem(index, { invoiceTotal: event.target.value })} onBlur={(event) => updateItem(index, { invoiceTotal: formatMoneyInput(event.target.value) })} placeholder="R$ 0,00" required /></td>}
+                      {includeInvoiceTotal && <td><input inputMode="decimal" value={item.invoiceUnitPrice} onChange={(event) => updateItem(index, { invoiceUnitPrice: event.target.value })} onBlur={(event) => updateItem(index, { invoiceUnitPrice: formatMoneyInput(event.target.value) })} placeholder="R$ 0,00" required /></td>}
                       <td><button type="button" className="remove-item" aria-label={`Remover item ${index + 1}`} onClick={() => setItems((current) => current.length === 1 ? [blankItem()] : current.filter((_, itemIndex) => itemIndex !== index))}>×</button></td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            <div className="form-total"><span>Valor total da proposta</span><strong>{formatBRL(totalCents)}</strong></div>
+            <div className="form-total"><span>Valor total de Netprice</span><strong>{formatBRL(totalCents)}</strong></div>
             {includeInvoiceTotal && <div className="form-total invoice-total-summary"><span>Valor total das NFs</span><strong>{formatBRL(invoiceTotalCents)}</strong></div>}
           </section>
           <section className="form-section sale-documents-section">
@@ -1397,7 +1397,8 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
       proposal.createdByEmail === me.email);
   const canEdit = ["general_admin", "global_management"].includes(me.role) || (proposal.isActionOwner && ["general_admin", "global_management", "factory_manager"].includes(me.role) && status !== "expired");
   const canManageStatus = proposal.isActionOwner && (me.role === "dealer_manager" || ["general_admin", "global_management", "factory_manager"].includes(me.role));
-  const hasInvoiceTotals = proposal.items.some((item) => item.invoiceTotalCents !== null && item.invoiceTotalCents !== undefined);
+  const hasInvoiceTotals = proposal.items.some((item) => item.invoiceUnitPriceCents !== null && item.invoiceUnitPriceCents !== undefined);
+  const invoiceTotalCents = proposal.items.reduce((sum, item) => sum + (item.invoiceUnitPriceCents ?? 0) * item.quantity, 0);
 
   function updateCounterItem(
     id: number,
@@ -1727,9 +1728,9 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
             <div><span>Responsável HORSCH</span><strong>{proposal.commercialOwner}</strong><small>{proposal.factoryManagerEmail || proposal.createdByEmail}</small></div>
           </section>
           {(proposal.customerName || proposal.customerSaleValueCents) && <section className="document-sale-data"><div><span>Cliente específico</span><strong>{proposal.customerName || "—"}</strong></div><div><span>Valor fixado para o cliente</span><strong>{proposal.customerSaleValueCents ? formatBRL(proposal.customerSaleValueCents) : "—"}</strong></div></section>}
-          <div className="document-section-title"><h2>Itens da proposta</h2><span>{hasInvoiceTotals ? "Valores líquidos e fiscais em reais" : "Valores líquidos em reais"}</span></div>
+          <div className="document-section-title"><h2>Itens da proposta</h2><span>{hasInvoiceTotals ? "Netprice e valores fiscais em reais" : "Valores líquidos em reais"}</span></div>
           <table className={`document-items ${hasInvoiceTotals ? "invoice-enabled" : ""}`}>
-            <thead><tr><th>PN</th><th>Descrição</th><th>VT</th><th>Origem</th><th>NCM</th><th>Qtd.</th><th>Net price (R$)</th>{hasInvoiceTotals && <th>Valor total NF (R$)</th>}</tr></thead>
+            <thead><tr><th>PN</th><th>Descrição</th><th>VT</th><th>Origem</th><th>NCM</th><th>Qtd.</th><th>Netprice unitário (R$)</th>{hasInvoiceTotals && <th>Valor unitário de NF (R$)</th>}</tr></thead>
             <tbody>
               {proposal.items.map((item) => (
                 <tr key={item.id}>
@@ -1740,13 +1741,13 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
                   <td>{item.ncm || "—"}</td>
                   <td>{item.quantity}</td>
                   <td>{formatBRL(item.unitPriceCents)}</td>
-                  {hasInvoiceTotals && <td>{item.invoiceTotalCents === null || item.invoiceTotalCents === undefined ? "—" : formatBRL(item.invoiceTotalCents)}</td>}
+                  {hasInvoiceTotals && <td>{item.invoiceUnitPriceCents === null || item.invoiceUnitPriceCents === undefined ? "—" : formatBRL(item.invoiceUnitPriceCents)}</td>}
                 </tr>
               ))}
             </tbody>
           </table>
-          <div className="document-total"><span>Valor total da proposta</span><strong>{formatBRL(proposal.totalCents)}</strong></div>
-          {hasInvoiceTotals && <div className="document-total invoice-document-total"><span>Valor total das NFs</span><strong>{formatBRL(proposal.items.reduce((sum, item) => sum + (item.invoiceTotalCents ?? 0), 0))}</strong></div>}
+          <div className="document-total"><span>Valor total de Netprice</span><strong>{formatBRL(proposal.totalCents)}</strong></div>
+          {hasInvoiceTotals && <div className="document-total invoice-document-total"><span>Valor total das NFs</span><strong>{formatBRL(invoiceTotalCents)}</strong></div>}
           {(proposal.counterofferCents || status === "counteroffer") && (
             <section className="document-counteroffer-detail">
               <div className="document-section-title">
