@@ -240,6 +240,38 @@ export const quotePriceListControl = sqliteTable("quote_price_list_control", {
   includedByEmail: text("included_by_email").notNull(),
 });
 
+export const priceListImports = sqliteTable("price_list_imports", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  fileName: text("file_name").notNull(),
+  storageKey: text("storage_key").notNull().default(""),
+  contentType: text("content_type").notNull().default("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+  rowCount: integer("row_count").notNull().default(0),
+  statesJson: text("states_json").notNull().default("[]"),
+  importedByEmail: text("imported_by_email").notNull(),
+  importedByName: text("imported_by_name").notNull().default(""),
+  isActive: integer("is_active", { mode: "boolean" }).notNull().default(false),
+  importedAt: text("imported_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [index("price_list_imports_active_idx").on(table.isActive), index("price_list_imports_imported_at_idx").on(table.importedAt)]);
+
+export const priceListItems = sqliteTable("price_list_items", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  importId: integer("import_id").notNull().references(() => priceListImports.id, { onDelete: "cascade" }),
+  partNumber: text("part_number").notNull(),
+  description: text("description").notNull().default(""),
+  family: text("family").notNull().default(""),
+  unit: text("unit").notNull().default(""),
+  ncm: text("ncm").notNull().default(""),
+  vt: text("vt").notNull().default(""),
+  origin: text("origin").notNull().default(""),
+  netPriceCents: integer("net_price_cents").notNull().default(0),
+  statePricesJson: text("state_prices_json").notNull().default("{}"),
+  importedAt: text("imported_at").notNull(),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("price_list_items_import_idx").on(table.importId),
+  index("price_list_items_part_number_idx").on(table.partNumber),
+]);
+
 export const proposalRequests = sqliteTable("proposal_requests", {
   id: text("id").primaryKey(),
   dealershipId: integer("dealership_id").notNull().references(() => dealerships.id),
