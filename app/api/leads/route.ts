@@ -39,6 +39,17 @@ function normalizeTemperature(value: unknown): Temperature {
   return TEMPERATURES.includes(String(value) as Temperature) ? String(value) as Temperature : "warm";
 }
 
+const STAGE_LABELS: Record<Stage, string> = { new: "Novo", contacted: "Contato", qualified: "Qualificado", proposal: "Proposta", negotiation: "Negociação", won: "Fechado", lost: "Perdido" };
+
+function extractPartNumbers(value: string) {
+  return [...new Set((value.match(/\b[A-Z0-9][A-Z0-9._\/-]{3,}\b/gi) ?? []).filter((token) => /\d/.test(token)).map((token) => token.trim().toUpperCase()))];
+}
+
+function partNumbersForLead(lead: typeof leads.$inferSelect) {
+  const explicit = extractPartNumbers(lead.partNumbers);
+  return explicit.length ? explicit : extractPartNumbers(lead.partsOfInterest);
+}
+
 function metrics(rows: Array<{ lead: typeof leads.$inferSelect; dealership: typeof dealerships.$inferSelect }>) {
   const values = rows.map((row) => row.lead);
   const won = values.filter((lead) => lead.stage === "won");
@@ -75,6 +86,31 @@ function serialize(rows: Array<{ lead: typeof leads.$inferSelect; dealership: ty
   return rows.map(({ lead, dealership }) => ({ ...lead, dealership: dealership.name, city: dealership.city, state: dealership.state }));
 }
 
+function insights(rows: Array<{ lead: typeof leads.$inferSelect; dealership: typeof dealerships.$inferSelect }>) {
+  const partStage = new Map<string, { partNumber: string; stage: Stage; stageLabel: string; customers: Set<string>; leadCount: number; valueCents: number }>();
+  const customers = new Map<string, { customerName: string; machineDomain: string; dealership: string; sellerName: string; stage: Stage; partNumbers: string; temperature: Temperature; negotiatedValueCents: number; updatedAt: string }>();
+  for (const { lead, dealership } of rows) {
+    const partNumbers = partNumbersForLead(lead);
+    for (const partNumber of partNumbers) {
+      const key = `${lead.stage}:${partNumber}`;
+      const current = partStage.get(key) ?? { partNumber, stage: lead.stage as Stage, stageLabel: STAGE_LABELS[lead.stage as Stage], customers: new Set<string>(), leadCount: 0, valueCents: 0 };
+      current.customers.add(lead.customerName);
+      current.leadCount += 1;
+      current.valueCents += lead.negotiatedValueCents;
+      partStage.set(key, current);
+    }
+    const customerKey = `${lead.dealershipId}:${lead.customerName.toLocaleLowerCase("pt-BR")}:${lead.machineDomain.toLocaleLowerCase("pt-BR")}`;
+    const currentCustomer = customers.get(customerKey);
+    if (!currentCustomer || new Date(lead.updatedAt).getTime() >= new Date(currentCustomer.updatedAt).getTime()) {
+      customers.set(customerKey, { customerName: lead.customerName, machineDomain: lead.machineDomain, dealership: dealership.name, sellerName: lead.sellerName, stage: lead.stage as Stage, partNumbers: partNumbers.join(", "), temperature: lead.temperature as Temperature, negotiatedValueCents: lead.negotiatedValueCents, updatedAt: lead.updatedAt });
+    }
+  }
+  return {
+    byPartNumberStage: [...partStage.values()].map((item) => ({ ...item, customers: [...item.customers] })).sort((a, b) => STAGE_LABELS[a.stage].localeCompare(STAGE_LABELS[b.stage], "pt-BR") || a.partNumber.localeCompare(b.partNumber)),
+    customerMachines: [...customers.values()].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
+  };
+}
+
 export async function GET() {
   const profile = await getAccessProfile();
   if (!profile) return forbidden("Seu acesso ainda não foi liberado ou está inativo.");
@@ -100,8 +136,11 @@ export async function GET() {
     const bySeller = [...bySellerMap.entries()].map(([label, groupRows]) => ({ label, ...metrics(groupRows) })).sort((a, b) => b.total - a.total);
     const sellers = allUsers.filter((user) => user.active && ["dealer_manager", "concession"].includes(normalizeUserRole(user.email, user.role) || "") && enabledIds.has(user.dealershipId || -1)).map((user) => ({ email: user.email, name: user.name || user.email, dealershipId: user.dealershipId }));
     const canEdit = ["dealer_manager", "concession"].includes(profile.role);
+    const serialized = serialize(scoped);
     return Response.json({
-      leads: canEdit ? serialize(scoped) : [],
+      leads: canEdit ? serialized : [],
+      leadDetails: serialized,
+      ...insights(scoped),
       metrics: metrics(scoped),
       byDealership,
       bySeller,
@@ -121,7 +160,7 @@ function payloadValues(payload: Record<string, unknown>, fallback?: typeof leads
   const customerName = String(payload.customerName ?? fallback?.customerName ?? "").trim();
   const sellerName = String(payload.sellerName ?? fallback?.sellerName ?? "").trim();
   const invoiceNumber = String(payload.invoiceNumber ?? fallback?.invoiceNumber ?? "").trim();
-  return { customerName, phone: String(payload.phone ?? fallback?.phone ?? "").trim(), email: String(payload.email ?? fallback?.email ?? "").trim(), machineDomain: String(payload.machineDomain ?? fallback?.machineDomain ?? "").trim(), partsOfInterest: String(payload.partsOfInterest ?? fallback?.partsOfInterest ?? "").trim(), temperature, stage, negotiatedValueCents: normalizeCents(payload.negotiatedValueCents ?? fallback?.negotiatedValueCents), invoiceNumber, invoiceValueCents: normalizeCents(payload.invoiceValueCents ?? fallback?.invoiceValueCents), sellerName, sellerEmail: String(payload.sellerEmail ?? fallback?.sellerEmail ?? "").trim() };
+  return { customerName, phone: String(payload.phone ?? fallback?.phone ?? "").trim(), email: String(payload.email ?? fallback?.email ?? "").trim(), machineDomain: String(payload.machineDomain ?? fallback?.machineDomain ?? "").trim(), partNumbers: String(payload.partNumbers ?? fallback?.partNumbers ?? "").trim(), partsOfInterest: String(payload.partsOfInterest ?? fallback?.partsOfInterest ?? "").trim(), temperature, stage, negotiatedValueCents: normalizeCents(payload.negotiatedValueCents ?? fallback?.negotiatedValueCents), invoiceNumber, invoiceValueCents: normalizeCents(payload.invoiceValueCents ?? fallback?.invoiceValueCents), sellerName, sellerEmail: String(payload.sellerEmail ?? fallback?.sellerEmail ?? "").trim() };
 }
 
 function validateLead(values: ReturnType<typeof payloadValues>) {

@@ -134,6 +134,13 @@
       "when": 1786473126284,
       "tag": "0018_massive_crusher_hogan",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1786487382600,
+      "tag": "0019_bitter_iron_fist",
+      "breakpoints": true
     }
   ]
 }

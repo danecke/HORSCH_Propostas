@@ -912,6 +912,27 @@ button { cursor: pointer; }
 .lead-card > footer > span { color: var(--muted); font-size: 9px; }
 .lead-temperature { font-weight: 900 !important; }.lead-temperature.hot { color: #b05d1f !important; }.lead-temperature.warm { color: #8a671f !important; }.lead-temperature.cold { color: #4f789b !important; }
 .leads-empty { padding: 42px 24px; display: grid; gap: 7px; place-items: center; color: var(--muted); text-align: center; }.leads-empty strong { color: var(--ink); font-size: 13px; }.leads-empty span { font-size: 10px; }
+.lead-insights-grid { display: grid; grid-template-columns: 1.05fr 1.45fr .9fr; gap: 16px; margin-bottom: 16px; }
+.lead-insight-panel { min-width: 0; min-height: 280px; padding: 22px 0 0; overflow: hidden; }
+.lead-insight-panel > .panel-header { padding: 0 22px; }
+.lead-insight-table-wrap { overflow-x: auto; padding: 0 22px 18px; }
+.lead-insight-table { width: 100%; border-collapse: collapse; font-size: 9px; }
+.lead-insight-table th { padding: 11px 8px; color: var(--muted); border-bottom: 1px solid var(--line); font-size: 8px; font-weight: 900; text-align: left; text-transform: uppercase; white-space: nowrap; }
+.lead-insight-table td { max-width: 150px; padding: 11px 8px; color: var(--ink); border-bottom: 1px solid #eef0f2; vertical-align: middle; }
+.lead-insight-table td:first-child, .lead-insight-table th:first-child { padding-left: 0; }
+.lead-insight-table td:last-child, .lead-insight-table th:last-child { padding-right: 0; }
+.lead-insight-table td strong, .lead-insight-table td small { display: block; }
+.lead-insight-table td strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.lead-insight-table td small { margin-top: 3px; color: var(--muted); font-size: 8px; }
+.lead-insight-table .lead-stage { display: inline-block; padding: 5px 6px; font-size: 7px; }
+.lead-seller-ranking { display: grid; padding: 0 22px 18px; }
+.lead-seller-row { display: grid; grid-template-columns: 25px minmax(0, 1fr) auto; gap: 9px; align-items: center; padding: 13px 0; border-top: 1px solid var(--line); }
+.lead-seller-row:first-child { border-top: 0; }
+.lead-seller-rank { color: var(--red); font-size: 10px; font-weight: 900; }
+.lead-seller-row strong, .lead-seller-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lead-seller-row strong { color: var(--ink); font-size: 10px; }
+.lead-seller-row small { margin-top: 3px; color: var(--muted); font-size: 8px; }
+.lead-seller-row b { color: var(--ink); font-size: 17px; }
 .lead-report-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .lead-report-panel { min-height: 240px; padding: 22px; }
 .lead-report-list { display: grid; gap: 0; }.lead-report-list > div { padding: 12px 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; border-top: 1px solid var(--line); }.lead-report-list > div:first-child { border-top: 0; }.lead-report-list span { overflow: hidden; color: var(--ink); font-size: 10px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }.lead-report-list strong { color: var(--red); font-size: 14px; }.lead-report-list small { grid-column: 1 / -1; color: var(--muted); font-size: 9px; }
@@ -919,11 +940,15 @@ button { cursor: pointer; }
 .lead-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }.lead-form-grid .lead-parts-field { grid-column: 1 / -1; }.lead-form-grid textarea { min-height: 86px; padding: 10px 11px; resize: vertical; }
 
 @media (max-width: 960px) {
+  .lead-insights-grid { grid-template-columns: 1fr 1fr; }
+  .lead-seller-insight { grid-column: 1 / -1; }
   .lead-card-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .lead-card-grid > div:nth-child(4) { padding-left: 0; border-left: 0; }
   .lead-report-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 780px) {
+  .lead-insights-grid { grid-template-columns: 1fr; }
+  .lead-seller-insight { grid-column: auto; }
   .leads-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .leads-list-panel > .panel-header { align-items: stretch; flex-direction: column; }
   .leads-search { width: 100%; }

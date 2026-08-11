@@ -272,6 +272,7 @@ export const leads = sqliteTable("leads", {
   phone: text("phone").notNull().default(""),
   email: text("email").notNull().default(""),
   machineDomain: text("machine_domain").notNull().default(""),
+  partNumbers: text("part_numbers").notNull().default(""),
   partsOfInterest: text("parts_of_interest").notNull().default(""),
   temperature: text("temperature").notNull().default("warm"),
   stage: text("stage").notNull().default("new"),
