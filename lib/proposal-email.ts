@@ -6,6 +6,7 @@ type ProposalEmailItem = {
   ncm: string;
   quantity: number;
   unitPriceCents: number;
+  invoiceTotalCents?: number | null;
 };
 
 export type ProposalEmailInput = {
@@ -55,6 +56,7 @@ function formatDate(value: string) {
 }
 
 function buildHtml(input: ProposalEmailInput) {
+  const hasInvoiceTotals = input.items.some((item) => item.invoiceTotalCents !== null && item.invoiceTotalCents !== undefined);
   const itemRows = input.items
     .map(
       (item) => `
@@ -66,6 +68,7 @@ function buildHtml(input: ProposalEmailInput) {
           <td>${escapeHtml(item.ncm)}</td>
           <td style="text-align:center">${item.quantity}</td>
           <td style="text-align:right">${escapeHtml(formatBRL(item.unitPriceCents))}</td>
+          ${hasInvoiceTotals ? `<td style="text-align:right">${escapeHtml(item.invoiceTotalCents === null || item.invoiceTotalCents === undefined ? "—" : formatBRL(item.invoiceTotalCents))}</td>` : ""}
         </tr>`,
     )
     .join("");
@@ -85,7 +88,7 @@ function buildHtml(input: ProposalEmailInput) {
               <p>Olá, ${escapeHtml(input.recipientName || "responsável comercial")}.</p>
               <p>A HORSCH encaminha abaixo a proposta comercial para fornecimento de peças. O responsável HORSCH por esta negociação é <strong>${escapeHtml(input.commercialOwner)}</strong>.</p>
               <table width="100%" cellspacing="0" cellpadding="8" style="border-collapse:collapse;font-size:12px;margin-top:20px">
-                <thead><tr style="background:#343a40;color:#fff;text-align:left"><th>PN</th><th>Descrição</th><th>VT</th><th>Origem</th><th>NCM</th><th>Qtd.</th><th style="text-align:right">Net price</th></tr></thead>
+                <thead><tr style="background:#343a40;color:#fff;text-align:left"><th>PN</th><th>Descrição</th><th>VT</th><th>Origem</th><th>NCM</th><th>Qtd.</th><th style="text-align:right">Net price</th>${hasInvoiceTotals ? '<th style="text-align:right">Valor total NF</th>' : ""}</tr></thead>
                 <tbody>${itemRows}</tbody>
               </table>
               <div style="margin-top:18px;padding:17px 20px;background:#f4f5f5;text-align:right"><span style="color:#666">Valor total&nbsp;&nbsp;</span><strong style="font-size:20px">${escapeHtml(formatBRL(input.totalCents))}</strong></div>
@@ -103,7 +106,7 @@ function buildText(input: ProposalEmailInput) {
   const items = input.items
     .map(
       (item) =>
-        `${item.partNumber} | ${item.description} | VT ${item.vt} | Origem ${item.origin} | NCM ${item.ncm} | Qtd. ${item.quantity} | ${formatBRL(item.unitPriceCents)}`,
+        `${item.partNumber} | ${item.description} | VT ${item.vt} | Origem ${item.origin} | NCM ${item.ncm} | Qtd. ${item.quantity} | ${formatBRL(item.unitPriceCents)}${item.invoiceTotalCents === null || item.invoiceTotalCents === undefined ? "" : ` | Valor total NF ${formatBRL(item.invoiceTotalCents)}`}`,
     )
     .join("\n");
   return [
@@ -178,4 +181,3 @@ export async function sendProposalEmail(
     };
   }
 }
-

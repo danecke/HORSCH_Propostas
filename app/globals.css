@@ -295,6 +295,12 @@ button { cursor: pointer; }
 .form-section-title h3 { margin: 0; font-size: 14px; }
 .form-section-title p { margin: 3px 0 0; color: var(--muted); font-size: 10px; }
 .add-item-button { margin-left: auto; min-height: 36px; padding: 0 12px; }
+.optional-column-card { margin: -2px 0 14px; padding: 11px 13px; border: 1px solid #e1e3e5; background: #fafafa; }
+.optional-column-toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.optional-column-toggle input { width: 16px; height: 16px; flex: 0 0 auto; accent-color: var(--red); }
+.optional-column-toggle span { display: grid; gap: 3px; }
+.optional-column-toggle strong { color: #3e4247; font-size: 11px; }
+.optional-column-toggle small { color: var(--muted); font-size: 10px; }
 .form-grid { display: grid; grid-template-columns: 1.45fr 1fr 100px; gap: 14px; }
 .form-grid.two-columns { grid-template-columns: 1fr 1fr; }
 .field { display: grid; gap: 7px; }
@@ -321,12 +327,24 @@ button { cursor: pointer; }
 .items-form-table th:nth-child(6) { width: 7%; }
 .items-form-table th:nth-child(7) { width: 23%; }
 .items-form-table th:nth-child(8) { width: 6%; }
+.items-form-table.invoice-enabled { min-width: 1240px; }
+.items-form-table.invoice-enabled th:nth-child(1) { width: 10%; }
+.items-form-table.invoice-enabled th:nth-child(2) { width: 18%; }
+.items-form-table.invoice-enabled th:nth-child(3) { width: 7%; }
+.items-form-table.invoice-enabled th:nth-child(4) { width: 7%; }
+.items-form-table.invoice-enabled th:nth-child(5) { width: 11%; }
+.items-form-table.invoice-enabled th:nth-child(6) { width: 6%; }
+.items-form-table.invoice-enabled th:nth-child(7) { width: 17%; }
+.items-form-table.invoice-enabled th:nth-child(8) { width: 18%; }
+.items-form-table.invoice-enabled th:nth-child(9) { width: 6%; }
 .items-form-table td { padding: 6px; border-top: 1px solid var(--line); }
 .origin-cell { color: var(--muted); font-size: 12px; font-weight: 800; text-align: center; }
 .remove-item { width: 31px; height: 31px; display: grid; place-items: center; border: 1px solid #efc7cb; color: var(--red); background: #fff6f7; font-size: 17px; }
 .form-total { margin-left: auto; width: min(380px, 100%); min-height: 59px; padding: 0 17px; display: flex; align-items: center; justify-content: space-between; color: white; background: var(--graphite); }
 .form-total span { font-size: 10px; }
 .form-total strong { font-size: 19px; }
+.invoice-total-summary { margin-top: 7px; color: #373b40; background: #eef0f1; }
+.invoice-total-summary strong { color: var(--red); }
 .sale-documents-section { padding-top: 4px; border-top: 1px solid var(--line); }
 .selected-documents, .existing-documents { margin-top: 14px; padding: 12px 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border-left: 3px solid var(--red); background: #f7f8f8; }
 .selected-documents strong, .existing-documents strong { width: 100%; color: #5f6368; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; }
@@ -486,9 +504,20 @@ button { cursor: pointer; }
 .document-items th:nth-child(5) { width: 13%; }
 .document-items th:nth-child(6) { width: 10%; }
 .document-items th:nth-child(7) { width: 17%; }
+.document-items.invoice-enabled th:nth-child(1) { width: 12%; }
+.document-items.invoice-enabled th:nth-child(2) { width: 22%; }
+.document-items.invoice-enabled th:nth-child(3) { width: 7%; }
+.document-items.invoice-enabled th:nth-child(4) { width: 8%; }
+.document-items.invoice-enabled th:nth-child(5) { width: 11%; }
+.document-items.invoice-enabled th:nth-child(6) { width: 8%; }
+.document-items.invoice-enabled th:nth-child(7) { width: 15%; }
+.document-items.invoice-enabled th:nth-child(8) { width: 17%; }
 .document-total { min-height: 18.5mm; margin: 5mm 0 0 auto; padding: 0 5mm; width: 101mm; display: flex; align-items: center; justify-content: space-between; gap: 5mm; color: white; border-left: 1.8mm solid #8f101c; background: var(--red); break-inside: avoid; }
 .document-total span { max-width: 37mm; color: #ffe9eb; font-size: 6.6pt; font-weight: 800; line-height: 1.35; letter-spacing: .05em; text-transform: uppercase; }
 .document-total strong { font-size: 15.5pt; letter-spacing: -.025em; white-space: nowrap; }
+.invoice-document-total { margin-top: 2mm; color: #3b3f44; border-left-color: #9da2a7; background: #eef0f1; }
+.invoice-document-total span { color: #676b70; }
+.invoice-document-total strong { color: var(--red); }
 .document-counteroffer { margin: 4mm 0 0 auto; padding: 4mm 5mm; width: 78mm; border: 1px solid #9eb4d2; background: #eef4fb; }
 .document-counteroffer span, .document-counteroffer strong { display: block; }
 .document-counteroffer span { color: #4c6282; font-size: 7pt; font-weight: 800; text-transform: uppercase; }

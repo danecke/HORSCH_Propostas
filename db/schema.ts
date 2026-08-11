@@ -139,6 +139,7 @@ export const proposalItems = sqliteTable(
     ncm: text("ncm").notNull().default(""),
     quantity: integer("quantity").notNull().default(1),
     unitPriceCents: integer("unit_price_cents").notNull().default(0),
+    invoiceTotalCents: integer("invoice_total_cents"),
     counterofferQuantity: integer("counteroffer_quantity"),
     counterofferUnitPriceCents: integer("counteroffer_unit_price_cents"),
   },

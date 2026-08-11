@@ -1,0 +1,1 @@
+ALTER TABLE `proposal_items` ADD `invoice_total_cents` integer;

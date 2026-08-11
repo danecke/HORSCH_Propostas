@@ -40,6 +40,7 @@ type ItemInput = {
   ncm?: string;
   quantity?: number;
   unitPriceCents?: number;
+  invoiceTotalCents?: number | null;
 };
 
 type ProposalInput = {
@@ -130,6 +131,7 @@ function normalizeItems(items: ItemInput[]) {
     ncm: item.ncm?.trim() ?? "",
     quantity: Math.max(1, Math.trunc(Number(item.quantity) || 1)),
     unitPriceCents: Math.max(0, Math.trunc(Number(item.unitPriceCents) || 0)),
+    invoiceTotalCents: normalizeOptionalCents(item.invoiceTotalCents),
   }));
 }
 
@@ -158,6 +160,13 @@ function itemValidationError(items: ReturnType<typeof normalizeItems>) {
     return "Preencha PN, descrição, VT, origem, NCM e net price em todos os itens.";
   }
   return "";
+}
+
+function invoiceTotalValidationError(items: ReturnType<typeof normalizeItems>) {
+  const hasInvoiceTotals = items.some((item) => item.invoiceTotalCents !== null);
+  return hasInvoiceTotals && items.some((item) => item.invoiceTotalCents === null)
+    ? "Preencha o valor total da NF em todos os itens ou remova a coluna opcional."
+    : "";
 }
 
 function deliveryDatabasePatch(delivery: ProposalEmailResult) {
@@ -426,6 +435,10 @@ export async function POST(request: Request) {
     if (validationError) {
       return Response.json({ error: validationError }, { status: 400 });
     }
+    const invoiceValidationError = invoiceTotalValidationError(validItems);
+    if (invoiceValidationError) {
+      return Response.json({ error: invoiceValidationError }, { status: 400 });
+    }
 
     const db = await getDb();
     const dealershipIdInput = Math.trunc(Number(payload.dealershipId) || 0);
@@ -688,6 +701,8 @@ export async function PATCH(request: Request) {
       const validItems = normalizeItems(payload.items ?? []);
       const validationError = itemValidationError(validItems);
       if (validationError) return Response.json({ error: validationError }, { status: 400 });
+      const invoiceValidationError = invoiceTotalValidationError(validItems);
+      if (invoiceValidationError) return Response.json({ error: invoiceValidationError }, { status: 400 });
       const validUntil = payload.validUntil?.trim() || record.proposal.validUntil;
       if (validUntil < currentBusinessDate()) return Response.json({ error: "A data de vigência não pode estar vencida." }, { status: 400 });
       const currentItems = await db.select().from(proposalItems).where(eq(proposalItems.proposalId, record.proposal.id));
