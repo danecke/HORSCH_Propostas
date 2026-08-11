@@ -862,6 +862,8 @@ button { cursor: pointer; }
   .document-header, .document-stats, .document-customer, .document-sale-data, .document-total, .document-counteroffer, .document-counteroffer-detail, .document-terms, .document-signatures, .document-footer { break-inside: avoid; page-break-inside: avoid; }
   .document-items thead, .document-counteroffer-table thead { display: table-header-group; }
   .document-items tr, .document-counteroffer-table tr { break-inside: avoid; page-break-inside: avoid; }
+  .document-items.invoice-enabled { display: table !important; width: 100% !important; table-layout: fixed !important; }
+  .document-items.invoice-enabled th:nth-child(8), .document-items.invoice-enabled td:nth-child(8) { display: table-cell !important; }
 }
 
 /* Horsch Leads */

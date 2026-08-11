@@ -1397,6 +1397,7 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
       proposal.createdByEmail === me.email);
   const canEdit = (status === "expired" && ["general_admin", "global_management"].includes(me.role)) || (proposal.isActionOwner && ["general_admin", "global_management", "factory_manager"].includes(me.role) && status !== "expired");
   const canManageStatus = proposal.isActionOwner && (me.role === "dealer_manager" || ["general_admin", "global_management", "factory_manager"].includes(me.role));
+  const hasInvoiceTotals = proposal.items.some((item) => item.invoiceTotalCents !== null && item.invoiceTotalCents !== undefined);
 
   function updateCounterItem(
     id: number,
@@ -1726,9 +1727,9 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
             <div><span>Responsável HORSCH</span><strong>{proposal.commercialOwner}</strong><small>{proposal.factoryManagerEmail || proposal.createdByEmail}</small></div>
           </section>
           {(proposal.customerName || proposal.customerSaleValueCents) && <section className="document-sale-data"><div><span>Cliente específico</span><strong>{proposal.customerName || "—"}</strong></div><div><span>Valor fixado para o cliente</span><strong>{proposal.customerSaleValueCents ? formatBRL(proposal.customerSaleValueCents) : "—"}</strong></div></section>}
-          <div className="document-section-title"><h2>Itens da proposta</h2><span>{proposal.items.some((item) => item.invoiceTotalCents !== null) ? "Valores líquidos e fiscais em reais" : "Valores líquidos em reais"}</span></div>
-          <table className={`document-items ${proposal.items.some((item) => item.invoiceTotalCents !== null) ? "invoice-enabled" : ""}`}>
-            <thead><tr><th>PN</th><th>Descrição</th><th>VT</th><th>Origem</th><th>NCM</th><th>Qtd.</th><th>Net price (R$)</th>{proposal.items.some((item) => item.invoiceTotalCents !== null) && <th>Valor total NF (R$)</th>}</tr></thead>
+          <div className="document-section-title"><h2>Itens da proposta</h2><span>{hasInvoiceTotals ? "Valores líquidos e fiscais em reais" : "Valores líquidos em reais"}</span></div>
+          <table className={`document-items ${hasInvoiceTotals ? "invoice-enabled" : ""}`}>
+            <thead><tr><th>PN</th><th>Descrição</th><th>VT</th><th>Origem</th><th>NCM</th><th>Qtd.</th><th>Net price (R$)</th>{hasInvoiceTotals && <th>Valor total NF (R$)</th>}</tr></thead>
             <tbody>
               {proposal.items.map((item) => (
                 <tr key={item.id}>
@@ -1739,13 +1740,13 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
                   <td>{item.ncm || "—"}</td>
                   <td>{item.quantity}</td>
                   <td>{formatBRL(item.unitPriceCents)}</td>
-                  {proposal.items.some((record) => record.invoiceTotalCents !== null) && <td>{item.invoiceTotalCents === null ? "—" : formatBRL(item.invoiceTotalCents)}</td>}
+                  {hasInvoiceTotals && <td>{item.invoiceTotalCents === null || item.invoiceTotalCents === undefined ? "—" : formatBRL(item.invoiceTotalCents)}</td>}
                 </tr>
               ))}
             </tbody>
           </table>
           <div className="document-total"><span>Valor total da proposta</span><strong>{formatBRL(proposal.totalCents)}</strong></div>
-          {proposal.items.some((item) => item.invoiceTotalCents !== null) && <div className="document-total invoice-document-total"><span>Valor total das NFs</span><strong>{formatBRL(proposal.items.reduce((sum, item) => sum + (item.invoiceTotalCents ?? 0), 0))}</strong></div>}
+          {hasInvoiceTotals && <div className="document-total invoice-document-total"><span>Valor total das NFs</span><strong>{formatBRL(proposal.items.reduce((sum, item) => sum + (item.invoiceTotalCents ?? 0), 0))}</strong></div>}
           {(proposal.counterofferCents || status === "counteroffer") && (
             <section className="document-counteroffer-detail">
               <div className="document-section-title">
