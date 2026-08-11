@@ -1395,7 +1395,7 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
     (me.permissions.deleteOwnDraft &&
       status === "draft" &&
       proposal.createdByEmail === me.email);
-  const canEdit = (status === "expired" && ["general_admin", "global_management"].includes(me.role)) || (proposal.isActionOwner && ["general_admin", "global_management", "factory_manager"].includes(me.role) && status !== "expired");
+  const canEdit = ["general_admin", "global_management"].includes(me.role) || (proposal.isActionOwner && ["general_admin", "global_management", "factory_manager"].includes(me.role) && status !== "expired");
   const canManageStatus = proposal.isActionOwner && (me.role === "dealer_manager" || ["general_admin", "global_management", "factory_manager"].includes(me.role));
   const hasInvoiceTotals = proposal.items.some((item) => item.invoiceTotalCents !== null && item.invoiceTotalCents !== undefined);
 
@@ -1573,9 +1573,9 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
                 {sendingEmail ? "Enviando..." : "Enviar por e-mail"}
               </button>
             )}
-            <button type="button" className="outline-button dark" onClick={() => window.print()}>
+            <button type="button" className="outline-button dark" onClick={() => window.print()} title="Abrir a impressão para salvar como PDF">
               <Icon name="print" size={16} />
-              Imprimir / PDF
+              Baixar / imprimir PDF
             </button>
             <button type="button" className="icon-button dark" onClick={onClose} aria-label="Fechar">
               <Icon name="close" />

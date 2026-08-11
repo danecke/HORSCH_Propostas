@@ -590,6 +590,7 @@ export async function POST(request: Request) {
         ncm: item.ncm,
         quantity: item.quantity,
         unitPriceCents: item.unitPriceCents,
+        invoiceTotalCents: item.invoiceTotalCents,
       })),
     );
     await recordAudit(db, {
@@ -681,7 +682,9 @@ export async function PATCH(request: Request) {
     const allUsers = await db.select().from(users).orderBy(users.name, users.email);
     const isActionOwner = proposalActionOwnerEmail(record.proposal, record.dealer, allUsers) === profile.email.trim().toLowerCase();
     const actionRequired = Boolean(payload.action || payload.status);
-    if (actionRequired && !isActionOwner && !expiredEdit) {
+    const canEditAnyProposal = ["general_admin", "global_management"].includes(profile.role);
+    const isGlobalEdit = payload.action === "edit" && canEditAnyProposal;
+    if (actionRequired && !isActionOwner && !expiredEdit && !isGlobalEdit) {
       return Response.json({ error: "Esta ação está disponível somente para o responsável atual da proposta." }, { status: 403 });
     }
 
