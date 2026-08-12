@@ -1,5 +1,5 @@
 import { desc, eq, ne } from "drizzle-orm";
-import { unzipSync } from "fflate";
+import { unzipSync, zipSync } from "fflate";
 import { getDb } from "../../../db";
 import { dealerships, priceListImports, priceListItems } from "../../../db/schema";
 import { getAccessProfile, isModuleEnabled, type AccessProfile } from "../../../lib/access";
@@ -57,7 +57,11 @@ function columnIndex(value: string) {
 
 function cents(value: unknown) {
   if (value === null || value === undefined || String(value).trim() === "") return null;
-  const number = Number(String(value).replace(/\s/g, "").replace(",", "."));
+  const raw = String(value).trim().replace(/R\$/gi, "").replace(/\s/g, "");
+  const normalized = raw.includes(",")
+    ? raw.replace(/\./g, "").replace(",", ".")
+    : raw.replace(/[^\d.-]/g, "");
+  const number = Number(normalized);
   return Number.isFinite(number) ? Math.round(number * 100) : null;
 }
 
@@ -92,7 +96,7 @@ function parseWorkbook(bytes: Uint8Array) {
   if (!rows.length) throw new Error("A planilha não possui linhas válidas.");
   const header = rows[0];
   const headers = Object.entries(header).map(([index, value]) => [Number(index), value.trim()] as const);
-  const indexOf = (pattern: RegExp) => headers.find((entry) => pattern.test(entry[1].toLocaleLowerCase("pt-BR")))?.[0] ?? 0;
+  const indexOf = (pattern: RegExp) => headers.find((entry) => pattern.test(entry[1].toLocaleLowerCase("pt-BR")))?.[0] ?? -1;
   const pnIndex = indexOf(/^pn$/);
   const descriptionIndex = indexOf(/descri/);
   const familyIndex = indexOf(/famil/);
@@ -100,8 +104,8 @@ function parseWorkbook(bytes: Uint8Array) {
   const ncmIndex = indexOf(/^ncm$/);
   const vtIndex = indexOf(/^vt$/);
   const originIndex = indexOf(/origem/);
-  const netIndex = headers.find((entry) => entry[1].toLocaleLowerCase("pt-BR").startsWith("netprice 26"))?.[0] ?? 0;
-  if (!pnIndex || !descriptionIndex || !netIndex) throw new Error("A planilha deve conter as colunas PN, Descrição e Netprice 26.");
+  const netIndex = headers.find((entry) => /^netprice\s*26\b/i.test(entry[1]))?.[0] ?? headers.find((entry) => /^netprice\b/i.test(entry[1]))?.[0] ?? -1;
+  if (pnIndex < 0 || descriptionIndex < 0 || netIndex < 0) throw new Error("A planilha deve conter as colunas PN, Descrição e Netprice 26.");
 
   const stateColumns = headers.flatMap(([index, value]) => {
     const state = stateFromHeader(value);
@@ -183,6 +187,41 @@ function projectItem(item: typeof priceListItems.$inferSelect, state: string) {
   };
 }
 
+function xmlEscape(value: string) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+
+function excelColumn(index: number) {
+  let value = "";
+  let current = index + 1;
+  while (current > 0) {
+    const remainder = (current - 1) % 26;
+    value = String.fromCharCode(65 + remainder) + value;
+    current = Math.floor((current - 1) / 26);
+  }
+  return value;
+}
+
+function exportMoney(value: number | null) {
+  if (value === null) return "";
+  return (value / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function exportXlsx(rows: ReturnType<typeof projectItem>[], state: string) {
+  const headers = ["PN (PART NUMBER)", "DESCRIÇÃO", "UNIDADE", "NCM", "VT", "ORIGEM", "NETPRICE", "CLIENTE FINAL", "N2", "N3"];
+  const values = rows.map((row) => [row.partNumber, row.description, row.unit, row.ncm, row.vt, row.origin, exportMoney(row.netPriceCents), exportMoney(row.finalPriceCents), exportMoney(row.n2PriceCents), exportMoney(row.n3PriceCents)]);
+  const sheetRows = [headers, ...values].map((row, rowIndex) => `<row r="${rowIndex + 1}">${row.map((value, columnIndex) => `<c r="${excelColumn(columnIndex)}${rowIndex + 1}" t="inlineStr"><is><t>${xmlEscape(String(value ?? ""))}</t></is></c>`).join("")}</row>`).join("");
+  const files = {
+    "[Content_Types].xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`,
+    "_rels/.rels": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`,
+    "xl/workbook.xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${xmlEscape(`Preços ${state}`)}" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+    "xl/_rels/workbook.xml.rels": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`,
+    "xl/worksheets/sheet1.xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${sheetRows}</sheetData></worksheet>`,
+  };
+  const bytes = zipSync(Object.fromEntries(Object.entries(files).map(([name, content]) => [name, new TextEncoder().encode(content)])));
+  return new Response(new Blob([bytes.buffer as ArrayBuffer]), { headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Content-Disposition": `attachment; filename="lista-precos-${state.toLowerCase()}.xlsx"`, "Cache-Control": "no-store" } });
+}
+
 export async function GET(request: Request) {
   const profile = await getAccessProfile();
   if (!profile) return errorResponse("Acesso não autorizado.", 403);
@@ -200,8 +239,10 @@ export async function GET(request: Request) {
     const pageSize = Math.min(100, Math.max(10, Math.trunc(Number(new URL(request.url).searchParams.get("pageSize") ?? 50) || 50)));
     const items = await db.select().from(priceListItems).where(eq(priceListItems.importId, record.id));
     const filtered = items.filter((item) => !search || [item.partNumber, item.description, item.family, item.vt].some((value) => value.toLocaleLowerCase("pt-BR").includes(search)));
+    const projected = selectedState ? filtered.map((item) => projectItem(item, selectedState)) : [];
+    if (new URL(request.url).searchParams.get("export") === "xlsx" && selectedState) return exportXlsx(projected, selectedState);
     const start = (page - 1) * pageSize;
-    return Response.json({ import: importSummary(record), rows: selectedState ? filtered.slice(start, start + pageSize).map((item) => projectItem(item, selectedState)) : [], total: filtered.length, page, pageSize, states, selectedState, canManage: canManage(profile) });
+    return Response.json({ import: importSummary(record), rows: projected.slice(start, start + pageSize), total: filtered.length, page, pageSize, states, selectedState, canManage: canManage(profile) });
   } catch (error) {
     return errorResponse(error instanceof Error ? error.message : "Não foi possível carregar a lista de preços.", 500);
   }
