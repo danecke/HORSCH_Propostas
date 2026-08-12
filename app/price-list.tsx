@@ -37,6 +37,8 @@ type PriceListResponse = {
   error?: string;
 };
 
+const MAX_UPLOAD_SIZE = 120 * 1024 * 1024;
+
 function money(cents: number | null | undefined) {
   if (cents === null || cents === undefined) return "—";
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: 2 }).format(cents / 100);
@@ -89,6 +91,7 @@ export function PriceListView({ me }: { me: PriceListAccess }) {
   const [notice, setNotice] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [editing, setEditing] = useState<PriceRow | null>(null);
 
   const load = useCallback(async () => {
@@ -125,14 +128,26 @@ export function PriceListView({ me }: { me: PriceListAccess }) {
     event.preventDefault();
     if (!file) return;
     setUploading(true);
+    setUploadProgress(0);
     setError("");
-    const form = new FormData();
-    form.set("file", file);
     try {
-      const response = await fetch("/api/price-list", { method: "POST", body: form });
+      if (file.size > MAX_UPLOAD_SIZE) throw new Error("A planilha deve ter no máximo 120 MB.");
+      const initResponse = await fetch("/api/price-list?upload=init", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileName: file.name, fileSize: file.size, contentType: file.type }) });
+      const initPayload = await readUploadPayload<{ error?: string; uploadId?: string; chunkSize?: number; totalChunks?: number }>(initResponse);
+      if (!initResponse.ok || !initPayload.uploadId || !initPayload.chunkSize || !initPayload.totalChunks) throw new Error(initPayload.error || "Não foi possível iniciar a importação.");
+      for (let part = 0; part < initPayload.totalChunks; part += 1) {
+        const start = part * initPayload.chunkSize;
+        const chunk = file.slice(start, Math.min(start + initPayload.chunkSize, file.size));
+        const chunkResponse = await fetch(`/api/price-list?upload=chunk&uploadId=${encodeURIComponent(initPayload.uploadId)}&part=${part}&totalChunks=${initPayload.totalChunks}`, { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: chunk });
+        const chunkPayload = await readUploadPayload<{ error?: string }>(chunkResponse);
+        if (!chunkResponse.ok) throw new Error(chunkPayload.error || `Não foi possível enviar a parte ${part + 1} da planilha.`);
+        setUploadProgress(Math.round(((part + 1) / initPayload.totalChunks) * 90));
+      }
+      const response = await fetch("/api/price-list?upload=complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ uploadId: initPayload.uploadId, fileName: file.name, fileSize: file.size, totalChunks: initPayload.totalChunks }) });
       const payload = await readUploadPayload<{ error?: string; import?: { rowCount: number } }>(response);
       if (!response.ok) throw new Error(payload.error || "Não foi possível importar a planilha.");
       setFile(null);
+      setUploadProgress(100);
       setPage(1);
       setState("");
       setNotice(`Lista importada com ${payload.import?.rowCount.toLocaleString("pt-BR") ?? ""} itens.`);
@@ -166,7 +181,7 @@ export function PriceListView({ me }: { me: PriceListAccess }) {
     </header>
     {canManage && <div className="price-list-tabs" role="tablist" aria-label="Lista de preços"><button type="button" className={tab === "view" ? "active" : ""} onClick={() => setTab("view")}>Consultar lista</button><button type="button" className={tab === "admin" ? "active" : ""} onClick={() => setTab("admin")}>Administração</button></div>}
     {notice && <div className="price-list-notice" role="status">{notice}</div>}
-    {tab === "admin" && canManage ? <AdminPanel file={file} setFile={setFile} uploading={uploading} onSubmit={submitUpload} currentImport={data?.import ?? null} /> : <>
+    {tab === "admin" && canManage ? <AdminPanel file={file} setFile={setFile} uploading={uploading} uploadProgress={uploadProgress} onSubmit={submitUpload} currentImport={data?.import ?? null} /> : <>
       <div className="price-list-state-tabs" role="tablist" aria-label="Estados disponíveis">{(data?.states ?? []).map((item) => <button type="button" role="tab" aria-selected={selectedState === item} key={item} className={selectedState === item ? "active" : ""} onClick={() => { setState(item); setPage(1); }}>{item}</button>)}</div>
       <div className="price-list-search-row"><label className="price-list-search-box"><span aria-hidden="true">⌕</span><input aria-label="Pesquisar por PN ou descrição" value={searchInput} onChange={(event) => setSearchInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { setSearch(searchInput); setPage(1); } }} placeholder="Pesquisar por PN (ex: 60027753) ou Descrição (ex: Tubo)..." /></label><button type="button" className="price-list-search-button" onClick={() => { setSearch(searchInput); setPage(1); }}>Buscar</button><button type="button" className="price-list-export-button" onClick={exportList} disabled={!data?.import || !selectedState}>⇩&nbsp; Exportar XLSX</button></div>
       <section className="panel price-list-panel">
@@ -180,8 +195,8 @@ export function PriceListView({ me }: { me: PriceListAccess }) {
   </div>;
 }
 
-function AdminPanel({ file, setFile, uploading, onSubmit, currentImport }: { file: File | null; setFile: (file: File | null) => void; uploading: boolean; onSubmit: (event: FormEvent) => void; currentImport: PriceListResponse["import"] }) {
-  return <section className="price-list-admin-grid"><article className="panel price-list-upload-card"><div className="admin-card-icon">↑</div><span className="eyebrow">Atualização central</span><h2>Importar nova lista</h2><p>Use o mesmo padrão do Excel fornecido: <strong>PN, Descrição, Familia, Unidade, NCM, VT, Origem, Netprice 26</strong> e três colunas de preço por UF para Cliente Final, N2 e N3.</p><form onSubmit={onSubmit}><label className="file-drop"><input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /><strong>{file ? file.name : "Selecionar arquivo .xlsx"}</strong><small>{file ? `${(file.size / (1024 * 1024)).toFixed(1).replace(".", ",")} MB pronto para importar` : "Até 35 MB · uma planilha por versão"}</small></label><button type="submit" className="primary-button" disabled={!file || uploading}>{uploading ? "Processando planilha..." : "Publicar nova versão"}</button></form></article><article className="panel price-list-admin-info"><span className="eyebrow">Versão ativa</span><h2>{currentImport?.fileName || "Nenhuma lista publicada"}</h2>{currentImport ? <><div className="admin-info-row"><span>Itens normalizados</span><strong>{currentImport.rowCount.toLocaleString("pt-BR")}</strong></div><div className="admin-info-row"><span>UFs identificadas</span><strong>{currentImport.states.join(" · ")}</strong></div><div className="admin-info-row"><span>Importado por</span><strong>{currentImport.importedByName || "—"}</strong></div><div className="admin-info-row"><span>Data</span><strong>{formatDate(currentImport.importedAt)}</strong></div></> : <p>A lista aparecerá aqui depois da primeira importação.</p>}<div className="admin-permission-note"><strong>Acesso restrito</strong><span>Somente ADM Geral e Gestão Global podem importar ou ajustar preços.</span></div></article></section>;
+function AdminPanel({ file, setFile, uploading, uploadProgress, onSubmit, currentImport }: { file: File | null; setFile: (file: File | null) => void; uploading: boolean; uploadProgress: number; onSubmit: (event: FormEvent) => void; currentImport: PriceListResponse["import"] }) {
+  return <section className="price-list-admin-grid"><article className="panel price-list-upload-card"><div className="admin-card-icon">↑</div><span className="eyebrow">Atualização central</span><h2>Importar nova lista</h2><p>Use o mesmo padrão do Excel fornecido: <strong>PN, Descrição, Familia, Unidade, NCM, VT, Origem, Netprice 26</strong> e três colunas de preço por UF para Cliente Final, N2 e N3.</p><form onSubmit={onSubmit}><label className="file-drop"><input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /><strong>{file ? file.name : "Selecionar arquivo .xlsx"}</strong><small>{file ? `${(file.size / (1024 * 1024)).toFixed(1).replace(".", ",")} MB pronto para importar` : "Até 120 MB · upload dividido em partes"}</small></label>{uploading && <div className="price-list-upload-progress" role="status"><div className="price-list-upload-progress-label"><span>Enviando planilha em partes...</span><strong>{uploadProgress}%</strong></div><div className="price-list-upload-progress-track"><span style={{ width: `${uploadProgress}%` }} /></div></div>}<button type="submit" className="primary-button" disabled={!file || uploading}>{uploading ? "Processando planilha..." : "Publicar nova versão"}</button></form></article><article className="panel price-list-admin-info"><span className="eyebrow">Versão ativa</span><h2>{currentImport?.fileName || "Nenhuma lista publicada"}</h2>{currentImport ? <><div className="admin-info-row"><span>Itens normalizados</span><strong>{currentImport.rowCount.toLocaleString("pt-BR")}</strong></div><div className="admin-info-row"><span>UFs identificadas</span><strong>{currentImport.states.join(" · ")}</strong></div><div className="admin-info-row"><span>Importado por</span><strong>{currentImport.importedByName || "—"}</strong></div><div className="admin-info-row"><span>Data</span><strong>{formatDate(currentImport.importedAt)}</strong></div></> : <p>A lista aparecerá aqui depois da primeira importação.</p>}<div className="admin-permission-note"><strong>Acesso restrito</strong><span>Somente ADM Geral e Gestão Global podem importar ou ajustar preços.</span></div></article></section>;
 }
 
 function EmptyPriceState({ text }: { text: string }) {

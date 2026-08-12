@@ -7,7 +7,10 @@ import { recordAudit } from "../../../lib/audit";
 
 export const dynamic = "force-dynamic";
 
-const MAX_FILE_SIZE = 35 * 1024 * 1024;
+// The workbook is sent in small parts so the platform's per-request limit is
+// never reached. The complete workbook is still validated before activation.
+const MAX_FILE_SIZE = 120 * 1024 * 1024;
+const UPLOAD_CHUNK_SIZE = 4 * 1024 * 1024;
 const STATES = ["BA", "MA", "PI", "TO", "RS", "SC", "PR", "SP", "MG", "MS", "MT", "DF", "RR", "PA", "GO", "PY", "RO"];
 type PriceTier = "final" | "n2" | "n3";
 
@@ -25,6 +28,18 @@ type ParsedPriceRow = {
 
 function errorResponse(message: string, status = 400) {
   return Response.json({ error: message }, { status });
+}
+
+function uploadKey(uploadId: string, part: number) {
+  return `price-list/incoming/${uploadId}/${part}`;
+}
+
+function validUploadId(value: unknown) {
+  return typeof value === "string" && /^[a-f0-9-]{36}$/i.test(value);
+}
+
+async function cleanupUpload(bucket: R2Bucket, uploadId: string, totalChunks: number) {
+  await Promise.allSettled(Array.from({ length: totalChunks }, (_, part) => bucket.delete(uploadKey(uploadId, part))));
 }
 
 function canManage(profile: AccessProfile) {
@@ -253,17 +268,87 @@ export async function POST(request: Request) {
   if (!profile) return errorResponse("Acesso não autorizado.", 403);
   if (!canManage(profile)) return errorResponse("Somente Gestão Global e ADM Geral podem importar a lista de preços.", 403);
   let storageKey = "";
+  let incomingUploadId = "";
+  let incomingTotalChunks = 0;
   try {
+    const { env } = await import("cloudflare:workers");
+    if (!env.BUCKET) return errorResponse("O armazenamento da lista de preços ainda não está configurado.", 503);
+    const uploadAction = new URL(request.url).searchParams.get("upload");
+
+    if (uploadAction === "init") {
+      const payload = (await request.json()) as { fileName?: string; fileSize?: number; contentType?: string };
+      const fileName = String(payload.fileName ?? "").trim();
+      const fileSize = Math.trunc(Number(payload.fileSize) || 0);
+      if (!fileName.toLowerCase().endsWith(".xlsx")) return errorResponse("Envie uma planilha Excel no formato .xlsx.");
+      if (!fileSize || fileSize > MAX_FILE_SIZE) return errorResponse("A planilha deve ter no máximo 120 MB.");
+      const uploadId = crypto.randomUUID();
+      const totalChunks = Math.ceil(fileSize / UPLOAD_CHUNK_SIZE);
+      return Response.json({ ok: true, uploadId, chunkSize: UPLOAD_CHUNK_SIZE, totalChunks, fileSize, contentType: payload.contentType || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    }
+
+    if (uploadAction === "chunk") {
+      const params = new URL(request.url).searchParams;
+      const uploadId = params.get("uploadId") ?? "";
+      const part = Math.trunc(Number(params.get("part")) || -1);
+      const totalChunks = Math.trunc(Number(params.get("totalChunks")) || 0);
+      if (!validUploadId(uploadId) || part < 0 || !totalChunks || totalChunks > Math.ceil(MAX_FILE_SIZE / UPLOAD_CHUNK_SIZE) || part >= totalChunks) return errorResponse("Dados de upload inválidos.");
+      const bytes = new Uint8Array(await request.arrayBuffer());
+      if (!bytes.length || bytes.length > UPLOAD_CHUNK_SIZE) return errorResponse("Parte da planilha inválida.");
+      await env.BUCKET.put(uploadKey(uploadId, part), bytes, { httpMetadata: { contentType: "application/octet-stream" } });
+      return Response.json({ ok: true, part, bytes: bytes.byteLength });
+    }
+
+    if (uploadAction === "complete") {
+      const payload = (await request.json()) as { uploadId?: string; fileName?: string; fileSize?: number; totalChunks?: number };
+      const uploadId = payload.uploadId ?? "";
+      const fileName = String(payload.fileName ?? "").trim();
+      const fileSize = Math.trunc(Number(payload.fileSize) || 0);
+      const totalChunks = Math.trunc(Number(payload.totalChunks) || 0);
+      incomingUploadId = uploadId;
+      incomingTotalChunks = totalChunks;
+      if (!validUploadId(uploadId) || !fileName.toLowerCase().endsWith(".xlsx") || !fileSize || fileSize > MAX_FILE_SIZE || !totalChunks || totalChunks > Math.ceil(MAX_FILE_SIZE / UPLOAD_CHUNK_SIZE)) return errorResponse("Dados de conclusão da planilha inválidos.");
+
+      const parts: Uint8Array[] = [];
+      let assembledSize = 0;
+      for (let part = 0; part < totalChunks; part += 1) {
+        const object = await env.BUCKET.get(uploadKey(uploadId, part));
+        if (!object) return errorResponse(`A parte ${part + 1} da planilha não foi recebida.`, 409);
+        const bytes = new Uint8Array(await object.arrayBuffer());
+        parts.push(bytes);
+        assembledSize += bytes.byteLength;
+      }
+      if (assembledSize !== fileSize) return errorResponse("O tamanho recebido não corresponde ao arquivo selecionado.", 409);
+      const bytes = new Uint8Array(assembledSize);
+      let offset = 0;
+      for (const part of parts) { bytes.set(part, offset); offset += part.byteLength; }
+      const parsed = parseWorkbook(bytes);
+      const now = new Date().toISOString();
+      storageKey = `price-list/${now.slice(0, 10)}/${crypto.randomUUID()}-${safeFileName(fileName)}`;
+      await env.BUCKET.put(storageKey, bytes, { httpMetadata: { contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }, customMetadata: { importedBy: profile.email, rowCount: String(parsed.rows.length) } });
+      const db = await getDb();
+      const [created] = await db.insert(priceListImports).values({ fileName: fileName.slice(0, 180), storageKey, contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", rowCount: parsed.rows.length, statesJson: JSON.stringify(parsed.states), importedByEmail: profile.email, importedByName: profile.name, isActive: false, importedAt: now }).returning({ id: priceListImports.id });
+      if (!created) throw new Error("Não foi possível registrar a importação.");
+      for (let index = 0; index < parsed.rows.length; index += 60) {
+        const chunk = parsed.rows.slice(index, index + 60);
+        await db.insert(priceListItems).values(chunk.map((item) => ({ importId: created.id, partNumber: item.partNumber, description: item.description, family: item.family, unit: item.unit, ncm: item.ncm, vt: item.vt, origin: item.origin, netPriceCents: item.netPriceCents, statePricesJson: JSON.stringify(item.statePrices), importedAt: now, updatedAt: now })));
+      }
+      await db.update(priceListImports).set({ isActive: false }).where(eq(priceListImports.isActive, true));
+      await db.update(priceListImports).set({ isActive: true }).where(eq(priceListImports.id, created.id));
+      await db.delete(priceListItems).where(ne(priceListItems.importId, created.id));
+      await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "price_list_imported", entity: "price_list", details: `Lista de preços importada: ${fileName} (${parsed.rows.length} itens).`, after: { fileName, rowCount: parsed.rows.length, states: parsed.states } });
+      await cleanupUpload(env.BUCKET, uploadId, totalChunks);
+      incomingUploadId = "";
+      return Response.json({ ok: true, import: { fileName, rowCount: parsed.rows.length, states: parsed.states, importedAt: now } }, { status: 201 });
+    }
+
     const form = await request.formData();
     const file = form.get("file");
     if (!(file instanceof File)) return errorResponse("Selecione o arquivo XLSX da lista de preços.");
-    if (!file.size || file.size > MAX_FILE_SIZE) return errorResponse("O arquivo deve ter no máximo 35 MB.");
+    if (!file.size || file.size > MAX_FILE_SIZE) return errorResponse("A planilha deve ter no máximo 120 MB.");
     if (!file.name.toLowerCase().endsWith(".xlsx")) return errorResponse("Envie uma planilha Excel no formato .xlsx.");
     const bytes = new Uint8Array(await file.arrayBuffer());
     const parsed = parseWorkbook(bytes);
     const db = await getDb();
-    const { env } = await import("cloudflare:workers");
-    if (!env.BUCKET) return errorResponse("O armazenamento da lista de preços ainda não está configurado.", 503);
     storageKey = `price-list/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}-${safeFileName(file.name)}`;
     await env.BUCKET.put(storageKey, bytes, { httpMetadata: { contentType: file.type || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }, customMetadata: { importedBy: profile.email, rowCount: String(parsed.rows.length) } });
     const now = new Date().toISOString();
@@ -279,6 +364,9 @@ export async function POST(request: Request) {
     await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "price_list_imported", entity: "price_list", details: `Lista de preços importada: ${file.name} (${parsed.rows.length} itens).`, after: { fileName: file.name, rowCount: parsed.rows.length, states: parsed.states } });
     return Response.json({ ok: true, import: { fileName: file.name, rowCount: parsed.rows.length, states: parsed.states, importedAt: now } }, { status: 201 });
   } catch (error) {
+    if (incomingUploadId && incomingTotalChunks) {
+      try { const { env } = await import("cloudflare:workers"); if (env.BUCKET) await cleanupUpload(env.BUCKET, incomingUploadId, incomingTotalChunks); } catch { /* preserve the original error */ }
+    }
     if (storageKey) {
       try { const { env } = await import("cloudflare:workers"); await env.BUCKET?.delete(storageKey); } catch { /* keep the original error */ }
     }

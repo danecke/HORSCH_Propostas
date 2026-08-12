@@ -1019,6 +1019,11 @@ button { cursor: pointer; }
 .file-drop input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
 .file-drop strong { overflow: hidden; color: var(--ink); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .file-drop small { color: var(--muted); font-size: 8px; }
+.price-list-upload-progress { flex: 1; min-width: 170px; }
+.price-list-upload-progress-label { display: flex; justify-content: space-between; margin-bottom: 5px; color: var(--muted); font-size: 8px; }
+.price-list-upload-progress-label strong { color: var(--ink); }
+.price-list-upload-progress-track { height: 5px; overflow: hidden; border-radius: 999px; background: #e7ebee; }
+.price-list-upload-progress-track span { display: block; height: 100%; border-radius: inherit; background: var(--red); transition: width .2s ease; }
 .price-list-admin-info { background: linear-gradient(145deg, #20262b, #30383f); color: white; }
 .price-list-admin-info .eyebrow { color: #b6c0c8; }
 .price-list-admin-info h2 { overflow: hidden; color: white; text-overflow: ellipsis; white-space: nowrap; }
