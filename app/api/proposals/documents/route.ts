@@ -6,7 +6,7 @@ import { recordAudit } from "../../../../lib/audit";
 
 export const dynamic = "force-dynamic";
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const MAX_FILE_SIZE = 8 * 1024 * 1024;
 const ALLOWED_TYPES = new Set([
   "application/pdf",
   "image/jpeg",
@@ -72,7 +72,7 @@ export async function POST(request: Request) {
     if (!proposalId) return errorResponse("Informe a proposta.");
     if (!(file instanceof File)) return errorResponse("Selecione um documento.");
     if (!ALLOWED_TYPES.has(file.type)) return errorResponse("Formato não permitido. Anexe PDF, JPG, PNG, WEBP ou XLSX.");
-    if (!file.size || file.size > MAX_FILE_SIZE) return errorResponse("Cada documento deve ter no máximo 10 MB.");
+    if (!file.size || file.size > MAX_FILE_SIZE) return errorResponse("Cada documento deve ter no máximo 8 MB. Fotos grandes devem ser reduzidas antes do envio.", 413);
     if (!(category in CATEGORY_LABELS)) return errorResponse("Tipo de documento inválido.");
 
     const { db, record } = await getProposalContext(profile, proposalId);

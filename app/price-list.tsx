@@ -58,6 +58,20 @@ function formatDate(value: string) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 }
 
+async function readUploadPayload<T extends { error?: string }>(response: Response): Promise<T> {
+  const raw = await response.text();
+  if (!raw.trim()) return {} as T;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return {
+      error: response.status === 413 || /payload too large/i.test(raw)
+        ? "A planilha excede o limite de upload. Selecione um arquivo XLSX de até 35 MB."
+        : `Não foi possível concluir a importação (HTTP ${response.status}).`,
+    } as T;
+  }
+}
+
 function stateName(state: string) {
   return state === "PY" ? "Paraguai" : state === "RO" ? "Rondônia" : state;
 }
@@ -116,7 +130,7 @@ export function PriceListView({ me }: { me: PriceListAccess }) {
     form.set("file", file);
     try {
       const response = await fetch("/api/price-list", { method: "POST", body: form });
-      const payload = (await response.json()) as { error?: string; import?: { rowCount: number } };
+      const payload = await readUploadPayload<{ error?: string; import?: { rowCount: number } }>(response);
       if (!response.ok) throw new Error(payload.error || "Não foi possível importar a planilha.");
       setFile(null);
       setPage(1);

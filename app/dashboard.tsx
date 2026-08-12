@@ -922,6 +922,71 @@ type DeliveryResponse = {
   error?: string;
 };
 
+const MAX_DOCUMENT_UPLOAD_BYTES = 8 * 1024 * 1024;
+const MAX_COMPRESSED_IMAGE_BYTES = 6 * 1024 * 1024;
+const MAX_IMAGE_DIMENSION = 2400;
+
+async function readResponsePayload<T extends { error?: string }>(response: Response): Promise<T> {
+  const raw = await response.text();
+  if (!raw.trim()) return {} as T;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    const isTooLarge = response.status === 413 || /payload too large/i.test(raw);
+    return {
+      error: isTooLarge
+        ? "O arquivo excede o limite de upload. Fotos grandes são reduzidas automaticamente; PDFs e planilhas devem ter no máximo 8 MB."
+        : `Não foi possível concluir o upload (HTTP ${response.status}).`,
+    } as T;
+  }
+}
+
+function canvasBlob(canvas: HTMLCanvasElement, quality: number) {
+  return new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+}
+
+async function prepareDocumentForUpload(file: File) {
+  if (!file.type.startsWith("image/")) {
+    if (file.size > MAX_DOCUMENT_UPLOAD_BYTES) {
+      throw new Error("PDFs e planilhas devem ter no máximo 8 MB.");
+    }
+    return file;
+  }
+  if (file.size <= MAX_COMPRESSED_IMAGE_BYTES) return file;
+
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = () => reject(new Error("Não foi possível preparar a imagem para o upload."));
+      element.src = objectUrl;
+    });
+    const largestSide = Math.max(image.naturalWidth || image.width, image.naturalHeight || image.height);
+    const scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(1, largestSide));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round((image.naturalWidth || image.width) * scale));
+    canvas.height = Math.max(1, Math.round((image.naturalHeight || image.height) * scale));
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Não foi possível preparar a imagem para o upload.");
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+    let quality = 0.84;
+    let blob = await canvasBlob(canvas, quality);
+    while (blob && blob.size > MAX_COMPRESSED_IMAGE_BYTES && quality > 0.48) {
+      quality -= 0.08;
+      blob = await canvasBlob(canvas, quality);
+    }
+    if (!blob || blob.size > MAX_COMPRESSED_IMAGE_BYTES) {
+      throw new Error("A imagem continua acima do limite mesmo após a redução. Escolha uma foto menor.");
+    }
+    const baseName = file.name.replace(/\.[^.]+$/, "") || "documento";
+    return new File([blob], `${baseName}.jpg`, { type: "image/jpeg", lastModified: Date.now() });
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
 function NewProposalRequestModal({ onClose, onSaved }: { onClose: () => void; onSaved: (message: string) => Promise<void> }) {
   const [partNumber, setPartNumber] = useState("");
   const [description, setDescription] = useState("");
@@ -1082,14 +1147,19 @@ function NewProposalModal({
     if (savedProposalId && selectedDocuments.length) {
       const failedDocuments: string[] = [];
       for (const file of selectedDocuments) {
-        const formData = new FormData();
-        formData.set("proposalId", savedProposalId);
-        formData.set("category", documentCategory);
-        formData.set("file", file);
-        const uploadResponse = await fetch("/api/proposals/documents", { method: "POST", body: formData });
-        if (!uploadResponse.ok) {
-          const uploadPayload = (await uploadResponse.json()) as { error?: string };
-          failedDocuments.push(`${file.name}: ${uploadPayload.error || "falha no anexo"}`);
+        try {
+          const uploadFile = await prepareDocumentForUpload(file);
+          const formData = new FormData();
+          formData.set("proposalId", savedProposalId);
+          formData.set("category", documentCategory);
+          formData.set("file", uploadFile);
+          const uploadResponse = await fetch("/api/proposals/documents", { method: "POST", body: formData });
+          if (!uploadResponse.ok) {
+            const uploadPayload = await readResponsePayload<{ error?: string }>(uploadResponse);
+            failedDocuments.push(`${file.name}: ${uploadPayload.error || "falha no anexo"}`);
+          }
+        } catch (uploadError) {
+          failedDocuments.push(`${file.name}: ${uploadError instanceof Error ? uploadError.message : "falha no anexo"}`);
         }
       }
       if (failedDocuments.length) {
