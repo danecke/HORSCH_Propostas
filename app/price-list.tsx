@@ -68,7 +68,7 @@ async function readUploadPayload<T extends { error?: string }>(response: Respons
   } catch {
     return {
       error: response.status === 413 || /payload too large/i.test(raw)
-        ? "A planilha excede o limite de upload. Selecione um arquivo XLSX de até 35 MB."
+        ? "O servidor rejeitou uma parte do arquivo. Tente novamente; o envio será feito em partes menores."
         : `Não foi possível concluir a importação (HTTP ${response.status}).`,
     } as T;
   }

@@ -10,7 +10,9 @@ export const dynamic = "force-dynamic";
 // The workbook is sent in small parts so the platform's per-request limit is
 // never reached. The complete workbook is still validated before activation.
 const MAX_FILE_SIZE = 120 * 1024 * 1024;
-const UPLOAD_CHUNK_SIZE = 4 * 1024 * 1024;
+// Keep a wide safety margin below the platform request limit. The XLSX is
+// still stored and validated as one complete workbook after all parts arrive.
+const UPLOAD_CHUNK_SIZE = 1 * 1024 * 1024;
 const STATES = ["BA", "MA", "PI", "TO", "RS", "SC", "PR", "SP", "MG", "MS", "MT", "DF", "RR", "PA", "GO", "PY", "RO"];
 type PriceTier = "final" | "n2" | "n3";
 
@@ -90,10 +92,30 @@ function readSharedStrings(files: Record<string, Uint8Array>) {
   return [...xml.matchAll(/<si[\s\S]*?<\/si>/g)].map((match) => [...match[0].matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)].map((part) => xmlUnescape(part[1])).join(""));
 }
 
+function firstWorksheetPath(files: Record<string, Uint8Array>) {
+  const workbook = decode(files["xl/workbook.xml"] ?? new Uint8Array());
+  const relationships = decode(files["xl/_rels/workbook.xml.rels"] ?? new Uint8Array());
+  const firstSheet = workbook.match(/<sheet\b[^>]*r:id="([^"]+)"[^>]*>/i)?.[1];
+  if (firstSheet) {
+    const relationship = [...relationships.matchAll(/<Relationship\b([^>]*?)\/?>(?:<\/Relationship>)?/gi)]
+      .map((match) => match[1])
+      .find((attributes) => attributes.match(/\bId="([^"]+)"/i)?.[1] === firstSheet);
+    const target = relationship?.match(/\bTarget="([^"]+)"/i)?.[1];
+    if (target) {
+      const normalized = target.replace(/^\/+/, "").replace(/^\.\//, "");
+      const worksheetPath = normalized.startsWith("xl/") ? normalized : `xl/${normalized}`;
+      if (files[worksheetPath]) return worksheetPath;
+    }
+  }
+  return files["xl/worksheets/sheet1.xml"] ? "xl/worksheets/sheet1.xml" : "";
+}
+
 function parseWorkbook(bytes: Uint8Array) {
   const files = unzipSync(bytes) as Record<string, Uint8Array>;
   const sharedStrings = readSharedStrings(files);
-  const xml = decode(files["xl/worksheets/sheet1.xml"]);
+  const worksheetPath = firstWorksheetPath(files);
+  if (!worksheetPath) throw new Error("Não foi possível localizar a primeira aba da planilha Excel.");
+  const xml = decode(files[worksheetPath]);
   const rawRows = [...xml.matchAll(/<row(?:\s[^>]*)?>([\s\S]*?)<\/row>/g)].map((match) => match[1]);
   const rows = rawRows.map((row) => {
     const values: Record<number, string> = {};
@@ -306,21 +328,19 @@ export async function POST(request: Request) {
       const totalChunks = Math.trunc(Number(payload.totalChunks) || 0);
       incomingUploadId = uploadId;
       incomingTotalChunks = totalChunks;
-      if (!validUploadId(uploadId) || !fileName.toLowerCase().endsWith(".xlsx") || !fileSize || fileSize > MAX_FILE_SIZE || !totalChunks || totalChunks > Math.ceil(MAX_FILE_SIZE / UPLOAD_CHUNK_SIZE)) return errorResponse("Dados de conclusão da planilha inválidos.");
+      if (!validUploadId(uploadId) || !fileName.toLowerCase().endsWith(".xlsx") || !fileSize || fileSize > MAX_FILE_SIZE || !totalChunks || totalChunks !== Math.ceil(fileSize / UPLOAD_CHUNK_SIZE)) return errorResponse("Dados de conclusão da planilha inválidos.");
 
-      const parts: Uint8Array[] = [];
+      const bytes = new Uint8Array(fileSize);
       let assembledSize = 0;
       for (let part = 0; part < totalChunks; part += 1) {
         const object = await env.BUCKET.get(uploadKey(uploadId, part));
         if (!object) return errorResponse(`A parte ${part + 1} da planilha não foi recebida.`, 409);
-        const bytes = new Uint8Array(await object.arrayBuffer());
-        parts.push(bytes);
-        assembledSize += bytes.byteLength;
+        const partBytes = new Uint8Array(await object.arrayBuffer());
+        if (!partBytes.length || partBytes.length > UPLOAD_CHUNK_SIZE || (part < totalChunks - 1 && partBytes.length !== UPLOAD_CHUNK_SIZE)) return errorResponse(`A parte ${part + 1} da planilha está incompleta.`, 409);
+        bytes.set(partBytes, assembledSize);
+        assembledSize += partBytes.byteLength;
       }
       if (assembledSize !== fileSize) return errorResponse("O tamanho recebido não corresponde ao arquivo selecionado.", 409);
-      const bytes = new Uint8Array(assembledSize);
-      let offset = 0;
-      for (const part of parts) { bytes.set(part, offset); offset += part.byteLength; }
       const parsed = parseWorkbook(bytes);
       const now = new Date().toISOString();
       storageKey = `price-list/${now.slice(0, 10)}/${crypto.randomUUID()}-${safeFileName(fileName)}`;
