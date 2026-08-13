@@ -674,8 +674,10 @@ export async function PATCH(request: Request) {
     }
     if (!dealerIsVisible(profile, record.dealer)) return forbidden();
     if (!(await isModuleEnabled(db, record.dealer.id, "proposals"))) return forbidden("O módulo Propostas não está habilitado para esta concessionária.");
+    const canManageAnyProposalStatus = rolePermissions(profile.role).manageAnyProposalStatus;
+    const isStatusOverride = Boolean(payload.status) && canManageAnyProposalStatus;
     const expiredEdit = record.proposal.status === "expired" && payload.action === "edit" && ["general_admin", "global_management"].includes(profile.role);
-    if (record.proposal.status === "expired" && !expiredEdit) {
+    if (record.proposal.status === "expired" && !expiredEdit && !isStatusOverride) {
       return expiredProposalResponse(record.proposal.validUntil);
     }
 
@@ -684,7 +686,7 @@ export async function PATCH(request: Request) {
     const actionRequired = Boolean(payload.action || payload.status);
     const canEditAnyProposal = ["general_admin", "global_management"].includes(profile.role);
     const isGlobalEdit = payload.action === "edit" && canEditAnyProposal;
-    if (actionRequired && !isActionOwner && !expiredEdit && !isGlobalEdit) {
+    if (actionRequired && !isActionOwner && !expiredEdit && !isGlobalEdit && !isStatusOverride) {
       return Response.json({ error: "Esta ação está disponível somente para o responsável atual da proposta." }, { status: 403 });
     }
 
@@ -804,7 +806,7 @@ export async function PATCH(request: Request) {
         { status: 409 },
       );
     }
-    if (nextStatus === "sent" && record.proposal.status !== "sent") {
+    if (nextStatus === "sent" && record.proposal.status !== "sent" && !isStatusOverride) {
       return Response.json(
         { error: "Use a ação Enviar por e-mail para registrar o envio da proposta." },
         { status: 409 },
@@ -927,7 +929,7 @@ export async function PATCH(request: Request) {
         updatedAt: new Date().toISOString(),
       })
       .where(eq(proposals.id, payload.id));
-    await recordAudit(db, { proposalId: payload.id, actorEmail: profile.email, actorName: profile.name, action: "status_changed", entity: "proposal", details: `Status alterado para ${nextStatus}.`, before: { status: record.proposal.status }, after: { status: nextStatus, decisionNote: payload.decisionNote?.trim() ?? record.proposal.decisionNote } });
+    await recordAudit(db, { proposalId: payload.id, actorEmail: profile.email, actorName: profile.name, action: "status_changed", entity: "proposal", details: `${isStatusOverride ? "Status alterado administrativamente" : "Status alterado"} para ${nextStatus}.`, before: { status: record.proposal.status }, after: { status: nextStatus, decisionNote: payload.decisionNote?.trim() ?? record.proposal.decisionNote } });
     return Response.json({ ok: true });
   } catch (error) {
     return Response.json({ error: apiError(error) }, { status: 500 });

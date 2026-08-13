@@ -178,6 +178,7 @@ type CurrentAccess = {
     assignLowerPermission: boolean;
     restoreLowerPassword: boolean;
     decideProposal: boolean;
+    manageAnyProposalStatus: boolean;
     deleteAnyProposal: boolean;
     deleteOwnDraft: boolean;
     createLead: boolean;
@@ -819,8 +820,8 @@ function AccessView({ data, onNew, onChanged }: { data: DashboardData; onNew: ()
         {data.me.permissions.manageAccess && <button className="primary-button" onClick={onNew}><Icon name="plus" size={18} />Criar acesso</button>}
       </header>
       <section className="permission-summary">
-        <PermissionCard title="ADM Geral" text="Acesso completo, incluindo usuários, permissões, preços, DSH, campanhas e auditoria." active={data.me.role === "general_admin"} />
-        <PermissionCard title="Gestão Global" text="Cotações, propostas, preços, DSH, campanhas, análises e gestão dos níveis abaixo." active={data.me.role === "global_management"} />
+        <PermissionCard title="ADM Geral" text="Acesso completo, incluindo usuários, permissões, preços, DSH, campanhas, auditoria e alteração de status das propostas." active={data.me.role === "general_admin"} />
+        <PermissionCard title="Gestão Global" text="Cotações, propostas, preços, DSH, campanhas, análises, gestão dos níveis abaixo e alteração de status de qualquer proposta." active={data.me.role === "global_management"} />
         <PermissionCard title="Gestor Fábrica" text="Propostas, cotações abertas, DSH, pedidos e acessos dos níveis abaixo na sua carteira." active={data.me.role === "factory_manager"} />
         <PermissionCard title="Gestor Concessionária" text="Solicita cotações, responde propostas, aprova retornos, faz DSH e consulta preços." active={data.me.role === "dealer_manager"} />
         <PermissionCard title="Concessão" text="Acesso exclusivamente consultivo à lista de preços vigente." active={data.me.role === "concession"} />
@@ -1453,9 +1454,9 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
     0,
   );
   const managerStatuses = STATUS_ORDER.filter((item) => {
-    if (status === "expired") return item === "expired";
+    if (status === "expired") return me.permissions.manageAnyProposalStatus ? item !== "counteroffer" : item === "expired";
     if (item === "expired") return false;
-    if (item === "sent" && status !== "sent") return false;
+    if (item === "sent" && status !== "sent" && !me.permissions.manageAnyProposalStatus) return false;
     return item !== "counteroffer" || status === "counteroffer";
   });
   const canDelete =
@@ -1464,7 +1465,7 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
       status === "draft" &&
       proposal.createdByEmail === me.email);
   const canEdit = ["general_admin", "global_management"].includes(me.role) || (proposal.isActionOwner && ["general_admin", "global_management", "factory_manager"].includes(me.role) && status !== "expired");
-  const canManageStatus = proposal.isActionOwner && (me.role === "dealer_manager" || ["general_admin", "global_management", "factory_manager"].includes(me.role));
+  const canManageStatus = me.permissions.manageAnyProposalStatus || (proposal.isActionOwner && (me.role === "dealer_manager" || ["general_admin", "global_management", "factory_manager"].includes(me.role)));
   const hasInvoiceTotals = proposal.items.some((item) => item.invoiceUnitPriceCents !== null && item.invoiceUnitPriceCents !== undefined);
   const invoiceTotalCents = proposal.items.reduce((sum, item) => sum + (item.invoiceUnitPriceCents ?? 0) * item.quantity, 0);
 
@@ -1609,7 +1610,7 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
                 Status
                 <select
                   value={status}
-                  disabled={updating || status === "expired"}
+                  disabled={updating || (status === "expired" && !me.permissions.manageAnyProposalStatus)}
                   onChange={(event) =>
                     void updateStatus(event.target.value as ProposalStatus)
                   }

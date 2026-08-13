@@ -101,6 +101,7 @@ export function rolePermissions(role: UserRole) {
     assignLowerPermission: ["general_admin", "global_management", "factory_manager"].includes(role),
     restoreLowerPassword: ["general_admin", "global_management", "factory_manager"].includes(role),
     decideProposal: ["general_admin", "global_management", "dealer_manager"].includes(role),
+    manageAnyProposalStatus: ["general_admin", "global_management"].includes(role),
     deleteAnyProposal: role === "general_admin",
     deleteOwnDraft: ["global_management", "factory_manager"].includes(role),
     createLead: ["dealer_manager", "concession"].includes(role),
