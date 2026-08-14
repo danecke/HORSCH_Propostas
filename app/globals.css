@@ -1014,6 +1014,11 @@ button { cursor: pointer; }
 .price-list-upload-card h2, .price-list-admin-info h2 { margin: 4px 0 8px; font-size: 20px; letter-spacing: -.03em; }
 .price-list-upload-card p, .price-list-admin-info > p { max-width: 580px; margin: 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
 .price-list-upload-card form { margin-top: 21px; display: flex; align-items: center; gap: 12px; }
+.price-list-template-callout { margin-top: 17px; padding: 12px 13px; display: flex; align-items: center; justify-content: space-between; gap: 14px; border: 1px solid #d9e5ef; border-radius: 9px; background: #f5f9fc; }
+.price-list-template-callout > div { min-width: 0; display: grid; gap: 4px; }
+.price-list-template-callout strong { color: var(--ink); font-size: 10px; }
+.price-list-template-callout span { color: var(--muted); font-size: 9px; line-height: 1.4; }
+.price-list-template-callout .outline-button { flex: 0 0 auto; white-space: nowrap; }
 .file-drop { min-width: 0; flex: 1; padding: 13px 14px; display: grid; gap: 4px; border: 1px dashed #c4cbd0; background: #fafbfb; cursor: pointer; }
 .file-drop:hover { border-color: var(--red); background: #fffafa; }
 .file-drop input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
@@ -1109,5 +1114,7 @@ button { cursor: pointer; }
   .price-list-pagination { align-items: stretch; flex-direction: column; }
   .price-list-pagination > div { justify-content: space-between; }
   .price-list-upload-card form { align-items: stretch; flex-direction: column; }
+  .price-list-template-callout { align-items: stretch; flex-direction: column; }
+  .price-list-template-callout .outline-button { width: 100%; }
   .price-editor-grid { grid-template-columns: 1fr; }
 }
