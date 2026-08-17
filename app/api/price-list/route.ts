@@ -13,6 +13,9 @@ const MAX_FILE_SIZE = 120 * 1024 * 1024;
 // Keep a wide safety margin below the platform request limit. The XLSX is
 // still stored and validated as one complete workbook after all parts arrive.
 const UPLOAD_CHUNK_SIZE = 1 * 1024 * 1024;
+// D1 limits bound SQL variables. Each item uses 12 bound values, so eight
+// items keep every multi-row insert below the platform limit.
+const DB_INSERT_BATCH_SIZE = 8;
 const STATES = ["BA", "MA", "PI", "TO", "RS", "SC", "PR", "SP", "MG", "MS", "MT", "DF", "RR", "PA", "GO", "PY", "RO"];
 type PriceTier = "final" | "n2" | "n3";
 
@@ -297,6 +300,8 @@ export async function POST(request: Request) {
   let storageKey = "";
   let incomingUploadId = "";
   let incomingTotalChunks = 0;
+  let createdImportId = 0;
+  let importActivated = false;
   try {
     const { env } = await import("cloudflare:workers");
     if (!env.BUCKET) return errorResponse("O armazenamento da lista de preços ainda não está configurado.", 503);
@@ -353,12 +358,14 @@ export async function POST(request: Request) {
       const db = await getDb();
       const [created] = await db.insert(priceListImports).values({ fileName: fileName.slice(0, 180), storageKey, contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", rowCount: parsed.rows.length, statesJson: JSON.stringify(parsed.states), importedByEmail: profile.email, importedByName: profile.name, isActive: false, importedAt: now }).returning({ id: priceListImports.id });
       if (!created) throw new Error("Não foi possível registrar a importação.");
-      for (let index = 0; index < parsed.rows.length; index += 60) {
-        const chunk = parsed.rows.slice(index, index + 60);
+      createdImportId = created.id;
+      for (let index = 0; index < parsed.rows.length; index += DB_INSERT_BATCH_SIZE) {
+        const chunk = parsed.rows.slice(index, index + DB_INSERT_BATCH_SIZE);
         await db.insert(priceListItems).values(chunk.map((item) => ({ importId: created.id, partNumber: item.partNumber, description: item.description, family: item.family, unit: item.unit, ncm: item.ncm, vt: item.vt, origin: item.origin, netPriceCents: item.netPriceCents, statePricesJson: JSON.stringify(item.statePrices), importedAt: now, updatedAt: now })));
       }
       await db.update(priceListImports).set({ isActive: false }).where(eq(priceListImports.isActive, true));
       await db.update(priceListImports).set({ isActive: true }).where(eq(priceListImports.id, created.id));
+      importActivated = true;
       await db.delete(priceListItems).where(ne(priceListItems.importId, created.id));
       await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "price_list_imported", entity: "price_list", details: `Lista de preços importada: ${fileName} (${parsed.rows.length} itens).`, after: { fileName, rowCount: parsed.rows.length, states: parsed.states } });
       await cleanupUpload(env.BUCKET, uploadId, totalChunks);
@@ -379,20 +386,29 @@ export async function POST(request: Request) {
     const now = new Date().toISOString();
     const [created] = await db.insert(priceListImports).values({ fileName: file.name.slice(0, 180), storageKey, contentType: file.type || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", rowCount: parsed.rows.length, statesJson: JSON.stringify(parsed.states), importedByEmail: profile.email, importedByName: profile.name, isActive: false, importedAt: now }).returning({ id: priceListImports.id });
     if (!created) throw new Error("Não foi possível registrar a importação.");
-    for (let index = 0; index < parsed.rows.length; index += 60) {
-      const chunk = parsed.rows.slice(index, index + 60);
+    createdImportId = created.id;
+    for (let index = 0; index < parsed.rows.length; index += DB_INSERT_BATCH_SIZE) {
+      const chunk = parsed.rows.slice(index, index + DB_INSERT_BATCH_SIZE);
       await db.insert(priceListItems).values(chunk.map((item) => ({ importId: created.id, partNumber: item.partNumber, description: item.description, family: item.family, unit: item.unit, ncm: item.ncm, vt: item.vt, origin: item.origin, netPriceCents: item.netPriceCents, statePricesJson: JSON.stringify(item.statePrices), importedAt: now, updatedAt: now })));
     }
     await db.update(priceListImports).set({ isActive: false }).where(eq(priceListImports.isActive, true));
     await db.update(priceListImports).set({ isActive: true }).where(eq(priceListImports.id, created.id));
+    importActivated = true;
     await db.delete(priceListItems).where(ne(priceListItems.importId, created.id));
     await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "price_list_imported", entity: "price_list", details: `Lista de preços importada: ${file.name} (${parsed.rows.length} itens).`, after: { fileName: file.name, rowCount: parsed.rows.length, states: parsed.states } });
     return Response.json({ ok: true, import: { fileName: file.name, rowCount: parsed.rows.length, states: parsed.states, importedAt: now } }, { status: 201 });
   } catch (error) {
+    if (createdImportId && !importActivated) {
+      try {
+        const db = await getDb();
+        await db.delete(priceListItems).where(eq(priceListItems.importId, createdImportId));
+        await db.delete(priceListImports).where(eq(priceListImports.id, createdImportId));
+      } catch { /* preserve the original import error */ }
+    }
     if (incomingUploadId && incomingTotalChunks) {
       try { const { env } = await import("cloudflare:workers"); if (env.BUCKET) await cleanupUpload(env.BUCKET, incomingUploadId, incomingTotalChunks); } catch { /* preserve the original error */ }
     }
-    if (storageKey) {
+    if (storageKey && !importActivated) {
       try { const { env } = await import("cloudflare:workers"); await env.BUCKET?.delete(storageKey); } catch { /* keep the original error */ }
     }
     return errorResponse(error instanceof Error ? error.message : "Não foi possível importar a lista de preços.", 500);
