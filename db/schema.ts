@@ -272,6 +272,35 @@ export const priceListItems = sqliteTable("price_list_items", {
   index("price_list_items_part_number_idx").on(table.partNumber),
 ]);
 
+export const priceListNotifications = sqliteTable("price_list_notifications", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  title: text("title").notNull(),
+  message: text("message").notNull(),
+  effectiveAt: text("effective_at").notNull(),
+  affectedPns: text("affected_pns").notNull().default(""),
+  audience: text("audience").notNull().default("all"),
+  createdByEmail: text("created_by_email").notNull(),
+  createdByName: text("created_by_name").notNull().default(""),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("price_list_notifications_created_at_idx").on(table.createdAt),
+  index("price_list_notifications_effective_at_idx").on(table.effectiveAt),
+]);
+
+export const priceListNotificationRecipients = sqliteTable("price_list_notification_recipients", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  notificationId: integer("notification_id").notNull().references(() => priceListNotifications.id, { onDelete: "cascade" }),
+  recipientEmail: text("recipient_email").notNull(),
+  recipientName: text("recipient_name").notNull().default(""),
+  readAt: text("read_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("price_list_notification_recipient_unique").on(table.notificationId, table.recipientEmail),
+  index("price_list_notification_recipient_email_idx").on(table.recipientEmail),
+  index("price_list_notification_recipient_unread_idx").on(table.recipientEmail, table.readAt),
+  index("price_list_notification_recipient_notification_idx").on(table.notificationId),
+]);
+
 export const proposalRequests = sqliteTable("proposal_requests", {
   id: text("id").primaryKey(),
   dealershipId: integer("dealership_id").notNull().references(() => dealerships.id),

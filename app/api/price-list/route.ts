@@ -4,6 +4,7 @@ import { getDb } from "../../../db";
 import { dealerships, priceListImports, priceListItems } from "../../../db/schema";
 import { getAccessProfile, isModuleEnabled, type AccessProfile } from "../../../lib/access";
 import { recordAudit } from "../../../lib/audit";
+import { createPriceListNotification } from "../../../lib/price-list-notifications";
 
 export const dynamic = "force-dynamic";
 
@@ -48,12 +49,41 @@ function integerParam(value: string | null, fallback: number) {
   return Number.isInteger(parsed) ? parsed : fallback;
 }
 
+function isValidEffectiveDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
 async function cleanupUpload(bucket: R2Bucket, uploadId: string, totalChunks: number) {
   await Promise.allSettled(Array.from({ length: totalChunks }, (_, part) => bucket.delete(uploadKey(uploadId, part))));
 }
 
 function canManage(profile: AccessProfile) {
   return ["general_admin", "global_management"].includes(profile.role);
+}
+
+async function automaticPriceListNotification(
+  db: Awaited<ReturnType<typeof getDb>>,
+  profile: AccessProfile,
+  fileName: string,
+  rowCount: number,
+  effectiveAt: string,
+) {
+  try {
+    return await createPriceListNotification(db, {
+      title: "Nova lista de preços publicada",
+      message: "A lista " + fileName + " foi atualizada e já está disponível no portal para consulta. Confira os valores antes de emitir novas propostas.",
+      effectiveAt,
+      affectedPns: rowCount.toLocaleString("pt-BR") + " itens · lista completa",
+      audience: "all",
+      createdByEmail: profile.email,
+      createdByName: profile.name,
+    });
+  } catch {
+    return null;
+  }
 }
 
 function safeFileName(value: string) {
@@ -335,13 +365,15 @@ export async function POST(request: Request) {
     }
 
     if (uploadAction === "complete") {
-      const payload = (await request.json()) as { uploadId?: string; fileName?: string; fileSize?: number; totalChunks?: number };
+      const payload = (await request.json()) as { uploadId?: string; fileName?: string; fileSize?: number; totalChunks?: number; effectiveAt?: string };
       const uploadId = payload.uploadId ?? "";
       const fileName = String(payload.fileName ?? "").trim();
       const fileSize = Math.trunc(Number(payload.fileSize) || 0);
       const totalChunks = Math.trunc(Number(payload.totalChunks) || 0);
+      const requestedEffectiveAt = String(payload.effectiveAt ?? "").trim();
       incomingUploadId = uploadId;
       incomingTotalChunks = totalChunks;
+      if (requestedEffectiveAt && !isValidEffectiveDate(requestedEffectiveAt)) return errorResponse("Informe uma data de vigência válida.");
       if (!validUploadId(uploadId) || !fileName.toLowerCase().endsWith(".xlsx") || !fileSize || fileSize > MAX_FILE_SIZE || !totalChunks || totalChunks !== Math.ceil(fileSize / UPLOAD_CHUNK_SIZE)) return errorResponse("Dados de conclusão da planilha inválidos.");
 
       const bytes = new Uint8Array(fileSize);
@@ -372,9 +404,10 @@ export async function POST(request: Request) {
       importActivated = true;
       await db.delete(priceListItems).where(ne(priceListItems.importId, created.id));
       await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "price_list_imported", entity: "price_list", details: `Lista de preços importada: ${fileName} (${parsed.rows.length} itens).`, after: { fileName, rowCount: parsed.rows.length, states: parsed.states } });
+      const notification = await automaticPriceListNotification(db, profile, fileName, parsed.rows.length, requestedEffectiveAt || now.slice(0, 10));
       await cleanupUpload(env.BUCKET, uploadId, totalChunks);
       incomingUploadId = "";
-      return Response.json({ ok: true, import: { fileName, rowCount: parsed.rows.length, states: parsed.states, importedAt: now } }, { status: 201 });
+      return Response.json({ ok: true, import: { fileName, rowCount: parsed.rows.length, states: parsed.states, importedAt: now }, notification }, { status: 201 });
     }
 
     const form = await request.formData();
@@ -400,7 +433,8 @@ export async function POST(request: Request) {
     importActivated = true;
     await db.delete(priceListItems).where(ne(priceListItems.importId, created.id));
     await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "price_list_imported", entity: "price_list", details: `Lista de preços importada: ${file.name} (${parsed.rows.length} itens).`, after: { fileName: file.name, rowCount: parsed.rows.length, states: parsed.states } });
-    return Response.json({ ok: true, import: { fileName: file.name, rowCount: parsed.rows.length, states: parsed.states, importedAt: now } }, { status: 201 });
+    const notification = await automaticPriceListNotification(db, profile, file.name, parsed.rows.length, now.slice(0, 10));
+    return Response.json({ ok: true, import: { fileName: file.name, rowCount: parsed.rows.length, states: parsed.states, importedAt: now }, notification }, { status: 201 });
   } catch (error) {
     if (createdImportId && !importActivated) {
       try {
@@ -424,10 +458,12 @@ export async function PATCH(request: Request) {
   if (!profile) return errorResponse("Acesso não autorizado.", 403);
   if (!canManage(profile)) return errorResponse("Somente Gestão Global e ADM Geral podem alterar a lista de preços.", 403);
   try {
-    const payload = (await request.json()) as { id?: number; state?: string; netPriceCents?: number | null; finalPriceCents?: number | null; n2PriceCents?: number | null; n3PriceCents?: number | null };
+    const payload = (await request.json()) as { id?: number; state?: string; netPriceCents?: number | null; finalPriceCents?: number | null; n2PriceCents?: number | null; n3PriceCents?: number | null; effectiveAt?: string };
     const id = Math.trunc(Number(payload.id) || 0);
     const state = String(payload.state ?? "").trim().toUpperCase();
+    const requestedEffectiveAt = String(payload.effectiveAt ?? "").trim();
     if (!id || !STATES.includes(state)) return errorResponse("Informe item e UF válidos.");
+    if (requestedEffectiveAt && !isValidEffectiveDate(requestedEffectiveAt)) return errorResponse("Informe uma data de vigência válida.");
     const db = await getDb();
     const record = await activeImport(db);
     if (!record) return errorResponse("Importe uma lista de preços antes de editar.", 409);
@@ -441,7 +477,8 @@ export async function PATCH(request: Request) {
     const nextNet = payload.netPriceCents === undefined || payload.netPriceCents === null ? item.netPriceCents : Math.max(0, Math.trunc(Number(payload.netPriceCents) || 0));
     await db.update(priceListItems).set({ netPriceCents: nextNet, statePricesJson: JSON.stringify(statePrices), updatedAt: new Date().toISOString() }).where(eq(priceListItems.id, id));
     await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "price_list_item_updated", entity: "price_list", details: `Item ${item.partNumber} ajustado para ${state}.`, before: { partNumber: item.partNumber, state, statePrices: current }, after: { partNumber: item.partNumber, state, statePrices: next } });
-    return Response.json({ ok: true });
+    const notification = await automaticPriceListNotification(db, profile, item.partNumber, 1, requestedEffectiveAt || new Date().toISOString().slice(0, 10));
+    return Response.json({ ok: true, notification });
   } catch (error) {
     return errorResponse(error instanceof Error ? error.message : "Não foi possível alterar o item.", 500);
   }

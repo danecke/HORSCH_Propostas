@@ -37,6 +37,32 @@ type PriceListResponse = {
   error?: string;
 };
 
+type PriceListNotification = {
+  id: number;
+  title: string;
+  message: string;
+  effectiveAt: string;
+  affectedPns: string;
+  audience: string;
+  createdByName: string;
+  createdAt: string;
+  readAt: string | null;
+};
+
+type NotificationAudienceUser = {
+  email: string;
+  name: string;
+  roleLabel: string;
+  dealershipName: string;
+};
+
+type NotificationResponse = {
+  notifications: PriceListNotification[];
+  unreadCount: number;
+  audience: NotificationAudienceUser[];
+  error?: string;
+};
+
 const MAX_UPLOAD_SIZE = 120 * 1024 * 1024;
 
 function money(cents: number | null | undefined) {
@@ -58,6 +84,16 @@ function parseMoney(value: string) {
 function formatDate(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+}
+
+function localDateValue() {
+  const date = new Date();
+  return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
+}
+
+function formatEffectiveDate(value: string) {
+  const date = new Date(value + "T00:00:00");
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("pt-BR");
 }
 
 async function readUploadPayload<T extends { error?: string }>(response: Response): Promise<T> {
@@ -93,6 +129,8 @@ export function PriceListView({ me }: { me: PriceListAccess }) {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [editing, setEditing] = useState<PriceRow | null>(null);
+  const [notificationRefreshKey, setNotificationRefreshKey] = useState(0);
+  const [publishEffectiveAt, setPublishEffectiveAt] = useState(localDateValue());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -143,14 +181,15 @@ export function PriceListView({ me }: { me: PriceListAccess }) {
         if (!chunkResponse.ok) throw new Error(chunkPayload.error || `Não foi possível enviar a parte ${part + 1} da planilha.`);
         setUploadProgress(Math.round(((part + 1) / initPayload.totalChunks) * 90));
       }
-      const response = await fetch("/api/price-list?upload=complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ uploadId: initPayload.uploadId, fileName: file.name, fileSize: file.size, totalChunks: initPayload.totalChunks }) });
-      const payload = await readUploadPayload<{ error?: string; import?: { rowCount: number } }>(response);
+      const response = await fetch("/api/price-list?upload=complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ uploadId: initPayload.uploadId, fileName: file.name, fileSize: file.size, totalChunks: initPayload.totalChunks, effectiveAt: publishEffectiveAt }) });
+      const payload = await readUploadPayload<{ error?: string; import?: { rowCount: number }; notification?: { recipientCount: number } | null }>(response);
       if (!response.ok) throw new Error(payload.error || "Não foi possível importar a planilha.");
       setFile(null);
       setUploadProgress(100);
       setPage(1);
       setState("");
-      setNotice(`Lista importada com ${payload.import?.rowCount.toLocaleString("pt-BR") ?? ""} itens.`);
+      setNotificationRefreshKey((current) => current + 1);
+      setNotice(`Lista importada com ${payload.import?.rowCount.toLocaleString("pt-BR") ?? ""} itens${payload.notification ? ` · aviso enviado para ${payload.notification.recipientCount} usuários` : ""}.`);
       await load();
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : "Não foi possível importar a planilha.");
@@ -159,12 +198,13 @@ export function PriceListView({ me }: { me: PriceListAccess }) {
     }
   }
 
-  async function saveRow(row: PriceRow, draft: { net: string; final: string; n2: string; n3: string }) {
-    const response = await fetch("/api/price-list", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: row.id, state: row.state, netPriceCents: parseMoney(draft.net), finalPriceCents: parseMoney(draft.final), n2PriceCents: parseMoney(draft.n2), n3PriceCents: parseMoney(draft.n3) }) });
-    const payload = (await response.json()) as { error?: string };
+  async function saveRow(row: PriceRow, draft: { net: string; final: string; n2: string; n3: string; effectiveAt: string }) {
+    const response = await fetch("/api/price-list", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: row.id, state: row.state, netPriceCents: parseMoney(draft.net), finalPriceCents: parseMoney(draft.final), n2PriceCents: parseMoney(draft.n2), n3PriceCents: parseMoney(draft.n3), effectiveAt: draft.effectiveAt }) });
+    const payload = (await response.json()) as { error?: string; notification?: { recipientCount: number } | null };
     if (!response.ok) throw new Error(payload.error || "Não foi possível salvar o ajuste.");
     setEditing(null);
-    setNotice(`PN ${row.partNumber} atualizado para ${row.state}.`);
+    setNotificationRefreshKey((current) => current + 1);
+    setNotice(`PN ${row.partNumber} atualizado para ${row.state}${payload.notification ? ` · aviso enviado para ${payload.notification.recipientCount} usuários` : ""}.`);
     await load();
   }
 
@@ -179,9 +219,10 @@ export function PriceListView({ me }: { me: PriceListAccess }) {
       <div><span className="eyebrow">Catálogo comercial</span><h1>Catálogo de Preços Sugeridos</h1><p>Tabela ativa: <strong>{data?.import?.fileName || "nenhuma lista publicada"}</strong> · Vigência a partir de {data?.import ? formatDate(data.import.importedAt).split(",")[0] : "aguardando importação"}</p></div>
       <div className="price-list-heading-mark"><span>H</span><small>Preço vigente</small></div>
     </header>
+    <PriceListNotificationCenter canManage={canManage} refreshKey={notificationRefreshKey} onNotice={setNotice} />
     {canManage && <div className="price-list-tabs" role="tablist" aria-label="Lista de preços"><button type="button" className={tab === "view" ? "active" : ""} onClick={() => setTab("view")}>Consultar lista</button><button type="button" className={tab === "admin" ? "active" : ""} onClick={() => setTab("admin")}>Administração</button></div>}
     {notice && <div className="price-list-notice" role="status">{notice}</div>}
-    {tab === "admin" && canManage ? <AdminPanel file={file} setFile={setFile} uploading={uploading} uploadProgress={uploadProgress} onSubmit={submitUpload} currentImport={data?.import ?? null} /> : <>
+    {tab === "admin" && canManage ? <><section className="panel price-list-publish-settings"><div><span className="eyebrow">Vigência da atualização</span><h2>Defina quando a nova lista passa a valer</h2><p>Esta data será registrada no aviso automático enviado após a publicação do Excel.</p></div><label className="field"><span>Vigência a partir de</span><input type="date" value={publishEffectiveAt} onChange={(event) => setPublishEffectiveAt(event.target.value)} /></label></section><AdminPanel file={file} setFile={setFile} uploading={uploading} uploadProgress={uploadProgress} onSubmit={submitUpload} currentImport={data?.import ?? null} /></> : <>
       <div className="price-list-state-tabs" role="tablist" aria-label="Estados disponíveis">{(data?.states ?? []).map((item) => <button type="button" role="tab" aria-selected={selectedState === item} key={item} className={selectedState === item ? "active" : ""} onClick={() => { setState(item); setPage(1); }}>{item}</button>)}</div>
       <div className="price-list-search-row"><label className="price-list-search-box"><span aria-hidden="true">⌕</span><input aria-label="Pesquisar por PN ou descrição" value={searchInput} onChange={(event) => setSearchInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { setSearch(searchInput); setPage(1); } }} placeholder="Pesquisar por PN (ex: 60027753) ou Descrição (ex: Tubo)..." /></label><button type="button" className="price-list-search-button" onClick={() => { setSearch(searchInput); setPage(1); }}>Buscar</button><button type="button" className="price-list-export-button" onClick={exportList} disabled={!data?.import || !selectedState}>⇩&nbsp; Exportar XLSX</button></div>
       <section className="panel price-list-panel">
@@ -199,12 +240,113 @@ function AdminPanel({ file, setFile, uploading, uploadProgress, onSubmit, curren
   return <section className="price-list-admin-grid"><article className="panel price-list-upload-card"><div className="admin-card-icon">↑</div><span className="eyebrow">Atualização central</span><h2>Importar nova lista</h2><p>Use o modelo Excel para manter o padrão: <strong>PN, Descrição, Familia, Unidade, NCM, VT, Origem, Netprice 26</strong> e três colunas de preço por UF para Cliente Final, N2 e N3.</p><div className="price-list-template-callout"><div><strong>Comece pelo arquivo de exemplo</strong><span>Ele já traz todos os cabeçalhos aceitos e instruções de preenchimento.</span></div><a className="outline-button" href="/modelos/lista-precos-exemplo.xlsx" download>Baixar Excel de exemplo</a></div><form onSubmit={onSubmit}><label className="file-drop"><input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /><strong>{file ? file.name : "Selecionar arquivo .xlsx"}</strong><small>{file ? `${(file.size / (1024 * 1024)).toFixed(1).replace(".", ",")} MB pronto para importar` : "Até 120 MB · upload dividido em partes"}</small></label>{uploading && <div className="price-list-upload-progress" role="status"><div className="price-list-upload-progress-label"><span>Enviando planilha em partes...</span><strong>{uploadProgress}%</strong></div><div className="price-list-upload-progress-track"><span style={{ width: `${uploadProgress}%` }} /></div></div>}<button type="submit" className="primary-button" disabled={!file || uploading}>{uploading ? "Processando planilha..." : "Publicar nova versão"}</button></form></article><article className="panel price-list-admin-info"><span className="eyebrow">Versão ativa</span><h2>{currentImport?.fileName || "Nenhuma lista publicada"}</h2>{currentImport ? <><div className="admin-info-row"><span>Itens normalizados</span><strong>{currentImport.rowCount.toLocaleString("pt-BR")}</strong></div><div className="admin-info-row"><span>UFs identificadas</span><strong>{currentImport.states.join(" · ")}</strong></div><div className="admin-info-row"><span>Importado por</span><strong>{currentImport.importedByName || "—"}</strong></div><div className="admin-info-row"><span>Data</span><strong>{formatDate(currentImport.importedAt)}</strong></div></> : <p>A lista aparecerá aqui depois da primeira importação.</p>}<div className="admin-permission-note"><strong>Acesso restrito</strong><span>Somente ADM Geral e Gestão Global podem importar ou ajustar preços.</span></div></article></section>;
 }
 
+function PriceListNotificationCenter({ canManage, refreshKey, onNotice }: { canManage: boolean; refreshKey: number; onNotice: (message: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [showComposer, setShowComposer] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+  const [notifications, setNotifications] = useState<PriceListNotification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [audience, setAudience] = useState<NotificationAudienceUser[]>([]);
+  const [scope, setScope] = useState<"all" | "selected">("all");
+  const [selectedEmails, setSelectedEmails] = useState<string[]>([]);
+  const [title, setTitle] = useState("");
+  const [message, setMessage] = useState("");
+  const [affectedPns, setAffectedPns] = useState("");
+  const [effectiveAt, setEffectiveAt] = useState(localDateValue());
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/price-list-notifications" + (canManage ? "?audience=1&refresh=" + refreshKey : "?refresh=" + refreshKey), { cache: "no-store" });
+      const payload = (await response.json()) as NotificationResponse;
+      if (!response.ok) throw new Error(payload.error || "Não foi possível carregar os avisos.");
+      setNotifications(payload.notifications ?? []);
+      setUnreadCount(payload.unreadCount ?? 0);
+      setAudience(payload.audience ?? []);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Não foi possível carregar os avisos.");
+    } finally {
+      setLoading(false);
+    }
+  }, [canManage, refreshKey]);
+
+  useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
+
+  async function markRead(id: number) {
+    const notification = notifications.find((item) => item.id === id);
+    if (!notification || notification.readAt) return;
+    const response = await fetch("/api/price-list-notifications", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+    if (!response.ok) return;
+    setNotifications((current) => current.map((item) => item.id === id ? { ...item, readAt: new Date().toISOString() } : item));
+    setUnreadCount((current) => Math.max(0, current - 1));
+  }
+
+  async function markAllRead() {
+    if (!unreadCount) return;
+    const response = await fetch("/api/price-list-notifications", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ all: true }) });
+    if (!response.ok) return;
+    const now = new Date().toISOString();
+    setNotifications((current) => current.map((item) => item.readAt ? item : { ...item, readAt: now }));
+    setUnreadCount(0);
+  }
+
+  function toggleRecipient(email: string) {
+    setSelectedEmails((current) => current.includes(email) ? current.filter((item) => item !== email) : [...current, email]);
+  }
+
+  async function submitNotification(event: FormEvent) {
+    event.preventDefault();
+    setSending(true);
+    setError("");
+    try {
+      const response = await fetch("/api/price-list-notifications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, message, effectiveAt, affectedPns, audience: scope, selectedEmails }),
+      });
+      const payload = (await response.json()) as { error?: string; notification?: { recipientCount: number } };
+      if (!response.ok) throw new Error(payload.error || "Não foi possível enviar o aviso.");
+      setTitle("");
+      setMessage("");
+      setAffectedPns("");
+      setSelectedEmails([]);
+      setScope("all");
+      setShowComposer(false);
+      setOpen(true);
+      onNotice("Aviso enviado para " + (payload.notification?.recipientCount ?? 0) + " usuários.");
+      await load();
+    } catch (sendError) {
+      setError(sendError instanceof Error ? sendError.message : "Não foi possível enviar o aviso.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return <section className="price-list-notification-center panel">
+    <header className="price-list-notification-header">
+      <div className="price-list-notification-title"><span className="admin-card-icon">!</span><div><span className="eyebrow">Comunicação operacional</span><h2>Avisos da lista de preços {unreadCount > 0 && <strong className="notification-badge">{unreadCount}</strong>}</h2><p>Alterações publicadas pelo ADM aparecem aqui para todos os acessos habilitados.</p></div></div>
+      <div className="price-list-notification-actions">{canManage && <button type="button" className="primary-button compact" onClick={() => { setOpen(true); setShowComposer((current) => !current); }}>{showComposer ? "Fechar envio" : "Enviar aviso"}</button>}<button type="button" className="outline-button compact" onClick={() => setOpen((current) => !current)}>{open ? "Ocultar avisos" : "Ver avisos"}</button></div>
+    </header>
+    {open && <div className="price-list-notification-body">
+      <div className="price-list-notification-inbox">
+        <div className="price-list-notification-inbox-heading"><div><span className="eyebrow">Caixa de entrada</span><strong>{unreadCount ? unreadCount + " não lido(s)" : "Tudo lido"}</strong></div>{unreadCount > 0 && <button type="button" className="text-button" onClick={() => void markAllRead()}>Marcar tudo como lido</button>}</div>
+        {error && <div className="price-list-error">{error}</div>}
+        {loading ? <div className="empty-mini">Carregando avisos...</div> : !notifications.length ? <div className="empty-mini">Nenhuma alteração foi comunicada ainda.</div> : <div className="price-list-notification-list">{notifications.map((notification) => <article className={notification.readAt ? "price-list-notification-item" : "price-list-notification-item unread"} key={notification.id}><div className="price-list-notification-item-top"><div><strong>{notification.title}</strong>{!notification.readAt && <span className="notification-unread-dot">Novo</span>}</div><span>{formatEffectiveDate(notification.effectiveAt)}</span></div><p>{notification.message}</p>{notification.affectedPns && <small>Escopo: {notification.affectedPns}</small>}<footer><span>Por {notification.createdByName || "ADM"} · enviado em {formatDate(notification.createdAt)}</span>{!notification.readAt && <button type="button" className="text-button" onClick={() => void markRead(notification.id)}>Marcar como lido</button>}</footer></article>)}</div>}
+      </div>
+      {canManage && showComposer && <form className="price-list-notification-composer" onSubmit={(event) => void submitNotification(event)}><div><span className="eyebrow">Novo aviso</span><h3>Comunicar alteração</h3><p>O envio automático para todos acontece ao importar uma nova lista ou salvar um ajuste de PN. Use este formulário para personalizar o aviso e escolher destinatários.</p></div><label className="field"><span>Título</span><input maxLength={120} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Ex.: Reajuste do PN 60027753" required /></label><label className="field"><span>Mensagem</span><textarea maxLength={2000} value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Explique o que mudou e o que o usuário precisa considerar." required /></label><div className="price-list-notification-form-grid"><label className="field"><span>Vigência a partir de</span><input type="date" value={effectiveAt} onChange={(event) => setEffectiveAt(event.target.value)} required /></label><label className="field"><span>PNs ou escopo da alteração</span><input maxLength={500} value={affectedPns} onChange={(event) => setAffectedPns(event.target.value)} placeholder="Ex.: 60027753 · cliente final · SP" /></label></div><div className="notification-scope"><span className="field-label">Destinatários</span><label className="notification-radio"><input type="radio" checked={scope === "all"} onChange={() => setScope("all")} />Todos com acesso à lista <small>{audience.length} usuários elegíveis</small></label><label className="notification-radio"><input type="radio" checked={scope === "selected"} onChange={() => setScope("selected")} />Usuários selecionados <small>Envio individual ou para um grupo</small></label></div>{scope === "selected" && <div className="notification-recipient-list">{audience.map((user) => <label className="notification-recipient" key={user.email}><input type="checkbox" checked={selectedEmails.includes(user.email)} onChange={() => toggleRecipient(user.email)} /><span><strong>{user.name}</strong><small>{user.roleLabel}{user.dealershipName ? " · " + user.dealershipName : ""} · {user.email}</small></span></label>)}</div>}<div className="notification-composer-footer"><span>{scope === "all" ? "O servidor valida os acessos ativos antes do envio." : selectedEmails.length + " selecionado(s)"}</span><button type="submit" className="primary-button" disabled={sending}>{sending ? "Enviando..." : "Enviar aviso"}</button></div></form>}
+    </div>}
+  </section>;
+}
+
 function EmptyPriceState({ text }: { text: string }) {
   return <div className="price-list-empty"><span>₿</span><strong>Lista de preços indisponível</strong><p>{text}</p></div>;
 }
 
-function PriceEditor({ row, onClose, onSave }: { row: PriceRow; onClose: () => void; onSave: (row: PriceRow, draft: { net: string; final: string; n2: string; n3: string }) => Promise<void> }) {
-  const [draft, setDraft] = useState({ net: inputMoney(row.netPriceCents), final: inputMoney(row.finalPriceCents), n2: inputMoney(row.n2PriceCents), n3: inputMoney(row.n3PriceCents) });
+function PriceEditor({ row, onClose, onSave }: { row: PriceRow; onClose: () => void; onSave: (row: PriceRow, draft: { net: string; final: string; n2: string; n3: string; effectiveAt: string }) => Promise<void> }) {
+  const [draft, setDraft] = useState({ net: inputMoney(row.netPriceCents), final: inputMoney(row.finalPriceCents), n2: inputMoney(row.n2PriceCents), n3: inputMoney(row.n3PriceCents), effectiveAt: localDateValue() });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   async function submit(event: FormEvent) {
@@ -213,5 +355,22 @@ function PriceEditor({ row, onClose, onSave }: { row: PriceRow; onClose: () => v
     setError("");
     try { await onSave(row, draft); } catch (saveError) { setError(saveError instanceof Error ? saveError.message : "Não foi possível salvar."); } finally { setSaving(false); }
   }
-  return <div className="modal-backdrop" role="dialog" aria-modal="true"><form className="price-editor-modal" onSubmit={(event) => void submit(event)}><header className="modal-header"><div><span className="eyebrow">Ajuste administrativo · {row.state}</span><h2>{row.partNumber}</h2><p>{row.description}</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Fechar">×</button></header><div className="form-scroll"><div className="price-editor-grid"><label className="field"><span>Netprice unitário</span><input inputMode="decimal" value={draft.net} onChange={(event) => setDraft({ ...draft, net: event.target.value })} /></label><label className="field"><span>Cliente final</span><input inputMode="decimal" value={draft.final} onChange={(event) => setDraft({ ...draft, final: event.target.value })} /></label><label className="field"><span>Cliente N2</span><input inputMode="decimal" value={draft.n2} onChange={(event) => setDraft({ ...draft, n2: event.target.value })} /></label><label className="field"><span>Cliente N3</span><input inputMode="decimal" value={draft.n3} onChange={(event) => setDraft({ ...draft, n3: event.target.value })} /></label></div>{error && <p className="form-error">{error}</p>}</div><footer className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button type="submit" className="primary-button" disabled={saving}>{saving ? "Salvando..." : "Salvar ajuste"}</button></footer></form></div>;
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
+      <form className="price-editor-modal" onSubmit={(event) => void submit(event)}>
+        <header className="modal-header"><div><span className="eyebrow">Ajuste administrativo · {row.state}</span><h2>{row.partNumber}</h2><p>{row.description}</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Fechar">×</button></header>
+        <div className="form-scroll">
+          <div className="price-editor-grid">
+            <label className="field"><span>Netprice unitário</span><input inputMode="decimal" value={draft.net} onChange={(event) => setDraft({ ...draft, net: event.target.value })} /></label>
+            <label className="field"><span>Cliente final</span><input inputMode="decimal" value={draft.final} onChange={(event) => setDraft({ ...draft, final: event.target.value })} /></label>
+            <label className="field"><span>Cliente N2</span><input inputMode="decimal" value={draft.n2} onChange={(event) => setDraft({ ...draft, n2: event.target.value })} /></label>
+            <label className="field"><span>Cliente N3</span><input inputMode="decimal" value={draft.n3} onChange={(event) => setDraft({ ...draft, n3: event.target.value })} /></label>
+            <label className="field"><span>Vigência do ajuste</span><input type="date" value={draft.effectiveAt} onChange={(event) => setDraft({ ...draft, effectiveAt: event.target.value })} required /></label>
+          </div>
+          {error && <p className="form-error">{error}</p>}
+        </div>
+        <footer className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button type="submit" className="primary-button" disabled={saving}>{saving ? "Salvando..." : "Salvar ajuste"}</button></footer>
+      </form>
+    </div>
+  );
 }
