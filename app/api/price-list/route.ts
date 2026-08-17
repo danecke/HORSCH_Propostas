@@ -124,6 +124,22 @@ function normalizeHeader(value: string) {
   return value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR").trim();
 }
 
+function derivedLevelPrice(finalPriceCents: number | null | undefined, factor: number) {
+  return finalPriceCents === null || finalPriceCents === undefined ? null : Math.round(finalPriceCents * factor);
+}
+
+function normalizeStatePrices(statePrices: ParsedPriceRow["statePrices"]) {
+  return Object.fromEntries(Object.entries(statePrices).map(([state, prices]) => {
+    const finalPriceCents = prices.final ?? null;
+    return [state, {
+      ...prices,
+      final: finalPriceCents,
+      n2: derivedLevelPrice(finalPriceCents, 0.9),
+      n3: derivedLevelPrice(finalPriceCents, 0.8),
+    }];
+  }));
+}
+
 function stateFromHeader(header: string) {
   const match = header.toUpperCase().trim().match(/(?:^|\s)([A-Z]{2})$/);
   return match && STATES.includes(match[1]) ? match[1] : "";
@@ -189,8 +205,8 @@ function parseWorkbook(bytes: Uint8Array) {
   const stateColumns = headers.flatMap(([index, value]) => {
     const state = stateFromHeader(value);
     if (!state || index < 8) return [];
-    const normalized = value.toLocaleLowerCase("pt-BR");
-    const tier: "netPriceCents" | PriceTier = normalized.startsWith("netprice") ? "netPriceCents" : normalized.includes("n2") ? "n2" : normalized.includes("n3") ? "n3" : "final";
+    const normalized = normalizeHeader(value);
+    const tier: "netPriceCents" | PriceTier = normalized.startsWith("netprice") ? "netPriceCents" : /(?:\bn2\b|nivel\s*2)/.test(normalized) ? "n2" : /(?:\bn3\b|nivel\s*3)/.test(normalized) ? "n3" : "final";
     return [{ index, state, tier }];
   });
   const states = [...new Set(stateColumns.map((column) => column.state))].filter((state) => STATES.includes(state));
@@ -203,7 +219,7 @@ function parseWorkbook(bytes: Uint8Array) {
       const current = statePrices[column.state] ?? {};
       const value = cents(row[column.index]);
       if (column.tier === "netPriceCents") current.netPriceCents = value ?? undefined;
-      else current[column.tier] = value;
+      else if (column.tier === "final") current.final = value;
       statePrices[column.state] = current;
     }
     parsed.push({
@@ -215,7 +231,7 @@ function parseWorkbook(bytes: Uint8Array) {
       vt: String(row[vtIndex] ?? "").trim(),
       origin: String(row[originIndex] ?? "").trim(),
       netPriceCents: cents(row[netIndex]) ?? 0,
-      statePrices,
+      statePrices: normalizeStatePrices(statePrices),
     });
   }
   if (!parsed.length) throw new Error("Nenhum item foi encontrado na planilha.");
@@ -249,6 +265,7 @@ function projectItem(item: typeof priceListItems.$inferSelect, state: string) {
   let prices: ParsedPriceRow["statePrices"] = {};
   try { prices = JSON.parse(item.statePricesJson) as ParsedPriceRow["statePrices"]; } catch { prices = {}; }
   const selected = prices[state] ?? {};
+  const finalPriceCents = selected.final ?? null;
   return {
     id: item.id,
     partNumber: item.partNumber,
@@ -259,9 +276,9 @@ function projectItem(item: typeof priceListItems.$inferSelect, state: string) {
     vt: item.vt,
     origin: item.origin,
     netPriceCents: selected.netPriceCents ?? item.netPriceCents,
-    finalPriceCents: selected.final ?? null,
-    n2PriceCents: selected.n2 ?? null,
-    n3PriceCents: selected.n3 ?? null,
+    finalPriceCents,
+    n2PriceCents: derivedLevelPrice(finalPriceCents, 0.9),
+    n3PriceCents: derivedLevelPrice(finalPriceCents, 0.8),
     state,
   };
 }
@@ -287,7 +304,7 @@ function exportMoney(value: number | null) {
 }
 
 function exportXlsx(rows: ReturnType<typeof projectItem>[], state: string) {
-  const headers = ["PN (PART NUMBER)", "DESCRIÇÃO", "FAMÍLIA", "UNIDADE", "NCM", "VT", "ORIGEM", "NETPRICE", "CLIENTE FINAL", "N2", "N3"];
+  const headers = ["PN (PART NUMBER)", "DESCRIÇÃO", "FAMÍLIA", "UNIDADE", "NCM", "VT", "ORIGEM", "NETPRICE", "CLIENTE FINAL", "CLIENTE NÍVEL 2", "CLIENTE NÍVEL 3"];
   const values = rows.map((row) => [row.partNumber, row.description, row.family, row.unit, row.ncm, row.vt, row.origin, exportMoney(row.netPriceCents), exportMoney(row.finalPriceCents), exportMoney(row.n2PriceCents), exportMoney(row.n3PriceCents)]);
   const sheetRows = [headers, ...values].map((row, rowIndex) => `<row r="${rowIndex + 1}">${row.map((value, columnIndex) => `<c r="${excelColumn(columnIndex)}${rowIndex + 1}" t="inlineStr"><is><t>${xmlEscape(String(value ?? ""))}</t></is></c>`).join("")}</row>`).join("");
   const files = {
@@ -397,7 +414,7 @@ export async function POST(request: Request) {
       createdImportId = created.id;
       for (let index = 0; index < parsed.rows.length; index += DB_INSERT_BATCH_SIZE) {
         const chunk = parsed.rows.slice(index, index + DB_INSERT_BATCH_SIZE);
-        await db.insert(priceListItems).values(chunk.map((item) => ({ importId: created.id, partNumber: item.partNumber, description: item.description, family: item.family, unit: item.unit, ncm: item.ncm, vt: item.vt, origin: item.origin, netPriceCents: item.netPriceCents, statePricesJson: JSON.stringify(item.statePrices), importedAt: now, updatedAt: now })));
+        await db.insert(priceListItems).values(chunk.map((item) => ({ importId: created.id, partNumber: item.partNumber, description: item.description, family: item.family, unit: item.unit, ncm: item.ncm, vt: item.vt, origin: item.origin, netPriceCents: item.netPriceCents, statePricesJson: JSON.stringify(normalizeStatePrices(item.statePrices)), importedAt: now, updatedAt: now })));
       }
       await db.update(priceListImports).set({ isActive: false }).where(eq(priceListImports.isActive, true));
       await db.update(priceListImports).set({ isActive: true }).where(eq(priceListImports.id, created.id));
@@ -426,7 +443,7 @@ export async function POST(request: Request) {
     createdImportId = created.id;
     for (let index = 0; index < parsed.rows.length; index += DB_INSERT_BATCH_SIZE) {
       const chunk = parsed.rows.slice(index, index + DB_INSERT_BATCH_SIZE);
-      await db.insert(priceListItems).values(chunk.map((item) => ({ importId: created.id, partNumber: item.partNumber, description: item.description, family: item.family, unit: item.unit, ncm: item.ncm, vt: item.vt, origin: item.origin, netPriceCents: item.netPriceCents, statePricesJson: JSON.stringify(item.statePrices), importedAt: now, updatedAt: now })));
+      await db.insert(priceListItems).values(chunk.map((item) => ({ importId: created.id, partNumber: item.partNumber, description: item.description, family: item.family, unit: item.unit, ncm: item.ncm, vt: item.vt, origin: item.origin, netPriceCents: item.netPriceCents, statePricesJson: JSON.stringify(normalizeStatePrices(item.statePrices)), importedAt: now, updatedAt: now })));
     }
     await db.update(priceListImports).set({ isActive: false }).where(eq(priceListImports.isActive, true));
     await db.update(priceListImports).set({ isActive: true }).where(eq(priceListImports.id, created.id));
@@ -458,7 +475,7 @@ export async function PATCH(request: Request) {
   if (!profile) return errorResponse("Acesso não autorizado.", 403);
   if (!canManage(profile)) return errorResponse("Somente Gestão Global e ADM Geral podem alterar a lista de preços.", 403);
   try {
-    const payload = (await request.json()) as { id?: number; state?: string; netPriceCents?: number | null; finalPriceCents?: number | null; n2PriceCents?: number | null; n3PriceCents?: number | null; effectiveAt?: string };
+    const payload = (await request.json()) as { id?: number; state?: string; netPriceCents?: number | null; finalPriceCents?: number | null; effectiveAt?: string };
     const id = Math.trunc(Number(payload.id) || 0);
     const state = String(payload.state ?? "").trim().toUpperCase();
     const requestedEffectiveAt = String(payload.effectiveAt ?? "").trim();
@@ -472,7 +489,8 @@ export async function PATCH(request: Request) {
     let statePrices: ParsedPriceRow["statePrices"] = {};
     try { statePrices = JSON.parse(item.statePricesJson) as ParsedPriceRow["statePrices"]; } catch { statePrices = {}; }
     const current = statePrices[state] ?? {};
-    const next = { ...current, final: payload.finalPriceCents ?? null, n2: payload.n2PriceCents ?? null, n3: payload.n3PriceCents ?? null, netPriceCents: payload.netPriceCents ?? current.netPriceCents };
+    const finalPriceCents = payload.finalPriceCents ?? null;
+    const next = { ...current, final: finalPriceCents, n2: derivedLevelPrice(finalPriceCents, 0.9), n3: derivedLevelPrice(finalPriceCents, 0.8), netPriceCents: payload.netPriceCents ?? current.netPriceCents };
     statePrices[state] = next;
     const nextNet = payload.netPriceCents === undefined || payload.netPriceCents === null ? item.netPriceCents : Math.max(0, Math.trunc(Number(payload.netPriceCents) || 0));
     await db.update(priceListItems).set({ netPriceCents: nextNet, statePricesJson: JSON.stringify(statePrices), updatedAt: new Date().toISOString() }).where(eq(priceListItems.id, id));

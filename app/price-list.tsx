@@ -81,6 +81,10 @@ function parseMoney(value: string) {
   return Number.isFinite(number) ? Math.max(0, Math.round(number * 100)) : 0;
 }
 
+function derivedInputMoney(value: string, factor: number) {
+  return value.trim() ? inputMoney(Math.round(parseMoney(value) * factor)) : "—";
+}
+
 function formatDate(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
@@ -198,8 +202,8 @@ export function PriceListView({ me }: { me: PriceListAccess }) {
     }
   }
 
-  async function saveRow(row: PriceRow, draft: { net: string; final: string; n2: string; n3: string; effectiveAt: string }) {
-    const response = await fetch("/api/price-list", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: row.id, state: row.state, netPriceCents: parseMoney(draft.net), finalPriceCents: parseMoney(draft.final), n2PriceCents: parseMoney(draft.n2), n3PriceCents: parseMoney(draft.n3), effectiveAt: draft.effectiveAt }) });
+  async function saveRow(row: PriceRow, draft: { net: string; final: string; effectiveAt: string }) {
+    const response = await fetch("/api/price-list", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: row.id, state: row.state, netPriceCents: parseMoney(draft.net), finalPriceCents: parseMoney(draft.final), effectiveAt: draft.effectiveAt }) });
     const payload = (await response.json()) as { error?: string; notification?: { recipientCount: number } | null };
     if (!response.ok) throw new Error(payload.error || "Não foi possível salvar o ajuste.");
     setEditing(null);
@@ -228,7 +232,7 @@ export function PriceListView({ me }: { me: PriceListAccess }) {
       <section className="panel price-list-panel">
         <header className="panel-header price-list-toolbar"><div><span className="eyebrow">{stateLabel}</span><h2>Itens e valores autorizados</h2><p>{(data?.import?.rowCount ?? 0).toLocaleString("pt-BR")} itens na estrutura vigente.</p></div><div className="price-list-toolbar-meta">{summary.visible ? `${summary.visible} itens exibidos` : "Sem itens para exibir"}</div></header>
         {error && <div className="price-list-error">{error}</div>}
-        {loading ? <div className="empty-mini">Carregando preços vigentes...</div> : !data?.import ? <EmptyPriceState text={canManage ? "Importe o primeiro arquivo na aba Administração." : "A Fábrica ainda não publicou uma lista de preços vigente."} /> : !data.rows.length ? <EmptyPriceState text="Nenhum item corresponde ao filtro informado." /> : <div className="price-list-table-wrap"><table className="price-list-table"><thead><tr><th>PN (PART NUMBER)</th><th>Descrição</th><th>Família</th><th>Unidade</th><th>NCM</th><th>VT</th><th>Origem</th><th>Netprice</th><th>Cliente final</th><th>N2</th><th>N3</th>{canManage && <th aria-label="Ações" />}</tr></thead><tbody>{data.rows.map((row) => <tr key={row.id}><td><strong>{row.partNumber}</strong></td><td><span>{row.description || "—"}</span></td><td>{row.family || "—"}</td><td>{row.unit || "—"}</td><td>{row.ncm || "—"}</td><td>{row.vt || "—"}</td><td>{row.origin || "—"}</td><td className="price-cell">{money(row.netPriceCents)}</td><td className="price-cell">{money(row.finalPriceCents)}</td><td className="price-cell">{money(row.n2PriceCents)}</td><td className="price-cell">{money(row.n3PriceCents)}</td>{canManage && <td><button type="button" className="table-action-button" aria-label={`Editar ${row.partNumber}`} onClick={() => setEditing(row)}>✎</button></td>}</tr>)}</tbody></table></div>}
+        {loading ? <div className="empty-mini">Carregando preços vigentes...</div> : !data?.import ? <EmptyPriceState text={canManage ? "Importe o primeiro arquivo na aba Administração." : "A Fábrica ainda não publicou uma lista de preços vigente."} /> : !data.rows.length ? <EmptyPriceState text="Nenhum item corresponde ao filtro informado." /> : <div className="price-list-table-wrap"><table className="price-list-table"><thead><tr><th>PN (PART NUMBER)</th><th>Descrição</th><th>Família</th><th>Unidade</th><th>NCM</th><th>VT</th><th>Origem</th><th>Netprice</th><th>Cliente final</th><th>Cliente nível 2</th><th>Cliente nível 3</th>{canManage && <th aria-label="Ações" />}</tr></thead><tbody>{data.rows.map((row) => <tr key={row.id}><td><strong>{row.partNumber}</strong></td><td><span>{row.description || "—"}</span></td><td>{row.family || "—"}</td><td>{row.unit || "—"}</td><td>{row.ncm || "—"}</td><td>{row.vt || "—"}</td><td>{row.origin || "—"}</td><td className="price-cell">{money(row.netPriceCents)}</td><td className="price-cell">{money(row.finalPriceCents)}</td><td className="price-cell">{money(row.n2PriceCents)}</td><td className="price-cell">{money(row.n3PriceCents)}</td>{canManage && <td><button type="button" className="table-action-button" aria-label={`Editar ${row.partNumber}`} onClick={() => setEditing(row)}>✎</button></td>}</tr>)}</tbody></table></div>}
         {data?.total ? <footer className="price-list-pagination"><span>{((page - 1) * (data.pageSize ?? 50) + 1).toLocaleString("pt-BR")}–{Math.min(page * (data.pageSize ?? 50), data.total).toLocaleString("pt-BR")} de {data.total.toLocaleString("pt-BR")} itens</span><div><button type="button" className="outline-button compact" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>Anterior</button><strong>Página {page} de {totalPages}</strong><button type="button" className="outline-button compact" disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>Próxima</button></div></footer> : null}
       </section>
     </>}
@@ -237,7 +241,49 @@ export function PriceListView({ me }: { me: PriceListAccess }) {
 }
 
 function AdminPanel({ file, setFile, uploading, uploadProgress, onSubmit, currentImport }: { file: File | null; setFile: (file: File | null) => void; uploading: boolean; uploadProgress: number; onSubmit: (event: FormEvent) => void; currentImport: PriceListResponse["import"] }) {
-  return <section className="price-list-admin-grid"><article className="panel price-list-upload-card"><div className="admin-card-icon">↑</div><span className="eyebrow">Atualização central</span><h2>Importar nova lista</h2><p>Use o modelo Excel para manter o padrão: <strong>PN, Descrição, Familia, Unidade, NCM, VT, Origem, Netprice 26</strong> e três colunas de preço por UF para Cliente Final, N2 e N3.</p><div className="price-list-template-callout"><div><strong>Comece pelo arquivo de exemplo</strong><span>Ele já traz todos os cabeçalhos aceitos e instruções de preenchimento.</span></div><a className="outline-button" href="/modelos/lista-precos-exemplo.xlsx" download>Baixar Excel de exemplo</a></div><form onSubmit={onSubmit}><label className="file-drop"><input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /><strong>{file ? file.name : "Selecionar arquivo .xlsx"}</strong><small>{file ? `${(file.size / (1024 * 1024)).toFixed(1).replace(".", ",")} MB pronto para importar` : "Até 120 MB · upload dividido em partes"}</small></label>{uploading && <div className="price-list-upload-progress" role="status"><div className="price-list-upload-progress-label"><span>Enviando planilha em partes...</span><strong>{uploadProgress}%</strong></div><div className="price-list-upload-progress-track"><span style={{ width: `${uploadProgress}%` }} /></div></div>}<button type="submit" className="primary-button" disabled={!file || uploading}>{uploading ? "Processando planilha..." : "Publicar nova versão"}</button></form></article><article className="panel price-list-admin-info"><span className="eyebrow">Versão ativa</span><h2>{currentImport?.fileName || "Nenhuma lista publicada"}</h2>{currentImport ? <><div className="admin-info-row"><span>Itens normalizados</span><strong>{currentImport.rowCount.toLocaleString("pt-BR")}</strong></div><div className="admin-info-row"><span>UFs identificadas</span><strong>{currentImport.states.join(" · ")}</strong></div><div className="admin-info-row"><span>Importado por</span><strong>{currentImport.importedByName || "—"}</strong></div><div className="admin-info-row"><span>Data</span><strong>{formatDate(currentImport.importedAt)}</strong></div></> : <p>A lista aparecerá aqui depois da primeira importação.</p>}<div className="admin-permission-note"><strong>Acesso restrito</strong><span>Somente ADM Geral e Gestão Global podem importar ou ajustar preços.</span></div></article></section>;
+  return (
+    <section className="price-list-admin-grid">
+      <article className="panel price-list-upload-card">
+        <div className="admin-card-icon">↑</div>
+        <span className="eyebrow">Atualização central</span>
+        <h2>Importar nova lista</h2>
+        <p>
+          Use o modelo Excel com PN, Descrição, Família, Unidade, NCM, VT, Origem, Netprice 26 e Cliente final por UF.
+          Cliente nível 2 = Cliente final × 0,90; Cliente nível 3 = Cliente final × 0,80. Esses dois níveis são calculados automaticamente.
+        </p>
+        <div className="price-list-template-callout">
+          <div>
+            <strong>Comece pelo arquivo de exemplo</strong>
+            <span>Ele já traz todos os cabeçalhos aceitos e fórmulas demonstrativas dos níveis calculados.</span>
+          </div>
+          <a className="outline-button" href="/modelos/lista-precos-exemplo.xlsx" download>Baixar Excel de exemplo</a>
+        </div>
+        <form onSubmit={onSubmit}>
+          <label className="file-drop">
+            <input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
+            <strong>{file ? file.name : "Selecionar arquivo .xlsx"}</strong>
+            <small>{file ? ((file.size / (1024 * 1024)).toFixed(1).replace(".", ",") + " MB pronto para importar") : "Até 120 MB · upload dividido em partes"}</small>
+          </label>
+          {uploading && <div className="price-list-upload-progress" role="status">
+            <div className="price-list-upload-progress-label"><span>Enviando planilha em partes...</span><strong>{uploadProgress}%</strong></div>
+            <div className="price-list-upload-progress-track"><span style={{ width: String(uploadProgress) + "%" }} /></div>
+          </div>}
+          <button type="submit" className="primary-button" disabled={!file || uploading}>{uploading ? "Processando planilha..." : "Publicar nova versão"}</button>
+        </form>
+      </article>
+      <article className="panel price-list-admin-info">
+        <span className="eyebrow">Versão ativa</span>
+        <h2>{currentImport?.fileName || "Nenhuma lista publicada"}</h2>
+        {currentImport ? <>
+          <div className="admin-info-row"><span>Itens normalizados</span><strong>{currentImport.rowCount.toLocaleString("pt-BR")}</strong></div>
+          <div className="admin-info-row"><span>UFs identificadas</span><strong>{currentImport.states.join(" · ")}</strong></div>
+          <div className="admin-info-row"><span>Importado por</span><strong>{currentImport.importedByName || "—"}</strong></div>
+          <div className="admin-info-row"><span>Data</span><strong>{formatDate(currentImport.importedAt)}</strong></div>
+        </> : <p>A lista aparecerá aqui depois da primeira importação.</p>}
+        <div className="admin-permission-note"><strong>Acesso restrito</strong><span>Somente ADM Geral e Gestão Global podem importar ou ajustar preços.</span></div>
+      </article>
+    </section>
+  );
 }
 
 function PriceListNotificationCenter({ canManage, refreshKey, onNotice }: { canManage: boolean; refreshKey: number; onNotice: (message: string) => void }) {
@@ -345,8 +391,8 @@ function EmptyPriceState({ text }: { text: string }) {
   return <div className="price-list-empty"><span>₿</span><strong>Lista de preços indisponível</strong><p>{text}</p></div>;
 }
 
-function PriceEditor({ row, onClose, onSave }: { row: PriceRow; onClose: () => void; onSave: (row: PriceRow, draft: { net: string; final: string; n2: string; n3: string; effectiveAt: string }) => Promise<void> }) {
-  const [draft, setDraft] = useState({ net: inputMoney(row.netPriceCents), final: inputMoney(row.finalPriceCents), n2: inputMoney(row.n2PriceCents), n3: inputMoney(row.n3PriceCents), effectiveAt: localDateValue() });
+function PriceEditor({ row, onClose, onSave }: { row: PriceRow; onClose: () => void; onSave: (row: PriceRow, draft: { net: string; final: string; effectiveAt: string }) => Promise<void> }) {
+  const [draft, setDraft] = useState({ net: inputMoney(row.netPriceCents), final: inputMoney(row.finalPriceCents), effectiveAt: localDateValue() });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   async function submit(event: FormEvent) {
@@ -363,8 +409,8 @@ function PriceEditor({ row, onClose, onSave }: { row: PriceRow; onClose: () => v
           <div className="price-editor-grid">
             <label className="field"><span>Netprice unitário</span><input inputMode="decimal" value={draft.net} onChange={(event) => setDraft({ ...draft, net: event.target.value })} /></label>
             <label className="field"><span>Cliente final</span><input inputMode="decimal" value={draft.final} onChange={(event) => setDraft({ ...draft, final: event.target.value })} /></label>
-            <label className="field"><span>Cliente N2</span><input inputMode="decimal" value={draft.n2} onChange={(event) => setDraft({ ...draft, n2: event.target.value })} /></label>
-            <label className="field"><span>Cliente N3</span><input inputMode="decimal" value={draft.n3} onChange={(event) => setDraft({ ...draft, n3: event.target.value })} /></label>
+            <label className="field"><span>Cliente nível 2 · 90%</span><input inputMode="decimal" value={derivedInputMoney(draft.final, 0.9)} readOnly aria-label="Cliente nível 2 calculado automaticamente" /></label>
+            <label className="field"><span>Cliente nível 3 · 80%</span><input inputMode="decimal" value={derivedInputMoney(draft.final, 0.8)} readOnly aria-label="Cliente nível 3 calculado automaticamente" /></label>
             <label className="field"><span>Vigência do ajuste</span><input type="date" value={draft.effectiveAt} onChange={(event) => setDraft({ ...draft, effectiveAt: event.target.value })} required /></label>
           </div>
           {error && <p className="form-error">{error}</p>}
