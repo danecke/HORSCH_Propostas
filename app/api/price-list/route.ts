@@ -90,6 +90,10 @@ function cents(value: unknown) {
   return Number.isFinite(number) ? Math.round(number * 100) : null;
 }
 
+function normalizeHeader(value: string) {
+  return value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR").trim();
+}
+
 function stateFromHeader(header: string) {
   const match = header.toUpperCase().trim().match(/(?:^|\s)([A-Z]{2})$/);
   return match && STATES.includes(match[1]) ? match[1] : "";
@@ -141,7 +145,7 @@ function parseWorkbook(bytes: Uint8Array) {
   if (!rows.length) throw new Error("A planilha não possui linhas válidas.");
   const header = rows[0];
   const headers = Object.entries(header).map(([index, value]) => [Number(index), value.trim()] as const);
-  const indexOf = (pattern: RegExp) => headers.find((entry) => pattern.test(entry[1].toLocaleLowerCase("pt-BR")))?.[0] ?? -1;
+  const indexOf = (pattern: RegExp) => headers.find((entry) => pattern.test(normalizeHeader(entry[1])))?.[0] ?? -1;
   const pnIndex = indexOf(/^pn$/);
   const descriptionIndex = indexOf(/descri/);
   const familyIndex = indexOf(/famil/);
@@ -149,7 +153,7 @@ function parseWorkbook(bytes: Uint8Array) {
   const ncmIndex = indexOf(/^ncm$/);
   const vtIndex = indexOf(/^vt$/);
   const originIndex = indexOf(/origem/);
-  const netIndex = headers.find((entry) => /^netprice\s*26\b/i.test(entry[1]))?.[0] ?? headers.find((entry) => /^netprice\b/i.test(entry[1]))?.[0] ?? -1;
+  const netIndex = headers.find((entry) => /^netprice\s*26\b/i.test(normalizeHeader(entry[1])))?.[0] ?? headers.find((entry) => /^netprice\b/i.test(normalizeHeader(entry[1])))?.[0] ?? -1;
   if (pnIndex < 0 || descriptionIndex < 0 || netIndex < 0) throw new Error("A planilha deve conter as colunas PN, Descrição e Netprice 26.");
 
   const stateColumns = headers.flatMap(([index, value]) => {
@@ -253,8 +257,8 @@ function exportMoney(value: number | null) {
 }
 
 function exportXlsx(rows: ReturnType<typeof projectItem>[], state: string) {
-  const headers = ["PN (PART NUMBER)", "DESCRIÇÃO", "UNIDADE", "NCM", "VT", "ORIGEM", "NETPRICE", "CLIENTE FINAL", "N2", "N3"];
-  const values = rows.map((row) => [row.partNumber, row.description, row.unit, row.ncm, row.vt, row.origin, exportMoney(row.netPriceCents), exportMoney(row.finalPriceCents), exportMoney(row.n2PriceCents), exportMoney(row.n3PriceCents)]);
+  const headers = ["PN (PART NUMBER)", "DESCRIÇÃO", "FAMÍLIA", "UNIDADE", "NCM", "VT", "ORIGEM", "NETPRICE", "CLIENTE FINAL", "N2", "N3"];
+  const values = rows.map((row) => [row.partNumber, row.description, row.family, row.unit, row.ncm, row.vt, row.origin, exportMoney(row.netPriceCents), exportMoney(row.finalPriceCents), exportMoney(row.n2PriceCents), exportMoney(row.n3PriceCents)]);
   const sheetRows = [headers, ...values].map((row, rowIndex) => `<row r="${rowIndex + 1}">${row.map((value, columnIndex) => `<c r="${excelColumn(columnIndex)}${rowIndex + 1}" t="inlineStr"><is><t>${xmlEscape(String(value ?? ""))}</t></is></c>`).join("")}</row>`).join("");
   const files = {
     "[Content_Types].xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`,
