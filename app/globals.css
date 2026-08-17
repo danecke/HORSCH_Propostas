@@ -508,7 +508,7 @@ button { cursor: pointer; }
 .document-items td:nth-child(7),
 .document-items td:nth-child(8) { white-space: nowrap; overflow-wrap: normal; word-break: keep-all; }
 .document-items th:nth-last-child(-n + 2), .document-items td:nth-last-child(-n + 2) { text-align: center; }
-.document-items td:nth-child(6), .document-items td:nth-child(7), .document-items td:nth-child(8) { text-align: right; font-variant-numeric: tabular-nums; }
+.document-items td:nth-child(6), .document-items td:nth-child(7), .document-items td:nth-child(8) { text-align: center; font-variant-numeric: tabular-nums; }
 .document-items th:nth-child(1) { width: 15%; }
 .document-items th:nth-child(2) { width: 28%; }
 .document-items th:nth-child(3) { width: 8%; }
