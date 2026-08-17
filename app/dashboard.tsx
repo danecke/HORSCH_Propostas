@@ -1800,7 +1800,7 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
           {(proposal.customerName || proposal.customerSaleValueCents) && <section className="document-sale-data"><div><span>Cliente específico</span><strong>{proposal.customerName || "—"}</strong></div><div><span>Valor fixado para o cliente</span><strong>{proposal.customerSaleValueCents ? formatBRL(proposal.customerSaleValueCents) : "—"}</strong></div></section>}
           <div className="document-section-title"><h2>Itens da proposta</h2><span>{hasInvoiceTotals ? "Netprice e valores fiscais em reais" : "Valores líquidos em reais"}</span></div>
           <table className={`document-items ${hasInvoiceTotals ? "invoice-enabled" : ""}`}>
-            <thead><tr><th>PN</th><th>Descrição</th><th>VT</th><th>Origem</th><th>NCM</th><th>Qtd.</th><th>Netprice unitário (R$)</th>{hasInvoiceTotals && <th>Valor unitário de NF (R$)</th>}</tr></thead>
+            <thead><tr><th>PN</th><th>Descrição</th><th>VT</th><th>Origem</th><th>NCM</th><th>Qtd.</th><th>Netprice unit. (R$)</th>{hasInvoiceTotals && <th>NF unit. (R$)</th>}</tr></thead>
             <tbody>
               {proposal.items.map((item) => (
                 <tr key={item.id}>
