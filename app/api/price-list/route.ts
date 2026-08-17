@@ -40,6 +40,11 @@ function validUploadId(value: unknown) {
   return typeof value === "string" && /^[a-f0-9-]{36}$/i.test(value);
 }
 
+function integerParam(value: string | null, fallback: number) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) ? parsed : fallback;
+}
+
 async function cleanupUpload(bucket: R2Bucket, uploadId: string, totalChunks: number) {
   await Promise.allSettled(Array.from({ length: totalChunks }, (_, part) => bucket.delete(uploadKey(uploadId, part))));
 }
@@ -311,8 +316,8 @@ export async function POST(request: Request) {
     if (uploadAction === "chunk") {
       const params = new URL(request.url).searchParams;
       const uploadId = params.get("uploadId") ?? "";
-      const part = Math.trunc(Number(params.get("part")) || -1);
-      const totalChunks = Math.trunc(Number(params.get("totalChunks")) || 0);
+      const part = integerParam(params.get("part"), -1);
+      const totalChunks = integerParam(params.get("totalChunks"), 0);
       if (!validUploadId(uploadId) || part < 0 || !totalChunks || totalChunks > Math.ceil(MAX_FILE_SIZE / UPLOAD_CHUNK_SIZE) || part >= totalChunks) return errorResponse("Dados de upload inválidos.");
       const bytes = new Uint8Array(await request.arrayBuffer());
       if (!bytes.length || bytes.length > UPLOAD_CHUNK_SIZE) return errorResponse("Parte da planilha inválida.");
