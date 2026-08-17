@@ -1781,6 +1781,7 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
           <header className="document-header">
             <div className="document-title">
               <h1>Proposta comercial</h1>
+              <p>Fornecimento de peças</p>
             </div>
             <div className="document-brand-block">
               <HorschDocumentLogo />
