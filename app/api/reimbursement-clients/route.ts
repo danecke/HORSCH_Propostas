@@ -14,8 +14,12 @@ function canManageClients(role: string) {
   return role === "general_admin" || role === "global_management";
 }
 
-function normalizeCnpj(value: unknown) {
+function normalizeDocument(value: unknown) {
   return String(value ?? "").replace(/\D/g, "");
+}
+
+function isValidDocument(value: string) {
+  return value.length === 11 || value.length === 14;
 }
 
 function normalizeState(value: unknown) {
@@ -24,14 +28,17 @@ function normalizeState(value: unknown) {
 
 function parseClientBody(body: Record<string, unknown>) {
   const legalName = String(body.legalName ?? "").trim();
-  const cnpj = normalizeCnpj(body.cnpj);
+  const cnpj = normalizeDocument(body.cnpj);
   const state = normalizeState(body.state);
   const clientType = String(body.clientType ?? "").trim() || "Não informado";
   const n2 = Boolean(body.n2);
   const n3 = Boolean(body.n3);
   const status = String(body.status ?? "active").trim() === "inactive" ? "inactive" : "active";
-  if (!legalName || cnpj.length !== 14 || !/^[A-Z]{2}$/.test(state)) {
-    return { error: "Informe Razão Social, CNPJ válido com 14 dígitos e UF." };
+  if (!legalName || !isValidDocument(cnpj) || !/^[A-Z]{2}$/.test(state)) {
+    return { error: "Informe Razão Social, CPF/CNPJ válido com 11 ou 14 dígitos e UF." };
+  }
+  if (n2 && n3) {
+    return { error: "Selecione apenas uma classificação de reembolso por cliente: N2 ou N3." };
   }
   return { legalName, cnpj, state, clientType, n2, n3, status };
 }
@@ -56,10 +63,10 @@ export async function POST(request: Request) {
   try {
     const body = await request.json() as Record<string, unknown>;
     const parsed = parseClientBody(body);
-    if ("error" in parsed) return errorResponse(parsed.error);
+    if ("error" in parsed) return errorResponse(parsed.error ?? "Dados de cliente inválidos.");
     const db = await ensureReimbursementStorage();
     const [duplicate] = await db.select().from(reimbursementClients).where(eq(reimbursementClients.cnpj, parsed.cnpj)).limit(1);
-    if (duplicate && duplicate.state === parsed.state) return errorResponse("Já existe um cadastro ativo ou inativo para este CNPJ e UF.", 409);
+    if (duplicate && duplicate.state === parsed.state) return errorResponse("Já existe um cadastro ativo ou inativo para este CPF/CNPJ e UF.", 409);
     const now = new Date().toISOString();
     const [created] = await db.insert(reimbursementClients).values({ ...parsed, createdByEmail: profile.email, createdAt: now, updatedAt: now }).returning();
     if (!created) return errorResponse("Não foi possível salvar o cliente.", 500);
@@ -79,12 +86,12 @@ export async function PATCH(request: Request) {
     const id = Math.trunc(Number(body.id) || 0);
     if (!id) return errorResponse("Informe o cliente.");
     const parsed = parseClientBody(body);
-    if ("error" in parsed) return errorResponse(parsed.error);
+    if ("error" in parsed) return errorResponse(parsed.error ?? "Dados de cliente inválidos.");
     const db = await ensureReimbursementStorage();
     const [before] = await db.select().from(reimbursementClients).where(eq(reimbursementClients.id, id)).limit(1);
     if (!before) return errorResponse("Cliente não encontrado.", 404);
     const [duplicate] = await db.select().from(reimbursementClients).where(eq(reimbursementClients.cnpj, parsed.cnpj)).limit(1);
-    if (duplicate && duplicate.id !== id && duplicate.state === parsed.state) return errorResponse("Já existe outro cadastro para este CNPJ e UF.", 409);
+    if (duplicate && duplicate.id !== id && duplicate.state === parsed.state) return errorResponse("Já existe outro cadastro para este CPF/CNPJ e UF.", 409);
     const [updated] = await db.update(reimbursementClients).set({ ...parsed, updatedAt: new Date().toISOString() }).where(eq(reimbursementClients.id, id)).returning();
     if (!updated) return errorResponse("Não foi possível editar o cliente.", 500);
     await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "reimbursement_client_updated", entity: "reimbursement_client", details: `Cliente ${updated.legalName} atualizado.`, before, after: updated });
