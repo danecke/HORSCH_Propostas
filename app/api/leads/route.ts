@@ -118,10 +118,9 @@ export async function GET() {
     const db = await getDb();
     const allDealers = await db.select().from(dealerships).orderBy(dealerships.name);
     const visibleDealers = allDealers.filter((dealer) => canSeeDealer(profile, dealer));
-    const enabledDealers = [] as typeof allDealers;
-    for (const dealer of visibleDealers) {
-      if (await isModuleEnabled(db, dealer.id, "leads")) enabledDealers.push(dealer);
-    }
+    const enabledDealers = isFactoryRole(profile)
+      ? visibleDealers
+      : (await Promise.all(visibleDealers.map(async (dealer) => ({ dealer, enabled: await isModuleEnabled(db, dealer.id, "leads") })))).filter((item) => item.enabled).map((item) => item.dealer);
     if (!enabledDealers.length && !isFactoryRole(profile)) return forbidden("O módulo Horsch Leads não está habilitado para sua concessionária.");
     const enabledIds = new Set(enabledDealers.map((dealer) => dealer.id));
     const rows = await db.select({ lead: leads, dealership: dealerships }).from(leads).innerJoin(dealerships, eq(leads.dealershipId, dealerships.id)).orderBy(desc(leads.updatedAt), desc(leads.createdAt));

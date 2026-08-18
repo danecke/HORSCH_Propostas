@@ -76,6 +76,9 @@ export async function POST(request: Request) {
     if (passwordError) {
       return Response.json({ error: passwordError }, { status: 400 });
     }
+    if (["dealer_manager", "concession"].includes(role) && dealershipId === null) {
+      return Response.json({ error: "Selecione a concessionária deste usuário." }, { status: 400 });
+    }
     if (!(await canManage(actor, role, dealershipId))) return forbidden();
 
     const db = await getDb();
@@ -132,7 +135,7 @@ export async function PATCH(request: Request) {
     if (email !== MASTER_ADMIN_EMAIL && role === "general_admin") {
       return forbidden("Nenhum outro usuário pode receber a posição ADM Geral.");
     }
-    if (role === "dealer_manager" && dealershipId === null) {
+    if (["dealer_manager", "concession"].includes(role) && dealershipId === null) {
       return Response.json({ error: "Selecione a concessionária deste gestor." }, { status: 400 });
     }
     if (!(await canManage(actor, currentRole, target.dealershipId ?? null))) return forbidden();
