@@ -31,7 +31,7 @@ export type Lead = {
 export type LeadGroup = { label: string; total: number; open: number; won: number; lost: number; pipelineCents: number; negotiatedCents: number; wonCents: number; conversionRate: number; byStage: Array<{ label: string; count: number; valueCents: number; wonCents: number }>; byTemperature: Array<{ label: string; count: number; valueCents: number; wonCents: number }> };
 export type LeadPartInsight = { partNumber: string; stage: LeadStage; stageLabel: string; customers: string[]; leadCount: number; valueCents: number };
 export type LeadCustomerMachineInsight = { customerName: string; machineDomain: string; dealership: string; sellerName: string; stage: LeadStage; partNumbers: string; temperature: LeadTemperature; negotiatedValueCents: number; updatedAt: string };
-export type LeadModuleData = { leads: Lead[]; ownerLeads?: Lead[]; leadDetails: Lead[]; byPartNumberStage: LeadPartInsight[]; customerMachines: LeadCustomerMachineInsight[]; metrics: LeadGroup; byDealership: LeadGroup[]; bySeller: LeadGroup[]; sellers: Array<{ email: string; name: string; dealershipId: number | null }>; canEdit: boolean; metricsOnly: boolean };
+export type LeadModuleData = { leads: Lead[]; ownerLeads?: Lead[]; leadDetails: Lead[]; byPartNumberStage: LeadPartInsight[]; customerMachines: LeadCustomerMachineInsight[]; metrics: LeadGroup; byDealership: LeadGroup[]; bySeller: LeadGroup[]; sellers: Array<{ email: string; name: string; dealershipId: number | null }>; canEdit: boolean; metricsOnly: boolean; moduleEnabled?: boolean };
 type PriceCatalogItem = { partNumber: string; description: string; family: string };
 type MachineModel = { id: number; name: string; active: boolean };
 

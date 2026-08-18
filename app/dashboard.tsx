@@ -311,18 +311,18 @@ export function Dashboard({ user }: { user: AppUser }) {
       const payload = (await response.json()) as DashboardData & { error?: string };
       if (!response.ok) throw new Error(payload.error || "Não foi possível carregar os dados.");
       const currentDealer = payload.dealerships.find((dealer) => dealer.id === payload.me.dealershipId);
-      const moduleEnabled = (moduleKey: ModuleKey) => ["general_admin", "global_management", "factory_manager"].includes(payload.me.role) || Boolean(currentDealer?.modules.find((module) => module.key === moduleKey)?.enabled ?? true);
+      const moduleEnabled = (moduleKey: ModuleKey) => ["general_admin", "global_management", "factory_manager"].includes(payload.me.role) || Boolean(currentDealer?.modules.find((module) => module.key === moduleKey)?.enabled ?? false);
       const quoteResponse = !moduleEnabled("quotes") ? null : await fetch("/api/quotes", { cache: "no-store" });
       const quotePayload = quoteResponse ? ((await quoteResponse.json()) as { quotes?: Quote[]; error?: string }) : { quotes: [] };
-      if (quoteResponse && !quoteResponse.ok) throw new Error(quotePayload.error || "Não foi possível carregar as cotações.");
+      const safeQuotePayload = quoteResponse?.ok ? quotePayload : { quotes: [] };
       const requestResponse = payload.me.role === "concession" || !moduleEnabled("proposals") ? null : await fetch("/api/proposal-requests", { cache: "no-store" });
       const requestPayload = requestResponse ? ((await requestResponse.json()) as { requests?: ProposalRequest[]; error?: string }) : { requests: [] };
-      if (requestResponse && !requestResponse.ok) throw new Error(requestPayload.error || "Não foi possível carregar as solicitações de proposta.");
+      const safeRequestPayload = requestResponse?.ok ? requestPayload : { requests: [] };
       const leadResponse = moduleEnabled("leads") ? await fetch("/api/leads", { cache: "no-store" }) : null;
       const leadPayload = leadResponse ? ((await leadResponse.json()) as LeadModuleData & { error?: string }) : null;
-      if (leadResponse && !leadResponse.ok) throw new Error(leadPayload?.error || "Não foi possível carregar os leads.");
-      setData({ ...payload, proposalRequests: requestPayload.requests ?? [], quotes: quotePayload.quotes ?? [] });
-      setLeadData(leadPayload);
+      const safeLeadPayload = leadResponse?.ok ? leadPayload : null;
+      setData({ ...payload, proposalRequests: safeRequestPayload.requests ?? [], quotes: safeQuotePayload.quotes ?? [] });
+      setLeadData(safeLeadPayload);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Erro ao carregar dados.");
     } finally {
@@ -348,12 +348,12 @@ export function Dashboard({ user }: { user: AppUser }) {
 
   if (loading) return <LoadingState />;
   if (error || !data) return <ErrorState message={error || "Acesso não disponível."} retry={loadData} />;
-  const moduleEnabled = (moduleKey: ModuleKey) => ["general_admin", "global_management", "factory_manager"].includes(data.me.role) || Boolean(data.dealerships.find((dealer) => dealer.id === data.me.dealershipId)?.modules.find((module) => module.key === moduleKey)?.enabled ?? true);
+  const moduleEnabled = (moduleKey: ModuleKey) => ["general_admin", "global_management", "factory_manager"].includes(data.me.role) || Boolean(data.dealerships.find((dealer) => dealer.id === data.me.dealershipId)?.modules.find((module) => module.key === moduleKey)?.enabled ?? false);
   const proposalsEnabled = moduleEnabled("proposals");
   const quotesEnabled = moduleEnabled("quotes");
   const priceListEnabled = moduleEnabled("price_list");
   const databaseEnabled = data.me.permissions.editPriceList && ["general_admin", "global_management"].includes(data.me.role);
-  const leadsEnabled = moduleEnabled("leads");
+  const leadsEnabled = moduleEnabled("leads") && leadData?.moduleEnabled !== false && leadData !== null;
   const reimbursementsEnabled = moduleEnabled("reimbursements");
   const canCreate = data.me.permissions.createProposal && proposalsEnabled;
   const canRequestProposal = data.me.role === "dealer_manager" && proposalsEnabled;

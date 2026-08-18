@@ -121,7 +121,9 @@ export async function GET() {
     const enabledDealers = isFactoryRole(profile)
       ? visibleDealers
       : (await Promise.all(visibleDealers.map(async (dealer) => ({ dealer, enabled: await isModuleEnabled(db, dealer.id, "leads") })))).filter((item) => item.enabled).map((item) => item.dealer);
-    if (!enabledDealers.length && !isFactoryRole(profile)) return forbidden("O módulo Horsch Leads não está habilitado para sua concessionária.");
+    if (!enabledDealers.length && !isFactoryRole(profile)) {
+      return Response.json({ leads: [], leadDetails: [], ownerLeads: [], ...insights([]), metrics: metrics([]), byDealership: [], bySeller: [], sellers: [], canEdit: false, metricsOnly: false, moduleEnabled: false });
+    }
     const enabledIds = new Set(enabledDealers.map((dealer) => dealer.id));
     const rows = await db.select({ lead: leads, dealership: dealerships }).from(leads).innerJoin(dealerships, eq(leads.dealershipId, dealerships.id)).orderBy(desc(leads.updatedAt), desc(leads.createdAt));
     const scoped = rows.filter((row) => enabledIds.has(row.lead.dealershipId));
@@ -149,6 +151,7 @@ export async function GET() {
       sellers,
       canEdit,
       metricsOnly: isFactoryRole(profile),
+      moduleEnabled: true,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Não foi possível carregar os leads.";
