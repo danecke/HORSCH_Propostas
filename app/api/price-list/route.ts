@@ -485,12 +485,13 @@ export async function PATCH(request: Request) {
   if (!profile) return errorResponse("Acesso não autorizado.", 403);
   if (!canManage(profile)) return errorResponse("Somente Gestão Global e ADM Geral podem alterar a lista de preços.", 403);
   try {
-    const payload = (await request.json()) as { id?: number; state?: string; partNumber?: string; description?: string; family?: string; unit?: string; ncm?: string; vt?: string; origin?: string; netPriceCents?: number | null; finalPriceCents?: number | null; effectiveAt?: string; justification?: string };
+    const payload = (await request.json()) as { id?: number; state?: string; applyToAllStates?: boolean; partNumber?: string; description?: string; family?: string; unit?: string; ncm?: string; vt?: string; origin?: string; netPriceCents?: number | null; finalPriceCents?: number | null; effectiveAt?: string; justification?: string };
     const id = Math.trunc(Number(payload.id) || 0);
     const state = String(payload.state ?? "").trim().toUpperCase();
+    const applyToAllStates = payload.applyToAllStates === true;
     const requestedEffectiveAt = String(payload.effectiveAt ?? "").trim();
     const justification = String(payload.justification ?? "").trim().replace(/\s+/g, " ");
-    if (!id || !STATES.includes(state)) return errorResponse("Informe item e UF válidos.");
+    if (!id || (!applyToAllStates && !STATES.includes(state))) return errorResponse("Informe item e UF válidos.");
     if (requestedEffectiveAt && !isValidEffectiveDate(requestedEffectiveAt)) return errorResponse("Informe uma data de vigência válida.");
     if (justification.length < 10 || justification.length > 1000) return errorResponse("Informe uma justificativa entre 10 e 1.000 caracteres.");
     const db = await getDb();
@@ -508,13 +509,23 @@ export async function PATCH(request: Request) {
     }));
     let statePrices: ParsedPriceRow["statePrices"] = {};
     try { statePrices = JSON.parse(item.statePricesJson) as ParsedPriceRow["statePrices"]; } catch { statePrices = {}; }
-    const current = statePrices[state] ?? {};
+    let availableStates: string[] = [];
+    try { availableStates = JSON.parse(record.statesJson) as string[]; } catch { availableStates = []; }
+    const targetStates = applyToAllStates
+      ? [...new Set(availableStates.filter((itemState) => STATES.includes(itemState)))]
+      : [state];
+    if (!targetStates.length) return errorResponse("Nenhuma UF disponível para aplicar o ajuste.");
     const finalPriceCents = payload.finalPriceCents ?? null;
-    const next = { ...current, final: finalPriceCents, n2: derivedLevelPrice(finalPriceCents, 0.9), n3: derivedLevelPrice(finalPriceCents, 0.8), netPriceCents: payload.netPriceCents ?? current.netPriceCents };
-    statePrices[state] = next;
+    const beforeStatePrices = Object.fromEntries(targetStates.map((targetState) => [targetState, statePrices[targetState] ?? {}]));
+    for (const targetState of targetStates) {
+      const current = statePrices[targetState] ?? {};
+      statePrices[targetState] = { ...current, final: finalPriceCents, n2: derivedLevelPrice(finalPriceCents, 0.9), n3: derivedLevelPrice(finalPriceCents, 0.8), netPriceCents: payload.netPriceCents ?? current.netPriceCents };
+    }
+    const afterStatePrices = Object.fromEntries(targetStates.map((targetState) => [targetState, statePrices[targetState]]));
     const nextNet = payload.netPriceCents === undefined || payload.netPriceCents === null ? item.netPriceCents : Math.max(0, Math.trunc(Number(payload.netPriceCents) || 0));
     await db.update(priceListItems).set({ ...textUpdates, netPriceCents: nextNet, statePricesJson: JSON.stringify(statePrices), updatedAt: new Date().toISOString() }).where(eq(priceListItems.id, id));
-    await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "price_list_item_updated", entity: "price_list", details: `Item ${item.partNumber} ajustado para ${state}. Justificativa: ${justification}`, before: { partNumber: item.partNumber, description: item.description, family: item.family, unit: item.unit, ncm: item.ncm, vt: item.vt, origin: item.origin, state, statePrices: current }, after: { partNumber: textUpdates.partNumber ?? item.partNumber, description: textUpdates.description ?? item.description, family: textUpdates.family ?? item.family, unit: textUpdates.unit ?? item.unit, ncm: textUpdates.ncm ?? item.ncm, vt: textUpdates.vt ?? item.vt, origin: textUpdates.origin ?? item.origin, state, statePrices: next, justification, effectiveAt: requestedEffectiveAt || new Date().toISOString().slice(0, 10) } });
+    const targetLabel = applyToAllStates ? `todos os estados (${targetStates.join(", ")})` : `a UF ${state}`;
+    await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "price_list_item_updated", entity: "price_list", details: `Item ${item.partNumber} ajustado para ${targetLabel}. Justificativa: ${justification}`, before: { partNumber: item.partNumber, description: item.description, family: item.family, unit: item.unit, ncm: item.ncm, vt: item.vt, origin: item.origin, state: applyToAllStates ? "TODOS" : state, states: targetStates, statePrices: beforeStatePrices }, after: { partNumber: textUpdates.partNumber ?? item.partNumber, description: textUpdates.description ?? item.description, family: textUpdates.family ?? item.family, unit: textUpdates.unit ?? item.unit, ncm: textUpdates.ncm ?? item.ncm, vt: textUpdates.vt ?? item.vt, origin: textUpdates.origin ?? item.origin, state: applyToAllStates ? "TODOS" : state, states: targetStates, statePrices: afterStatePrices, justification, effectiveAt: requestedEffectiveAt || new Date().toISOString().slice(0, 10) } });
     const notification = await automaticPriceListNotification(db, profile, item.partNumber, 1, requestedEffectiveAt || new Date().toISOString().slice(0, 10));
     return Response.json({ ok: true, notification });
   } catch (error) {

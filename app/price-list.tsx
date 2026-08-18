@@ -134,6 +134,7 @@ export function PriceListView({ me, mode = "consult" }: { me: PriceListAccess; m
   const adminMode = mode === "admin";
   const canManage = adminMode && me.permissions.editPriceList && ["general_admin", "global_management"].includes(me.role);
   const [tab, setTab] = useState<"view" | "admin">(canManage ? "view" : "view");
+  const [adminSection, setAdminSection] = useState<"maintenance" | "history">("maintenance");
   const [state, setState] = useState("");
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
@@ -215,13 +216,13 @@ export function PriceListView({ me, mode = "consult" }: { me: PriceListAccess; m
     }
   }
 
-  async function saveRow(row: PriceRow, draft: { partNumber: string; description: string; family: string; unit: string; ncm: string; vt: string; origin: string; net: string; final: string; effectiveAt: string; justification: string }) {
-    const response = await fetch("/api/price-list", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: row.id, state: row.state, partNumber: draft.partNumber, description: draft.description, family: draft.family, unit: draft.unit, ncm: draft.ncm, vt: draft.vt, origin: draft.origin, netPriceCents: parseMoney(draft.net), finalPriceCents: parseMoney(draft.final), effectiveAt: draft.effectiveAt, justification: draft.justification }) });
+  async function saveRow(row: PriceRow, draft: { partNumber: string; description: string; family: string; unit: string; ncm: string; vt: string; origin: string; net: string; final: string; effectiveAt: string; justification: string; applyToAllStates: boolean }) {
+    const response = await fetch("/api/price-list", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: row.id, state: row.state, applyToAllStates: draft.applyToAllStates, partNumber: draft.partNumber, description: draft.description, family: draft.family, unit: draft.unit, ncm: draft.ncm, vt: draft.vt, origin: draft.origin, netPriceCents: parseMoney(draft.net), finalPriceCents: parseMoney(draft.final), effectiveAt: draft.effectiveAt, justification: draft.justification }) });
     const payload = (await response.json()) as { error?: string; notification?: { recipientCount: number } | null };
     if (!response.ok) throw new Error(payload.error || "Não foi possível salvar o ajuste.");
     setEditing(null);
     setNotificationRefreshKey((current) => current + 1);
-    setNotice(`PN ${row.partNumber} atualizado para ${row.state}${payload.notification ? ` · aviso enviado para ${payload.notification.recipientCount} usuários` : ""}.`);
+    setNotice(`PN ${row.partNumber} atualizado${draft.applyToAllStates ? " para todos os estados" : ` para ${row.state}`}${payload.notification ? ` · aviso enviado para ${payload.notification.recipientCount} usuários` : ""}.`);
     await load();
   }
 
@@ -256,9 +257,10 @@ export function PriceListView({ me, mode = "consult" }: { me: PriceListAccess; m
     <PriceListNotificationCenter canManage={canManage} refreshKey={notificationRefreshKey} onNotice={setNotice} />
     {!adminMode && canManage && <div className="price-list-tabs" role="tablist" aria-label="Lista de preços"><button type="button" className={tab === "view" ? "active" : ""} onClick={() => setTab("view")}>Consultar lista</button><button type="button" className={tab === "admin" ? "active" : ""} onClick={() => setTab("admin")}>Administração</button></div>}
     {notice && <div className="price-list-notice" role="status">{notice}</div>}
-    {(adminMode || tab === "admin") && canManage && <><section className="panel price-list-publish-settings"><div><span className="eyebrow">Vigência da atualização</span><h2>Defina quando a nova lista passa a valer</h2><p>Esta data será registrada no aviso automático enviado após a publicação do Excel.</p></div><label className="field"><span>Vigência a partir de</span><input type="date" value={publishEffectiveAt} onChange={(event) => setPublishEffectiveAt(event.target.value)} /></label></section><AdminPanel file={file} setFile={setFile} uploading={uploading} uploadProgress={uploadProgress} onSubmit={submitUpload} currentImport={data?.import ?? null} /></>}
-    {canManage && <section className="panel price-list-maintenance-note"><div><span className="eyebrow">Ajuste pontual</span><h2>Edite um PN sem importar uma nova planilha</h2><p>Use o lápis na linha desejada para alterar preços e dados cadastrais. A justificativa é obrigatória e cada mudança ficará registrada no histórico abaixo.</p></div><strong>Histórico por PN</strong></section>}
-    <>
+    {canManage && <div className="price-list-admin-tabs" role="tablist" aria-label="Administração da lista de preços"><button type="button" role="tab" aria-selected={adminSection === "maintenance"} className={adminSection === "maintenance" ? "active" : ""} onClick={() => setAdminSection("maintenance")}>Lista e manutenção</button><button type="button" role="tab" aria-selected={adminSection === "history"} className={adminSection === "history" ? "active" : ""} onClick={() => setAdminSection("history")}>Histórico por PN</button></div>}
+    {(!canManage || adminSection === "maintenance") && <>
+      {(adminMode || tab === "admin") && canManage && <><section className="panel price-list-publish-settings"><div><span className="eyebrow">Vigência da atualização</span><h2>Defina quando a nova lista passa a valer</h2><p>Esta data será registrada no aviso automático enviado após a publicação do Excel.</p></div><label className="field"><span>Vigência a partir de</span><input type="date" value={publishEffectiveAt} onChange={(event) => setPublishEffectiveAt(event.target.value)} /></label></section><AdminPanel file={file} setFile={setFile} uploading={uploading} uploadProgress={uploadProgress} onSubmit={submitUpload} currentImport={data?.import ?? null} /></>}
+      {canManage && <section className="panel price-list-maintenance-note"><div><span className="eyebrow">Ajuste pontual</span><h2>Edite um PN sem importar uma nova planilha</h2><p>Use o lápis na linha desejada para alterar preços e dados cadastrais. A justificativa é obrigatória e cada mudança ficará registrada no histórico.</p></div><strong>Aplicação individual ou multiestado</strong></section>}
       <div className="price-list-state-tabs" role="tablist" aria-label="Estados disponíveis">{(data?.states ?? []).map((item) => <button type="button" role="tab" aria-selected={selectedState === item} key={item} className={selectedState === item ? "active" : ""} onClick={() => { setState(item); setPage(1); }}>{item}</button>)}</div>
       <div className="price-list-search-row"><label className="price-list-search-box"><span aria-hidden="true">⌕</span><input aria-label="Pesquisar por PN ou descrição" value={searchInput} onChange={(event) => setSearchInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { setSearch(searchInput); setPage(1); } }} placeholder="Pesquisar por PN (ex: 60027753) ou Descrição (ex: Tubo)..." /></label><button type="button" className="price-list-search-button" onClick={() => { setSearch(searchInput); setPage(1); }}>Buscar</button><button type="button" className="price-list-export-button" onClick={exportList} disabled={!data?.import || !selectedState}>⇩&nbsp; Exportar XLSX</button></div>
       <section className="panel price-list-panel">
@@ -267,8 +269,8 @@ export function PriceListView({ me, mode = "consult" }: { me: PriceListAccess; m
         {loading ? <div className="empty-mini">Carregando preços vigentes...</div> : !data?.import ? <EmptyPriceState text={canManage ? "Importe o primeiro arquivo na aba Administração." : "A Fábrica ainda não publicou uma lista de preços vigente."} /> : !data.rows.length ? <EmptyPriceState text="Nenhum item corresponde ao filtro informado." /> : <div className="price-list-table-wrap"><table className="price-list-table"><thead><tr><th>PN (PART NUMBER)</th><th>Descrição</th><th>Família</th><th>Unidade</th><th>NCM</th><th>VT</th><th>Origem</th><th>Netprice</th><th>Cliente final</th><th>Cliente nível 2</th><th>Cliente nível 3</th>{canManage && <th aria-label="Ações" />}</tr></thead><tbody>{data.rows.map((row) => <tr key={row.id}><td><strong>{row.partNumber}</strong></td><td><span>{row.description || "—"}</span></td><td>{row.family || "—"}</td><td>{row.unit || "—"}</td><td>{row.ncm || "—"}</td><td>{row.vt || "—"}</td><td>{row.origin || "—"}</td><td className="price-cell">{money(row.netPriceCents)}</td><td className="price-cell">{money(row.finalPriceCents)}</td><td className="price-cell">{money(row.n2PriceCents)}</td><td className="price-cell">{money(row.n3PriceCents)}</td>{canManage && <td><div className="table-row-actions"><button type="button" className="table-action-button" aria-label={`Editar ${row.partNumber}`} onClick={() => setEditing(row)}>✎</button><button type="button" className="table-action-button danger" aria-label={`Excluir ${row.partNumber}`} onClick={() => void deleteRow(row)}>×</button></div></td>}</tr>)}</tbody></table></div>}
         {data?.total ? <footer className="price-list-pagination"><span>{((page - 1) * (data.pageSize ?? 50) + 1).toLocaleString("pt-BR")}–{Math.min(page * (data.pageSize ?? 50), data.total).toLocaleString("pt-BR")} de {data.total.toLocaleString("pt-BR")} itens</span><div><button type="button" className="outline-button compact" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>Anterior</button><strong>Página {page} de {totalPages}</strong><button type="button" className="outline-button compact" disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>Próxima</button></div></footer> : null}
       </section>
-    </>
-    {canManage && <PriceListHistory refreshKey={notificationRefreshKey} />}
+    </>}
+    {canManage && adminSection === "history" && <PriceListHistory refreshKey={notificationRefreshKey} />}
     {editing && <PriceEditor row={editing} onClose={() => setEditing(null)} onSave={saveRow} />}
   </div>;
 }
@@ -424,8 +426,8 @@ function EmptyPriceState({ text }: { text: string }) {
   return <div className="price-list-empty"><span>₿</span><strong>Lista de preços indisponível</strong><p>{text}</p></div>;
 }
 
-function PriceEditor({ row, onClose, onSave }: { row: PriceRow; onClose: () => void; onSave: (row: PriceRow, draft: { partNumber: string; description: string; family: string; unit: string; ncm: string; vt: string; origin: string; net: string; final: string; effectiveAt: string; justification: string }) => Promise<void> }) {
-  const [draft, setDraft] = useState({ partNumber: row.partNumber, description: row.description, family: row.family, unit: row.unit, ncm: row.ncm, vt: row.vt, origin: row.origin, net: inputMoney(row.netPriceCents), final: inputMoney(row.finalPriceCents), effectiveAt: localDateValue(), justification: "" });
+function PriceEditor({ row, onClose, onSave }: { row: PriceRow; onClose: () => void; onSave: (row: PriceRow, draft: { partNumber: string; description: string; family: string; unit: string; ncm: string; vt: string; origin: string; net: string; final: string; effectiveAt: string; justification: string; applyToAllStates: boolean }) => Promise<void> }) {
+  const [draft, setDraft] = useState({ partNumber: row.partNumber, description: row.description, family: row.family, unit: row.unit, ncm: row.ncm, vt: row.vt, origin: row.origin, net: inputMoney(row.netPriceCents), final: inputMoney(row.finalPriceCents), effectiveAt: localDateValue(), justification: "", applyToAllStates: false });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   async function submit(event: FormEvent) {
@@ -437,7 +439,7 @@ function PriceEditor({ row, onClose, onSave }: { row: PriceRow; onClose: () => v
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true">
       <form className="price-editor-modal" onSubmit={(event) => void submit(event)}>
-        <header className="modal-header"><div><span className="eyebrow">Ajuste administrativo · {row.state}</span><h2>{row.partNumber}</h2><p>{row.description}</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Fechar">×</button></header>
+        <header className="modal-header"><div><span className="eyebrow">Ajuste administrativo · {draft.applyToAllStates ? "todos os estados" : row.state}</span><h2>{row.partNumber}</h2><p>{row.description}</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Fechar">×</button></header>
         <div className="form-scroll">
           <div className="price-editor-grid">
             <label className="field"><span>PN</span><input value={draft.partNumber} onChange={(event) => setDraft({ ...draft, partNumber: event.target.value })} required /></label>
@@ -452,6 +454,7 @@ function PriceEditor({ row, onClose, onSave }: { row: PriceRow; onClose: () => v
             <label className="field"><span>Cliente nível 2 · 90%</span><input inputMode="decimal" value={derivedInputMoney(draft.final, 0.9)} readOnly aria-label="Cliente nível 2 calculado automaticamente" /></label>
             <label className="field"><span>Cliente nível 3 · 80%</span><input inputMode="decimal" value={derivedInputMoney(draft.final, 0.8)} readOnly aria-label="Cliente nível 3 calculado automaticamente" /></label>
             <label className="field"><span>Vigência do ajuste</span><input type="date" value={draft.effectiveAt} onChange={(event) => setDraft({ ...draft, effectiveAt: event.target.value })} required /></label>
+            <label className="price-editor-scope price-editor-wide"><input type="checkbox" checked={draft.applyToAllStates} onChange={(event) => setDraft({ ...draft, applyToAllStates: event.target.checked })} /><span><strong>Aplicar este ajuste a todos os estados</strong><small>Use o mesmo clique para replicar preços e dados do PN em todas as UFs da lista vigente.</small></span></label>
             <label className="field price-editor-wide"><span>Justificativa da alteração</span><textarea value={draft.justification} onChange={(event) => setDraft({ ...draft, justification: event.target.value })} placeholder="Explique por que o PN ou o preço precisa ser alterado." minLength={10} maxLength={1000} rows={4} required /></label>
           </div>
           {error && <p className="form-error">{error}</p>}
@@ -466,6 +469,7 @@ function PriceListHistory({ refreshKey }: { refreshKey: number }) {
   const [entries, setEntries] = useState<PriceHistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [pnFilter, setPnFilter] = useState("");
   const load = useCallback(async () => {
     setLoading(true); setError("");
     try {
@@ -478,25 +482,35 @@ function PriceListHistory({ refreshKey }: { refreshKey: number }) {
     } finally { setLoading(false); }
   }, [refreshKey]);
   useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
+  const normalizedFilter = pnFilter.trim().toLocaleLowerCase("pt-BR");
+  const filteredEntries = entries.filter((entry) => {
+    if (!normalizedFilter) return true;
+    const before = parseHistoryJson(entry.beforeJson);
+    const after = parseHistoryJson(entry.afterJson);
+    return String(after.partNumber ?? before.partNumber ?? "").toLocaleLowerCase("pt-BR").includes(normalizedFilter);
+  });
 
-  return <section className="panel price-history-panel"><header className="panel-header"><div><span className="eyebrow">Governança dos preços</span><h2>Histórico de ajustes pontuais</h2><p>Registro dos PNs alterados, com justificativa, usuário, vigência e valores antes e depois.</p></div><strong>{entries.length} registros</strong></header>{loading ? <div className="empty-mini">Carregando histórico...</div> : error ? <div className="price-list-error">{error}</div> : !entries.length ? <div className="empty-mini">Nenhum ajuste pontual registrado.</div> : <div className="price-history-list">{entries.map((entry) => <PriceHistoryRow entry={entry} key={entry.id} />)}</div>}</section>;
+  return <section className="panel price-history-panel"><header className="panel-header"><div><span className="eyebrow">Governança dos preços</span><h2>Histórico de ajustes pontuais</h2><p>Filtre por PN para consultar todas as mudanças, justificativas, vigências e valores antes e depois.</p></div><strong>{filteredEntries.length}{entries.length !== filteredEntries.length ? ` de ${entries.length}` : ""} registros</strong></header>{!loading && !error && entries.length > 0 && <form className="price-history-filter" onSubmit={(event) => event.preventDefault()}><label><span>Filtrar por PN</span><input value={pnFilter} onChange={(event) => setPnFilter(event.target.value)} placeholder="Ex.: 60027753" /></label><button type="submit" className="price-list-search-button">Filtrar</button>{pnFilter && <button type="button" className="outline-button compact" onClick={() => setPnFilter("")}>Limpar</button>}</form>}{loading ? <div className="empty-mini">Carregando histórico...</div> : error ? <div className="price-list-error">{error}</div> : !entries.length ? <div className="empty-mini">Nenhum ajuste pontual registrado.</div> : !filteredEntries.length ? <div className="empty-mini">Nenhum histórico encontrado para este PN.</div> : <div className="price-history-list">{filteredEntries.map((entry) => <PriceHistoryRow entry={entry} key={entry.id} />)}</div>}</section>;
 }
 
 function PriceHistoryRow({ entry }: { entry: PriceHistoryEntry }) {
   const before = parseHistoryJson(entry.beforeJson);
   const after = parseHistoryJson(entry.afterJson);
   const state = String(after.state ?? before.state ?? "");
-  const beforePrices = historyStatePrices(before, state);
-  const afterPrices = historyStatePrices(after, state);
+  const states = Array.isArray(after.states) ? after.states.map((item) => String(item)).filter(Boolean) : state && state !== "TODOS" ? [state] : [];
+  const comparisonState = states[0] ?? state;
+  const beforePrices = historyStatePrices(before, comparisonState);
+  const afterPrices = historyStatePrices(after, comparisonState);
   const justification = String(after.justification ?? entry.details.split("Justificativa:").slice(1).join("Justificativa:").trim() ?? "");
   const pn = String(after.partNumber ?? before.partNumber ?? "—");
   const action = entry.action === "price_list_item_deleted" ? "PN excluído" : "PN ajustado";
+  const scopeLabel = states.length > 1 || state === "TODOS" ? `Todos os estados${states.length ? ` (${states.length})` : ""}` : state ? `UF ${state}` : "Lista vigente";
   const values = [
     ["Netprice", money(historyNumber(beforePrices.netPriceCents)), money(historyNumber(afterPrices.netPriceCents))],
     ["Cliente final", money(historyNumber(beforePrices.final)), money(historyNumber(afterPrices.final))],
   ].filter((item) => item[1] !== item[2]);
   const textChanges = ["description", "family", "unit", "ncm", "vt", "origin"].filter((field) => String(before[field] ?? "") !== String(after[field] ?? ""));
-  return <article className="price-history-row"><div className="price-history-row-head"><div><strong>PN {pn}</strong><span>{state ? `UF ${state}` : "Lista vigente"} · {action}</span></div><div><strong>{formatDate(entry.createdAt)}</strong><small>{entry.actorName || entry.actorEmail}</small></div></div><div className="price-history-row-body"><div className="price-history-values">{values.map(([label, oldValue, newValue]) => <div key={label}><span>{label}</span><small>{oldValue}</small><b>→</b><strong>{newValue}</strong></div>)}{textChanges.length > 0 && <div><span>Dados alterados</span><strong>{textChanges.join(", ")}</strong></div>}{!values.length && !textChanges.length && <div><span>Registro</span><strong>Exclusão do item</strong></div>}</div><p><strong>Justificativa:</strong> {justification || entry.details}</p><small>Vigência: {String(after.effectiveAt ?? "não informada")}</small></div></article>;
+  return <article className="price-history-row"><div className="price-history-row-head"><div><strong>PN {pn}</strong><span>{scopeLabel} · {action}</span></div><div><strong>{formatDate(entry.createdAt)}</strong><small>{entry.actorName || entry.actorEmail}</small></div></div><div className="price-history-row-body"><div className="price-history-values">{values.map(([label, oldValue, newValue]) => <div key={label}><span>{label}</span><small>{oldValue}</small><b>→</b><strong>{newValue}</strong></div>)}{textChanges.length > 0 && <div><span>Dados alterados</span><strong>{textChanges.join(", ")}</strong></div>}{!values.length && !textChanges.length && <div><span>Registro</span><strong>Exclusão do item</strong></div>}</div><p><strong>Justificativa:</strong> {justification || entry.details}</p><small>Vigência: {String(after.effectiveAt ?? "não informada")}</small></div></article>;
 }
 
 function parseHistoryJson(value: string): Record<string, unknown> {

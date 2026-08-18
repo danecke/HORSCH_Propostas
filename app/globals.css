@@ -1024,9 +1024,16 @@ button { cursor: pointer; }
 .price-list-maintenance-note h2 { margin: 4px 0; font-size: 15px; }
 .price-list-maintenance-note p { max-width: 720px; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
 .price-list-maintenance-note > strong { padding: 8px 10px; color: var(--red); background: #ffe7e7; font-size: 10px; white-space: nowrap; }
+.price-list-admin-tabs { display: flex; gap: 4px; margin: 18px 0 0; padding: 5px; border: 1px solid var(--line); background: #f4f6f7; }
+.price-list-admin-tabs button { flex: 1; border: 0; padding: 11px 14px; color: var(--muted); background: transparent; font: inherit; font-size: 11px; font-weight: 800; cursor: pointer; }
+.price-list-admin-tabs button.active { color: white; background: var(--navy); box-shadow: 0 3px 8px rgb(16 45 78 / 15%); }
 .price-history-panel { margin-top: 18px; overflow: hidden; }
 .price-history-panel > .panel-header { padding: 22px; align-items: end; }
 .price-history-panel > .panel-header p { margin: 6px 0 0; color: var(--muted); font-size: 11px; }
+.price-history-filter { display: flex; align-items: end; gap: 9px; padding: 0 22px 18px; }
+.price-history-filter label { display: grid; gap: 5px; width: min(360px, 100%); }
+.price-history-filter label > span { color: var(--muted); font-size: 10px; font-weight: 800; text-transform: uppercase; }
+.price-history-filter input { width: 100%; padding: 10px 12px; border: 1px solid var(--line); color: var(--ink); background: white; font: inherit; font-size: 12px; }
 .price-history-list { border-top: 1px solid var(--line); }
 .price-history-row { padding: 17px 22px; border-bottom: 1px solid var(--line); }
 .price-history-row:last-child { border-bottom: 0; }
@@ -1125,6 +1132,11 @@ button { cursor: pointer; }
 .admin-permission-note { margin-top: 16px; padding: 11px 12px; display: grid; gap: 4px; border: 1px solid rgb(255 255 255 / 15%); background: rgb(255 255 255 / 6%); }.admin-permission-note strong { color: #f2c8ce; font-size: 9px; text-transform: uppercase; }.admin-permission-note span { color: #d2d9de; font-size: 9px; }
 .price-editor-modal { width: min(620px, 100%); max-height: calc(100vh - 48px); display: flex; flex-direction: column; overflow: hidden; background: white; box-shadow: 0 28px 90px rgb(0 0 0 / 30%); }
 .price-editor-grid { padding: 0 22px 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.price-editor-scope { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid #e5c7c7; background: #fff8f8; cursor: pointer; }
+.price-editor-scope input { margin-top: 2px; accent-color: var(--red); }
+.price-editor-scope span { display: grid; gap: 4px; }
+.price-editor-scope strong { color: var(--ink); font-size: 11px; }
+.price-editor-scope small { color: var(--muted); font-size: 10px; line-height: 1.4; }
 .price-list-notification-center { margin-bottom: 16px; overflow: hidden; }
 .price-list-notification-header { padding: 17px 22px; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .price-list-notification-title { min-width: 0; display: flex; align-items: flex-start; gap: 12px; }
