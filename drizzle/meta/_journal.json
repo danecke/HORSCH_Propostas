@@ -169,6 +169,13 @@
       "when": 1787073834158,
       "tag": "0023_common_katie_power",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1787078753548,
+      "tag": "0024_real_havok",
+      "breakpoints": true
     }
   ]
 }

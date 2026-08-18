@@ -194,6 +194,7 @@ export const auditLogs = sqliteTable(
 export const quoteCatalog = sqliteTable("quote_catalog", {
   partNumber: text("part_number").primaryKey(),
   description: text("description").notNull().default(""),
+  ncm: text("ncm").notNull().default(""),
   vt: text("vt").notNull().default(""),
   origin: text("origin").notNull().default(""),
   netPriceCents: integer("net_price_cents").notNull().default(0),
@@ -215,6 +216,7 @@ export const quoteRequests = sqliteTable("quote_requests", {
   actionOwnerRole: text("action_owner_role").notNull().default("global_management"),
   actionOwnerEmail: text("action_owner_email").notNull().default(""),
   description: text("description").notNull().default(""),
+  ncm: text("ncm").notNull().default(""),
   vt: text("vt").notNull().default(""),
   origin: text("origin").notNull().default(""),
   netPriceCents: integer("net_price_cents"),
@@ -225,6 +227,7 @@ export const quoteRequests = sqliteTable("quote_requests", {
   decidedAt: text("decided_at"),
   decidedByEmail: text("decided_by_email").notNull().default(""),
   factoryActionAt: text("factory_action_at"),
+  horschOrderNumber: text("horsch_order_number").notNull().default(""),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [
@@ -342,6 +345,7 @@ export const leads = sqliteTable("leads", {
   invoiceValueCents: integer("invoice_value_cents").notNull().default(0),
   sellerName: text("seller_name").notNull().default(""),
   sellerEmail: text("seller_email").notNull().default(""),
+  lostReason: text("lost_reason").notNull().default(""),
   closedAt: text("closed_at"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),

@@ -39,7 +39,7 @@ function normalizeTemperature(value: unknown): Temperature {
   return TEMPERATURES.includes(String(value) as Temperature) ? String(value) as Temperature : "warm";
 }
 
-const STAGE_LABELS: Record<Stage, string> = { new: "Novo", contacted: "Contato", qualified: "Qualificado", proposal: "Proposta", negotiation: "Negociação", won: "Fechado", lost: "Perdido" };
+const STAGE_LABELS: Record<Stage, string> = { new: "Novo", contacted: "Contato", qualified: "Qualificado", proposal: "Proposta", negotiation: "Negociação", won: "Lead convertido", lost: "Perdido" };
 
 function extractPartNumbers(value: string) {
   return [...new Set((value.match(/\b[A-Z0-9][A-Z0-9._\/-]{3,}\b/gi) ?? []).filter((token) => /\d/.test(token)).map((token) => token.trim().toUpperCase()))];
@@ -77,7 +77,7 @@ function metrics(rows: Array<{ lead: typeof leads.$inferSelect; dealership: type
     negotiatedCents: sum(values),
     wonCents: sum(won),
     conversionRate: closed ? Math.round((won.length / closed) * 100) : 0,
-    byStage: group("stage", (value) => ({ new: "Novo", contacted: "Contato", qualified: "Qualificado", proposal: "Proposta", negotiation: "Negociação", won: "Fechado", lost: "Perdido" } as Record<string, string>)[value] || value),
+    byStage: group("stage", (value) => STAGE_LABELS[value as Stage] || value),
     byTemperature: group("temperature", (value) => ({ cold: "Frio", warm: "Morno", hot: "Quente" } as Record<string, string>)[value] || value),
   };
 }
@@ -137,9 +137,12 @@ export async function GET() {
     const sellers = allUsers.filter((user) => user.active && ["dealer_manager", "concession"].includes(normalizeUserRole(user.email, user.role) || "") && enabledIds.has(user.dealershipId || -1)).map((user) => ({ email: user.email, name: user.name || user.email, dealershipId: user.dealershipId }));
     const canEdit = ["dealer_manager", "concession"].includes(profile.role);
     const serialized = serialize(scoped);
+    const ownerEmail = profile.email.trim().toLowerCase();
+    const ownerRows = scoped.filter(({ lead }) => [lead.sellerEmail, lead.createdByEmail].some((email) => email.trim().toLowerCase() === ownerEmail));
     return Response.json({
       leads: canEdit ? serialized : [],
       leadDetails: serialized,
+      ownerLeads: canEdit ? serialize(ownerRows) : [],
       ...insights(scoped),
       metrics: metrics(scoped),
       byDealership,
@@ -160,7 +163,7 @@ function payloadValues(payload: Record<string, unknown>, fallback?: typeof leads
   const customerName = String(payload.customerName ?? fallback?.customerName ?? "").trim();
   const sellerName = String(payload.sellerName ?? fallback?.sellerName ?? "").trim();
   const invoiceNumber = String(payload.invoiceNumber ?? fallback?.invoiceNumber ?? "").trim();
-  return { customerName, phone: String(payload.phone ?? fallback?.phone ?? "").trim(), email: String(payload.email ?? fallback?.email ?? "").trim(), machineDomain: String(payload.machineDomain ?? fallback?.machineDomain ?? "").trim(), partNumbers: String(payload.partNumbers ?? fallback?.partNumbers ?? "").trim(), partsOfInterest: String(payload.partsOfInterest ?? fallback?.partsOfInterest ?? "").trim(), temperature, stage, negotiatedValueCents: normalizeCents(payload.negotiatedValueCents ?? fallback?.negotiatedValueCents), invoiceNumber, invoiceValueCents: normalizeCents(payload.invoiceValueCents ?? fallback?.invoiceValueCents), sellerName, sellerEmail: String(payload.sellerEmail ?? fallback?.sellerEmail ?? "").trim() };
+  return { customerName, phone: String(payload.phone ?? fallback?.phone ?? "").trim(), email: String(payload.email ?? fallback?.email ?? "").trim(), machineDomain: String(payload.machineDomain ?? fallback?.machineDomain ?? "").trim(), partNumbers: String(payload.partNumbers ?? fallback?.partNumbers ?? "").trim(), partsOfInterest: String(payload.partsOfInterest ?? fallback?.partsOfInterest ?? "").trim(), temperature, stage, negotiatedValueCents: normalizeCents(payload.negotiatedValueCents ?? fallback?.negotiatedValueCents), invoiceNumber, invoiceValueCents: normalizeCents(payload.invoiceValueCents ?? fallback?.invoiceValueCents), sellerName, sellerEmail: String(payload.sellerEmail ?? fallback?.sellerEmail ?? "").trim(), lostReason: String(payload.lostReason ?? fallback?.lostReason ?? "").trim() };
 }
 
 function validateLead(values: ReturnType<typeof payloadValues>) {
@@ -171,6 +174,7 @@ function validateLead(values: ReturnType<typeof payloadValues>) {
   if (values.stage === "won" && !values.invoiceNumber) return "Informe a NF para marcar o lead como fechado.";
   if (values.stage === "won" && !values.invoiceValueCents) return "Informe o valor da NF para marcar o lead como fechado.";
   if (values.stage === "won" && values.invoiceValueCents !== values.negotiatedValueCents) return "O valor da NF deve ser exatamente igual ao valor negociado. O lead não foi fechado.";
+  if (values.stage === "lost" && !values.lostReason) return "Informe o motivo da negativa para encerrar o lead.";
   return "";
 }
 
@@ -188,8 +192,8 @@ export async function POST(request: Request) {
     if (!dealer || !(await isModuleEnabled(db, dealer.id, "leads"))) return forbidden("O módulo Horsch Leads não está habilitado para sua concessionária.");
     const now = new Date().toISOString();
     const id = "LEAD-" + Date.now().toString(36).toUpperCase();
-    await db.insert(leads).values({ id, dealershipId: dealer.id, createdByEmail: profile.email, createdByName: profile.name, ...values, sellerEmail: values.sellerEmail || profile.email, closedAt: values.stage === "won" ? now : null, createdAt: now, updatedAt: now });
-    await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "lead_created", entity: "lead", details: `Lead ${id} cadastrado para ${dealer.name}.`, after: { id, dealershipId: dealer.id, stage: values.stage, temperature: values.temperature } });
+    await db.insert(leads).values({ id, dealershipId: dealer.id, createdByEmail: profile.email, createdByName: profile.name, ...values, sellerEmail: values.sellerEmail || profile.email, closedAt: ["won", "lost"].includes(values.stage) ? now : null, createdAt: now, updatedAt: now });
+    await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "lead_created", entity: "lead", details: `Lead ${id} cadastrado para ${dealer.name}.`, after: { id, dealershipId: dealer.id, stage: values.stage, temperature: values.temperature, lostReason: values.lostReason } });
     return Response.json({ ok: true, id });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Não foi possível cadastrar o lead." }, { status: 500 });
@@ -211,8 +215,8 @@ export async function PATCH(request: Request) {
     const error = validateLead(values);
     if (error) return Response.json({ error }, { status: 400 });
     const now = new Date().toISOString();
-    await db.update(leads).set({ ...values, closedAt: values.stage === "won" ? (row.lead.closedAt || now) : null, updatedAt: now }).where(eq(leads.id, id));
-    await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "lead_updated", entity: "lead", details: `Lead ${id} atualizado.`, before: { stage: row.lead.stage, temperature: row.lead.temperature }, after: { stage: values.stage, temperature: values.temperature, invoiceNumber: values.invoiceNumber, invoiceValueCents: values.invoiceValueCents } });
+    await db.update(leads).set({ ...values, closedAt: ["won", "lost"].includes(values.stage) ? (row.lead.closedAt || now) : null, updatedAt: now }).where(eq(leads.id, id));
+    await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "lead_updated", entity: "lead", details: `Lead ${id} atualizado.`, before: { stage: row.lead.stage, temperature: row.lead.temperature, lostReason: row.lead.lostReason }, after: { stage: values.stage, temperature: values.temperature, invoiceNumber: values.invoiceNumber, invoiceValueCents: values.invoiceValueCents, lostReason: values.lostReason } });
     return Response.json({ ok: true, id });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Não foi possível atualizar o lead." }, { status: 500 });

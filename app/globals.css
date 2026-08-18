@@ -1379,3 +1379,28 @@ button { cursor: pointer; }
   .reimbursement-detail-table { min-width: 0; font-size: 8px; }
   .reimbursement-detail-table th, .reimbursement-detail-table td { padding: 5px 4px; }
 }
+
+.leads-view-tabs { margin-top: 12px; display: inline-flex; gap: 4px; padding: 4px; border: 1px solid var(--line); background: #f7f8f8; }
+.leads-view-tabs button { padding: 7px 10px; border: 0; color: var(--muted); background: transparent; font-size: 9px; font-weight: 800; cursor: pointer; }
+.leads-view-tabs button.active { color: var(--ink); background: #fff; box-shadow: 0 2px 7px rgb(20 24 28 / 7%); }
+.lead-status-groups { display: grid; gap: 16px; }
+.lead-status-group { padding-top: 14px; border-top: 1px solid var(--line); }
+.lead-status-group:first-child { padding-top: 0; border-top: 0; }
+.lead-status-group > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.lead-status-group > header > div { display: flex; align-items: center; gap: 9px; }
+.lead-status-group > header strong, .lead-status-group > header > span { color: var(--muted); font-size: 9px; }
+.lead-status-group > header > span { font-weight: 800; }
+.analysis-promotion-box { display: grid; gap: 12px; padding: 15px; border: 1px solid #b8daca; border-left: 4px solid var(--green); background: #f3fbf6; }
+.analysis-promotion-box > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.analysis-promotion-box h3 { margin: 3px 0 0; font-size: 14px; }
+.analysis-promotion-box p { margin: 5px 0 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.analysis-promotion-box > header > strong { color: var(--green); font-size: 11px; white-space: nowrap; }
+.analysis-promotion-box textarea { min-height: 70px; padding: 10px 11px; resize: vertical; }
+.analysis-promotion-box .primary-button { justify-self: start; }
+@media (max-width: 600px) {
+  .leads-view-tabs { display: flex; width: 100%; }
+  .leads-view-tabs button { flex: 1; }
+  .lead-status-group > header { align-items: flex-start; flex-direction: column; }
+  .analysis-promotion-box > header { flex-direction: column; }
+  .analysis-promotion-box .primary-button { width: 100%; }
+}
