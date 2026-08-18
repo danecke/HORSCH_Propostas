@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { AppUser } from "../lib/auth";
 import { HorschLeadsView, type LeadModuleData } from "./horsch-leads";
-import { PriceListView } from "./price-list";
+import { PriceListView, type PriceListAccess } from "./price-list";
 
 type UserRole = "general_admin" | "global_management" | "factory_manager" | "dealer_manager" | "concession";
 type ModuleKey = "proposals" | "quotes" | "price_list" | "leads";
@@ -198,7 +198,7 @@ type DashboardData = {
 };
 
 type AuditEntry = { id: number; proposalId: string | null; actorEmail: string; actorName: string; action: string; entity: string; details: string; beforeJson: string; afterJson: string; createdAt: string };
-type View = "overview" | "proposals" | "quotes" | "quote-analysis" | "price-list" | "leads" | "dealerships" | "access" | "history";
+type View = "overview" | "proposals" | "quotes" | "quote-analysis" | "price-list" | "database" | "leads" | "dealerships" | "access" | "history";
 
 const STATUS_LABELS: Record<ProposalStatus, string> = {
   draft: "Rascunho",
@@ -352,6 +352,7 @@ export function Dashboard({ user }: { user: AppUser }) {
   const proposalsEnabled = moduleEnabled("proposals");
   const quotesEnabled = moduleEnabled("quotes");
   const priceListEnabled = moduleEnabled("price_list");
+  const databaseEnabled = data.me.permissions.editPriceList && ["general_admin", "global_management"].includes(data.me.role);
   const leadsEnabled = moduleEnabled("leads");
   const canCreate = data.me.permissions.createProposal && proposalsEnabled;
   const canRequestProposal = data.me.role === "dealer_manager" && proposalsEnabled;
@@ -375,7 +376,7 @@ export function Dashboard({ user }: { user: AppUser }) {
         <div className="role-card"><span>Perfil ativo</span><strong>{data.me.roleLabel}</strong><small>{scopeDescription(data.me)}</small></div>
         <nav className="sidebar-nav" aria-label="Navegação principal">
           {concessionOnly ? <>{priceListEnabled && <NavButton active={view !== "leads"} icon="file" onClick={() => setView("price-list")}>Lista de preços</NavButton>}{leadsEnabled && <NavButton active={view === "leads"} icon="trend" onClick={() => setView("leads")}>Horsch Leads</NavButton>}</> : <><NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão geral</NavButton>{proposalsEnabled && <NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton>}{quotesEnabled && <NavButton active={view === "quotes"} icon="clock" onClick={() => setView("quotes")}>Cotações</NavButton>}{priceListEnabled && <NavButton active={view === "price-list"} icon="money" onClick={() => setView("price-list")}>Lista de preços</NavButton>}{leadsEnabled && <NavButton active={view === "leads"} icon="trend" onClick={() => setView("leads")}>Horsch Leads</NavButton>}<NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Concessionárias</NavButton>{data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}</>}
-        </nav>
+          {databaseEnabled && <NavButton active={view === "database"} icon="grid" onClick={() => setView("database")}>Base de dados</NavButton>}</nav>
         {(canCreate || canRequestProposal) && <button className="sidebar-new" onClick={() => canRequestProposal ? setShowNewProposalRequest(true) : setShowNewProposal(true)}><Icon name="plus" size={17} />{canRequestProposal ? "Solicitar proposta" : "Nova proposta"}</button>}
         <div className="sidebar-account-actions"><button type="button" onClick={() => setShowChangePassword(true)}><Icon name="key" size={15} />Alterar senha</button></div>
         <div className="sidebar-footer"><div className="user-avatar">{initials(user.displayName)}</div><div className="user-copy"><strong>{user.displayName}</strong><span>{user.email}</span></div><button className="signout-link" type="button" onClick={() => void signOut()} title="Sair" aria-label="Sair">↗</button></div>
@@ -387,7 +388,7 @@ export function Dashboard({ user }: { user: AppUser }) {
         {view === "history" && <button type="button" className="outline-button compact back-button workspace-back-button" onClick={() => { setView(proposalsEnabled ? "proposals" : "overview"); setHistoryProposalId(null); }}>← Voltar</button>}
         {view === "leads" && leadsEnabled && leadData ? (
           <HorschLeadsView data={leadData} me={data.me} onChanged={async (message) => refreshed(message)} />
-        ) : view === "price-list" && priceListEnabled ? <PriceListView me={data.me} /> : concessionOnly && priceListEnabled ? <PriceListView me={data.me} /> : view === "overview" ? (
+        ) : view === "database" && databaseEnabled ? <DatabaseView me={data.me} /> : view === "price-list" && priceListEnabled ? <PriceListView me={data.me} mode="consult" /> : concessionOnly && priceListEnabled ? <PriceListView me={data.me} mode="consult" /> : view === "overview" ? (
           <Overview data={data} onNew={() => setShowNewProposal(true)} onOpen={setPreview} onHistory={openHistory} onAll={() => setView("proposals")} />
         ) : view === "proposals" && proposalsEnabled ? (
           <ProposalsView proposals={filteredProposals} proposalRequests={data.proposalRequests} me={data.me} allCount={data.proposals.length} search={search} onSearch={setSearch} status={statusFilter} onStatus={setStatusFilter} canCreate={canCreate} canRequestProposal={canRequestProposal} onNew={() => setShowNewProposal(true)} onNewRequest={() => setShowNewProposalRequest(true)} onOpen={setPreview} canViewHistory={data.me.role === "general_admin"} onHistory={openHistory} onChanged={() => refreshed("Solicitação de proposta atualizada.")} />
@@ -403,7 +404,7 @@ export function Dashboard({ user }: { user: AppUser }) {
           <Overview data={data} onNew={() => setShowNewProposal(true)} onOpen={setPreview} onHistory={openHistory} onAll={() => setView("proposals")} />
         )}
         <nav className="mobile-nav" aria-label="Navegação móvel">
-          {!concessionOnly ? <><NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão</NavButton>{proposalsEnabled && <NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton>}{quotesEnabled && <NavButton active={view === "quotes"} icon="clock" onClick={() => setView("quotes")}>Cotações</NavButton>}{priceListEnabled && <NavButton active={view === "price-list"} icon="money" onClick={() => setView("price-list")}>Preços</NavButton>}{leadsEnabled && <NavButton active={view === "leads"} icon="trend" onClick={() => setView("leads")}>Leads</NavButton>}<NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Rede</NavButton>{data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}</> : priceListEnabled && <NavButton active={view !== "leads"} icon="money" onClick={() => setView("price-list")}>Preços</NavButton>}
+          {!concessionOnly ? <><NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão</NavButton>{proposalsEnabled && <NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton>}{quotesEnabled && <NavButton active={view === "quotes"} icon="clock" onClick={() => setView("quotes")}>Cotações</NavButton>}{priceListEnabled && <NavButton active={view === "price-list"} icon="money" onClick={() => setView("price-list")}>Preços</NavButton>}{databaseEnabled && <NavButton active={view === "database"} icon="grid" onClick={() => setView("database")}>Base</NavButton>}{leadsEnabled && <NavButton active={view === "leads"} icon="trend" onClick={() => setView("leads")}>Leads</NavButton>}<NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Rede</NavButton>{data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}</> : priceListEnabled && <NavButton active={view !== "leads"} icon="money" onClick={() => setView("price-list")}>Preços</NavButton>}
         </nav>
       </section>
 
@@ -634,6 +635,33 @@ function QuoteCard({ quote, me, onChanged }: { quote: Quote; me: CurrentAccess; 
     {review && <div className="quote-action-box"><strong>Resposta da Fábrica</strong><p>Confira os dados, solicite imputação/revisão quando necessário ou retorne a cotação para aprovação da Concessionária.</p><div className="quote-edit-grid"><label className="field"><span>Descrição</span><input value={description} onChange={(event) => setDescription(event.target.value)} /></label><label className="field"><span>VT</span><input value={vt} onChange={(event) => setVt(event.target.value)} /></label><label className="field"><span>Origem</span><input value={origin} onChange={(event) => setOrigin(event.target.value)} /></label><label className="field"><span>Net price</span><input value={price} onChange={(event) => setPrice(event.target.value)} /></label></div><label className="field"><span>Observação</span><input value={note} onChange={(event) => setNote(event.target.value)} /></label><div className="quote-action-buttons"><button type="button" className="outline-button" disabled={saving} onClick={() => void action("needs_action")}>Solicitar imputação/revisão</button><button type="button" className="primary-button" disabled={saving} onClick={() => void action("return_quote")}>Enviar para aprovação</button></div></div>}
     {decide && <div className="quote-action-box"><strong>Aprovação da Concessionária</strong><p>Analise o retorno da Fábrica. Se reprovar, a cotação será encerrada e continuará visível aos níveis superiores.</p><label className="field"><span>Quantidade aprovada</span><input type="number" min="1" value={approvedQuantity} onChange={(event) => setApprovedQuantity(event.target.value)} /></label><label className="field"><span>Observação</span><input value={note} onChange={(event) => setNote(event.target.value)} /></label><div className="quote-action-buttons"><button type="button" className="outline-button danger-button" disabled={saving} onClick={() => void action("reject")}>Reprovar e encerrar</button><button type="button" className="primary-button" disabled={saving} onClick={() => void action("approve")}>Aprovar e enviar à Fábrica</button></div></div>}
     {place && <div className="quote-action-box factory-decision"><strong>Input do pedido</strong><p>Cotação aprovada e aguardando lançamento em carteira da Fábrica.</p><label className="field"><span>Referência do pedido</span><input value={note} onChange={(event) => setNote(event.target.value)} /></label><button type="button" className="primary-button" disabled={saving} onClick={() => void action("place_order")}>Marcar input realizado</button></div>}{error && <p className="form-error">{error}</p>}</article>;
+}
+
+function DatabaseView({ me }: { me: PriceListAccess }) {
+  const [section, setSection] = useState<"price-list" | "machine-models">("price-list");
+  return <div className="content-frame database-shell">
+    <header className="page-heading database-heading"><div><span className="eyebrow">Administração central</span><h1>Base de dados</h1><p>As bases oficiais são mantidas aqui e refletidas automaticamente nos módulos de consulta e no Horsch Leads.</p></div><div className="database-heading-mark"><Icon name="grid" size={26} /></div></header>
+    <div className="database-tabs" role="tablist" aria-label="Bases de dados"><button type="button" className={section === "price-list" ? "active" : ""} onClick={() => setSection("price-list")}>Lista de preços</button><button type="button" className={section === "machine-models" ? "active" : ""} onClick={() => setSection("machine-models")}>Modelos de máquinas</button></div>
+    {section === "price-list" ? <PriceListView me={me} mode="admin" /> : <MachineModelsDatabase />}
+  </div>;
+}
+
+function MachineModelsDatabase() {
+  const [models, setModels] = useState<Array<{ id: number; name: string; active: boolean }>>([]);
+  const [name, setName] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const load = useCallback(async () => {
+    setLoading(true); setError("");
+    try { const response = await fetch("/api/master-data", { cache: "no-store" }); const payload = await response.json() as { models?: typeof models; error?: string }; if (!response.ok) throw new Error(payload.error || "Não foi possível carregar os modelos."); setModels(payload.models ?? []); } catch (loadError) { setError(loadError instanceof Error ? loadError.message : "Não foi possível carregar os modelos."); } finally { setLoading(false); }
+  }, []);
+  useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
+  async function addModel(event: FormEvent) {
+    event.preventDefault(); if (!name.trim()) return; setSaving(true); setError("");
+    try { const response = await fetch("/api/master-data", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }); const payload = await response.json() as { error?: string }; if (!response.ok) throw new Error(payload.error || "Não foi possível salvar o modelo."); setName(""); await load(); } catch (saveError) { setError(saveError instanceof Error ? saveError.message : "Não foi possível salvar o modelo."); } finally { setSaving(false); }
+  }
+  return <section className="database-models-section"><div className="panel database-models-intro"><span className="eyebrow">Base de dados — Modelos de máquinas</span><h2>Modelos disponíveis no Leads</h2><p>Cadastre aqui os modelos oficiais. Eles aparecem como seleção padronizada no formulário; a opção de digitação manual continua disponível para exceções.</p><form className="database-model-form" onSubmit={(event) => void addModel(event)}><label className="field"><span>Novo modelo</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Ex.: Fortis" maxLength={80} /></label><button className="primary-button" type="submit" disabled={saving}>{saving ? "Salvando..." : "Adicionar modelo"}</button></form>{error && <p className="form-error">{error}</p>}</div><section className="panel database-models-list"><header className="panel-header"><div><span className="eyebrow">Fonte espelhada no Leads</span><h2>Modelos cadastrados</h2></div><strong>{models.length} ativos</strong></header>{loading ? <div className="empty-mini">Carregando modelos...</div> : models.length ? <div className="database-model-list">{models.map((model) => <div className="database-model-row" key={model.id}><span className="database-model-status" /><strong>{model.name}</strong><small>Disponível para seleção</small></div>)}</div> : <div className="empty-mini">Nenhum modelo cadastrado.</div>}</section></section>;
 }
 
 function NavButton({ active, icon, children, onClick }: { active: boolean; icon: IconName; children: ReactNode; onClick: () => void }) {

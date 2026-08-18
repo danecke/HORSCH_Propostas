@@ -4,7 +4,7 @@ import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 type PriceListRole = "general_admin" | "global_management" | "factory_manager" | "dealer_manager" | "concession";
-type PriceListAccess = {
+export type PriceListAccess = {
   role: PriceListRole;
   name: string;
   dealershipId: number | null;
@@ -118,8 +118,9 @@ function stateName(state: string) {
   return state === "PY" ? "Paraguai" : state === "RO" ? "Rondônia" : state;
 }
 
-export function PriceListView({ me }: { me: PriceListAccess }) {
-  const canManage = me.permissions.editPriceList && ["general_admin", "global_management"].includes(me.role);
+export function PriceListView({ me, mode = "consult" }: { me: PriceListAccess; mode?: "consult" | "admin" }) {
+  const adminMode = mode === "admin";
+  const canManage = adminMode && me.permissions.editPriceList && ["general_admin", "global_management"].includes(me.role);
   const [tab, setTab] = useState<"view" | "admin">(canManage ? "view" : "view");
   const [state, setState] = useState("");
   const [search, setSearch] = useState("");
@@ -220,13 +221,13 @@ export function PriceListView({ me }: { me: PriceListAccess }) {
 
   return <div className="content-frame price-list-shell">
     <header className="page-heading price-list-heading">
-      <div><span className="eyebrow">Catálogo comercial</span><h1>Catálogo de Preços Sugeridos</h1><p>Tabela ativa: <strong>{data?.import?.fileName || "nenhuma lista publicada"}</strong> · Vigência a partir de {data?.import ? formatDate(data.import.importedAt).split(",")[0] : "aguardando importação"}</p></div>
+      <div><span className="eyebrow">{adminMode ? "Base de dados" : "Catálogo comercial"}</span><h1>{adminMode ? "Base de dados — Lista de preços" : "Catálogo de Preços Sugeridos"}</h1><p>{adminMode ? "Importe, ajuste e publique a fonte oficial que será espelhada na Lista de preços." : <>Tabela ativa: <strong>{data?.import?.fileName || "nenhuma lista publicada"}</strong> · Vigência a partir de {data?.import ? formatDate(data.import.importedAt).split(",")[0] : "aguardando importação"}</>}</p></div>
       <div className="price-list-heading-mark"><span>H</span><small>Preço vigente</small></div>
     </header>
     <PriceListNotificationCenter canManage={canManage} refreshKey={notificationRefreshKey} onNotice={setNotice} />
-    {canManage && <div className="price-list-tabs" role="tablist" aria-label="Lista de preços"><button type="button" className={tab === "view" ? "active" : ""} onClick={() => setTab("view")}>Consultar lista</button><button type="button" className={tab === "admin" ? "active" : ""} onClick={() => setTab("admin")}>Administração</button></div>}
+    {!adminMode && canManage && <div className="price-list-tabs" role="tablist" aria-label="Lista de preços"><button type="button" className={tab === "view" ? "active" : ""} onClick={() => setTab("view")}>Consultar lista</button><button type="button" className={tab === "admin" ? "active" : ""} onClick={() => setTab("admin")}>Administração</button></div>}
     {notice && <div className="price-list-notice" role="status">{notice}</div>}
-    {tab === "admin" && canManage ? <><section className="panel price-list-publish-settings"><div><span className="eyebrow">Vigência da atualização</span><h2>Defina quando a nova lista passa a valer</h2><p>Esta data será registrada no aviso automático enviado após a publicação do Excel.</p></div><label className="field"><span>Vigência a partir de</span><input type="date" value={publishEffectiveAt} onChange={(event) => setPublishEffectiveAt(event.target.value)} /></label></section><AdminPanel file={file} setFile={setFile} uploading={uploading} uploadProgress={uploadProgress} onSubmit={submitUpload} currentImport={data?.import ?? null} /></> : <>
+    {(adminMode || tab === "admin") && canManage ? <><section className="panel price-list-publish-settings"><div><span className="eyebrow">Vigência da atualização</span><h2>Defina quando a nova lista passa a valer</h2><p>Esta data será registrada no aviso automático enviado após a publicação do Excel.</p></div><label className="field"><span>Vigência a partir de</span><input type="date" value={publishEffectiveAt} onChange={(event) => setPublishEffectiveAt(event.target.value)} /></label></section><AdminPanel file={file} setFile={setFile} uploading={uploading} uploadProgress={uploadProgress} onSubmit={submitUpload} currentImport={data?.import ?? null} /></> : <>
       <div className="price-list-state-tabs" role="tablist" aria-label="Estados disponíveis">{(data?.states ?? []).map((item) => <button type="button" role="tab" aria-selected={selectedState === item} key={item} className={selectedState === item ? "active" : ""} onClick={() => { setState(item); setPage(1); }}>{item}</button>)}</div>
       <div className="price-list-search-row"><label className="price-list-search-box"><span aria-hidden="true">⌕</span><input aria-label="Pesquisar por PN ou descrição" value={searchInput} onChange={(event) => setSearchInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { setSearch(searchInput); setPage(1); } }} placeholder="Pesquisar por PN (ex: 60027753) ou Descrição (ex: Tubo)..." /></label><button type="button" className="price-list-search-button" onClick={() => { setSearch(searchInput); setPage(1); }}>Buscar</button><button type="button" className="price-list-export-button" onClick={exportList} disabled={!data?.import || !selectedState}>⇩&nbsp; Exportar XLSX</button></div>
       <section className="panel price-list-panel">

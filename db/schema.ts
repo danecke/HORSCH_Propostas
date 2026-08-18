@@ -352,3 +352,14 @@ export const leads = sqliteTable("leads", {
   index("leads_seller_idx").on(table.sellerEmail),
   index("leads_updated_at_idx").on(table.updatedAt),
 ]);
+
+export const machineModels = sqliteTable("machine_models", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull(),
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("machine_models_name_idx").on(table.name),
+  index("machine_models_active_idx").on(table.active),
+]);
