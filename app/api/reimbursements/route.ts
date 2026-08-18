@@ -10,6 +10,8 @@ export const dynamic = "force-dynamic";
 
 const MAX_FILE_SIZE = 120 * 1024 * 1024;
 const CHUNK_SIZE = 1 * 1024 * 1024;
+const N3_PRICE_TOLERANCE_RATE = 0.05;
+const N3_PRICE_TOLERANCE_PERCENT = 5;
 const STATES = ["AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO", "PY"];
 const STATUS_VALUES = ["N2 Elegível", "N3 Elegível", "N2 Não Elegível", "N3 Não Elegível", "N3 com Negociação", "Divergência de Preço", "Estado sem Cadastro", "Net Price não Encontrado", "NF Duplicada"] as const;
 type SaleStatus = (typeof STATUS_VALUES)[number];
@@ -19,6 +21,7 @@ type ParsedSale = { sourceRow: number; partNumber: string; description: string; 
 function errorResponse(message: string, status = 400) { return Response.json({ error: message }, { status }); }
 function isManager(profile: AccessProfile) { return ["general_admin", "global_management", "factory_manager"].includes(profile.role); }
 function isClientManager(profile: AccessProfile) { return ["general_admin", "global_management"].includes(profile.role); }
+function isDealerScoped(profile: AccessProfile) { return ["dealer_manager", "concession"].includes(profile.role); }
 function reimbursementSegment(program: string): ReimbursementSegment { return program === "N2" ? "N2" : program === "N3" ? "N3" : "normal"; }
 function calculatedMarginBps(salesCents: number, costCents: number) { return salesCents ? Math.round(((salesCents - costCents) / salesCents) * 10000) : 0; }
 function isValidUploadId(value: unknown) { return typeof value === "string" && /^[a-f0-9-]{36}$/i.test(value); }
@@ -149,7 +152,13 @@ function priceForState(item: typeof priceListItems.$inferSelect, state: string) 
     n3: typeof n3 === "number" && n3 > 0 ? n3 : null,
   };
 }
-function isAllowedDealer(profile: AccessProfile, dealer: typeof dealerships.$inferSelect) { return ["general_admin", "global_management"].includes(profile.role) || (profile.role === "factory_manager" ? dealer.factoryManagerEmail.toLowerCase() === profile.email.toLowerCase() : dealer.id === profile.dealershipId); }
+function isAllowedDealer(profile: AccessProfile, dealer: typeof dealerships.$inferSelect) {
+  if (["general_admin", "global_management"].includes(profile.role)) return true;
+  if (profile.role === "factory_manager") return dealer.factoryManagerEmail.toLowerCase() === profile.email.toLowerCase();
+  return isDealerScoped(profile) && profile.dealershipId !== null && (
+    dealer.id === profile.dealershipId || dealer.parentDealershipId === profile.dealershipId
+  );
+}
 function moneyLabel(value: number) { return (value / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function excelColumn(index: number) { let value = ""; let current = index + 1; while (current > 0) { const remainder = (current - 1) % 26; value = String.fromCharCode(65 + remainder) + value; current = Math.floor((current - 1) / 26); } return value; }
 function xmlEscape(value: string) { return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;"); }
@@ -162,7 +171,10 @@ function exportXlsx(rows: Array<Record<string, unknown>>) {
   return new Response(new Blob([bytes.buffer as ArrayBuffer]), { headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Content-Disposition": "attachment; filename=relatorio-reembolsos.xlsx", "Cache-Control": "no-store" } });
 }
 
-async function visibleDealers(db: Awaited<ReturnType<typeof getDb>>, profile: AccessProfile) { const all = await db.select().from(dealerships).orderBy(dealerships.name); return all.filter((dealer) => isAllowedDealer(profile, dealer)); }
+async function visibleDealers(db: Awaited<ReturnType<typeof getDb>>, profile: AccessProfile) {
+  const all = await db.select().from(dealerships).orderBy(dealerships.name);
+  return all.filter((dealer) => isAllowedDealer(profile, dealer));
+}
 
 function serializeSale(row: typeof reimbursementSales.$inferSelect) { return { ...row, marginPercent: row.marginBps / 100 }; }
 
@@ -275,18 +287,24 @@ export async function POST(request: Request) {
     if (action === "init") { const body = await request.json() as { fileName?: string; fileSize?: number }; const fileName = String(body.fileName ?? "").trim(); const fileSize = Math.trunc(Number(body.fileSize) || 0); if (!/\.(xlsx|csv|tsv)$/i.test(fileName)) return errorResponse("Envie um arquivo .xlsx, .csv ou .tsv."); if (!fileSize || fileSize > MAX_FILE_SIZE) return errorResponse("A planilha deve ter no máximo 120 MB."); return Response.json({ uploadId: crypto.randomUUID(), chunkSize: CHUNK_SIZE, totalChunks: Math.ceil(fileSize / CHUNK_SIZE) }); }
     if (action === "chunk") { const params = new URL(request.url).searchParams; uploadId = params.get("uploadId") ?? ""; const part = Math.trunc(Number(params.get("part") ?? -1)); totalChunks = Math.trunc(Number(params.get("totalChunks") ?? 0)); if (!isValidUploadId(uploadId) || part < 0 || !totalChunks || part >= totalChunks) return errorResponse("Parte de upload inválida."); await env.BUCKET.put(`reimbursements/incoming/${uploadId}/${part}`, await request.arrayBuffer(), { httpMetadata: { contentType: request.headers.get("content-type") || "application/octet-stream" } }); return Response.json({ ok: true, part }); }
     if (action !== "complete") return errorResponse("Ação de upload não reconhecida.");
-    const body = await request.json() as { uploadId?: string; fileName?: string; contentType?: string; totalChunks?: number; dealershipId?: number; toleranceCents?: number };
+    const body = await request.json() as { uploadId?: string; fileName?: string; contentType?: string; totalChunks?: number; dealershipId?: number };
     uploadId = String(body.uploadId ?? ""); totalChunks = Math.trunc(Number(body.totalChunks) || 0); if (!isValidUploadId(uploadId) || !totalChunks) return errorResponse("Upload incompleto.");
     const parts = await Promise.all(Array.from({ length: totalChunks }, async (_, part) => { const object = await env.BUCKET.get(`reimbursements/incoming/${uploadId}/${part}`); if (!object) throw new Error(`A parte ${part + 1} da planilha não foi encontrada.`); return new Uint8Array(await object.arrayBuffer()); }));
     const length = parts.reduce((sum, part) => sum + part.length, 0); const bytes = new Uint8Array(length); let offset = 0; for (const part of parts) { bytes.set(part, offset); offset += part.length; }
     const db = await ensureReimbursementStorage();
     const allDealers = await visibleDealers(db, profile);
-    const requestedDealer = Number(body.dealershipId ?? 0);
-    const fallbackDealer = requestedDealer && allDealers.find((dealer) => dealer.id === requestedDealer)
-      ? allDealers.find((dealer) => dealer.id === requestedDealer)
-      : profile.dealershipId
-        ? allDealers.find((dealer) => dealer.id === profile.dealershipId)
-        : null;
+    const dealerScoped = isDealerScoped(profile);
+    const requestedDealerId = Math.trunc(Number(body.dealershipId) || 0);
+    const requestedDealer = requestedDealerId ? allDealers.find((dealer) => dealer.id === requestedDealerId) ?? null : null;
+    if (requestedDealerId && !requestedDealer) return errorResponse("A concessionária selecionada não está vinculada ao seu acesso.", 403);
+    if (dealerScoped && !allDealers.length) return errorResponse("Seu usuário não possui uma concessionária vinculada para importar vendas.", 403);
+    let fallbackDealer = requestedDealer;
+    if (dealerScoped) {
+      if (!fallbackDealer && allDealers.length === 1) fallbackDealer = allDealers[0];
+      if (!fallbackDealer) return errorResponse("Selecione uma das concessionárias vinculadas ao seu usuário para processar a planilha.");
+    } else if (!fallbackDealer && profile.dealershipId) {
+      fallbackDealer = allDealers.find((dealer) => dealer.id === profile.dealershipId) ?? null;
+    }
     const parsed = parseSales(bytes, String(body.fileName ?? "vendas.xlsx"));
     if (!parsed.length) return errorResponse("Nenhuma venda válida foi encontrada na planilha.");
     if (!fallbackDealer) {
@@ -309,7 +327,7 @@ export async function POST(request: Request) {
       seen.set(key, (seen.get(key) ?? 0) + 1);
     }
     const existing = new Set(oldSales.map((row) => `${row.dealershipId ?? 0}|${normalize(row.invoiceNumber)}`));
-    const tolerance = Math.max(0, Math.min(1000, Math.trunc(Number(body.toleranceCents ?? 1) || 0)));
+    const allowedDealerIds = new Set(allDealers.map((dealer) => dealer.id));
     const now = dateNow();
     const rowsToInsert: Array<typeof reimbursementSales.$inferInsert> = [];
     const summary = { quantity: 0, sales: 0, cost: 0, n2: 0, n3: 0, negotiation: 0 };
@@ -321,7 +339,7 @@ export async function POST(request: Request) {
     for (const row of parsed) {
       const dealer = fallbackDealer ?? allDealers.find((item) => normalize(item.name) === normalize(row.dealershipName));
       const dealerId = dealer?.id ?? null;
-      if (profile.dealershipId && dealerId !== profile.dealershipId) continue;
+      if (dealerScoped && (!dealerId || !allowedDealerIds.has(dealerId))) continue;
       importDealerId = importDealerId ?? dealerId;
       const client = clients.find((item) => normalizeDocument(item.cnpj) === row.clientCnpj && item.state === row.state);
       const priceItem = priceByPn.get(normalize(row.partNumber));
@@ -334,6 +352,7 @@ export async function POST(request: Request) {
       const program = client?.n3 ? "N3" : client?.n2 ? "N2" : "";
       const base = (price.net ?? row.costUnitCents) * row.quantity;
       const difference = price.n3 === null ? null : row.invoiceUnitCents - price.n3;
+      const n3ToleranceCents = price.n3 === null ? 0 : Math.round(price.n3 * N3_PRICE_TOLERANCE_RATE);
       let status: SaleStatus = "N2 Não Elegível";
       let reimbursement = 0;
       let negotiation = 0;
@@ -344,7 +363,7 @@ export async function POST(request: Request) {
         status = "Estado sem Cadastro";
       } else if (program === "N3") {
         if (price.n3 === null) status = "Net Price não Encontrado";
-        else if (Math.abs(row.invoiceUnitCents - price.n3) > tolerance) status = "Divergência de Preço";
+        else if (Math.abs(row.invoiceUnitCents - price.n3) > n3ToleranceCents) status = "Divergência de Preço";
         else {
           status = marginBps < 0 ? "N3 com Negociação" : "N3 Elegível";
           reimbursement = Math.round(base * 0.07);
@@ -359,9 +378,9 @@ export async function POST(request: Request) {
         }
       }
       summary.quantity += row.quantity; summary.sales += liquidTotal; summary.cost += costTotal; if (program === "N2") summary.n2 += reimbursement; if (program === "N3") summary.n3 += reimbursement; summary.negotiation += negotiation;
-      rowsToInsert.push({ importId: 0, dealershipId: dealerId, clientId: client?.id ?? null, priceListImportId: activePriceList?.id ?? null, partNumber: row.partNumber, description: row.description, quantity: row.quantity, costAvgUnitCents: row.costUnitCents, saleNetUnitCents: row.saleNetUnitCents, invoiceUnitCents: row.invoiceUnitCents, clientName: row.clientName, clientCnpj: client?.cnpj ?? row.clientCnpj, invoiceNumber: row.invoiceNumber, state: row.state, dealershipName: row.dealershipName || dealer?.name || "", marginBps, costTotalCents: costTotal, liquidTotalCents: liquidTotal, netPriceUsedCents: price.net, calculationBaseCents: base, reimbursementCents: reimbursement, reimbursementProgram: program, status, negotiationCents: negotiation, expectedN3Cents: price.n3, priceDifferenceCents: difference, createdAt: now });
+      rowsToInsert.push({ importId: 0, dealershipId: dealerId, clientId: client?.id ?? null, priceListImportId: activePriceList?.id ?? null, partNumber: row.partNumber, description: row.description, quantity: row.quantity, costAvgUnitCents: row.costUnitCents, saleNetUnitCents: row.saleNetUnitCents, invoiceUnitCents: row.invoiceUnitCents, clientName: row.clientName, clientCnpj: client?.cnpj ?? row.clientCnpj, invoiceNumber: row.invoiceNumber, state: row.state, dealershipName: dealer?.name || row.dealershipName || "", marginBps, costTotalCents: costTotal, liquidTotalCents: liquidTotal, netPriceUsedCents: price.net, calculationBaseCents: base, reimbursementCents: reimbursement, reimbursementProgram: program, status, negotiationCents: negotiation, expectedN3Cents: price.n3, priceDifferenceCents: difference, createdAt: now });
     }
-    if (!rowsToInsert.length) return errorResponse("Nenhuma venda pertence ao escopo da concessionária selecionada."); const storageKey = `reimbursements/${now.slice(0, 10)}/${crypto.randomUUID()}-${safeFileName(String(body.fileName ?? "vendas.xlsx"))}`; await env.BUCKET.put(storageKey, bytes, { httpMetadata: { contentType: body.contentType || "application/octet-stream" } }); const [created] = await db.insert(reimbursementImports).values({ fileName: String(body.fileName ?? "vendas.xlsx"), storageKey, contentType: String(body.contentType ?? ""), dealershipId: importDealerId, priceListImportId: activePriceList?.id ?? null, rowCount: rowsToInsert.length, totalQuantity: summary.quantity, totalSalesCents: summary.sales, totalCostCents: summary.cost, totalReimbursementN2Cents: summary.n2, totalReimbursementN3Cents: summary.n3, totalNegotiationCents: summary.negotiation, toleranceCents: tolerance, status: "processed", uploadedByEmail: profile.email, uploadedByName: profile.name, createdAt: now, updatedAt: now }).returning(); if (!created) throw new Error("Não foi possível criar o lote de reembolso."); await db.insert(reimbursementSales).values(rowsToInsert.map((row) => ({ ...row, importId: created.id }))).onConflictDoNothing(); await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "reimbursement_import_processed", entity: "reimbursement_import", details: `Importação ${created.id} processada com ${rowsToInsert.length} vendas.`, after: { importId: created.id, rowCount: rowsToInsert.length, status: created.status, reimbursementN2Cents: summary.n2, reimbursementN3Cents: summary.n3 } }); await Promise.all(Array.from({ length: totalChunks }, (_, part) => env.BUCKET.delete(`reimbursements/incoming/${uploadId}/${part}`))); return Response.json({ ok: true, import: { id: created.id, rowCount: created.rowCount, totalQuantity: created.totalQuantity } });
+    if (!rowsToInsert.length) return errorResponse("Nenhuma venda pertence ao escopo da concessionária selecionada."); const storageKey = `reimbursements/${now.slice(0, 10)}/${crypto.randomUUID()}-${safeFileName(String(body.fileName ?? "vendas.xlsx"))}`; await env.BUCKET.put(storageKey, bytes, { httpMetadata: { contentType: body.contentType || "application/octet-stream" } }); const [created] = await db.insert(reimbursementImports).values({ fileName: String(body.fileName ?? "vendas.xlsx"), storageKey, contentType: String(body.contentType ?? ""), dealershipId: importDealerId, priceListImportId: activePriceList?.id ?? null, rowCount: rowsToInsert.length, totalQuantity: summary.quantity, totalSalesCents: summary.sales, totalCostCents: summary.cost, totalReimbursementN2Cents: summary.n2, totalReimbursementN3Cents: summary.n3, totalNegotiationCents: summary.negotiation, toleranceCents: 0, status: "processed", uploadedByEmail: profile.email, uploadedByName: profile.name, createdAt: now, updatedAt: now }).returning(); if (!created) throw new Error("Não foi possível criar o lote de reembolso."); await db.insert(reimbursementSales).values(rowsToInsert.map((row) => ({ ...row, importId: created.id }))).onConflictDoNothing(); await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "reimbursement_import_processed", entity: "reimbursement_import", details: `Importação ${created.id} processada com ${rowsToInsert.length} vendas.`, after: { importId: created.id, dealershipId: importDealerId, rowCount: rowsToInsert.length, status: created.status, reimbursementN2Cents: summary.n2, reimbursementN3Cents: summary.n3, n3TolerancePercent: N3_PRICE_TOLERANCE_PERCENT } }); await Promise.all(Array.from({ length: totalChunks }, (_, part) => env.BUCKET.delete(`reimbursements/incoming/${uploadId}/${part}`))); return Response.json({ ok: true, import: { id: created.id, rowCount: created.rowCount, totalQuantity: created.totalQuantity } });
   } catch (error) { return errorResponse(error instanceof Error ? error.message : "Não foi possível processar a planilha de vendas.", 500); }
 }
 

@@ -109,11 +109,6 @@ function formatPercent(basisPoints: number) {
   return (basisPoints / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function parseCents(value: string) {
-  const clean = value.replace(/R\$\s?/g, "").replace(/\./g, "").replace(",", ".").replace(/[^\d.-]/g, "");
-  return Math.max(0, Math.round((Number(clean) || 0) * 100));
-}
-
 function statusClass(status: string) {
   if (status.includes("Negociação") || status.includes("Divergência") || status.includes("Duplicada")) return "danger";
   if (status.includes("Elegível")) return "success";
@@ -153,7 +148,6 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
   const [statusFilter, setStatusFilter] = useState("all");
   const [dealerFilter, setDealerFilter] = useState("");
   const [uploadDealerId, setUploadDealerId] = useState("");
-  const [tolerance, setTolerance] = useState("0,01");
   const [editingClient, setEditingClient] = useState<number | null>(null);
   const [clientForm, setClientForm] = useState<ClientForm>(EMPTY_CLIENT);
   const [busy, setBusy] = useState(false);
@@ -163,7 +157,10 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
 
   const canReview = Boolean(data?.canReview) || ["general_admin", "global_management", "factory_manager"].includes(me.role);
   const canManageClients = Boolean(data?.canManageClients) || ["general_admin", "global_management"].includes(me.role);
-  const visibleDealerships = dealerships.length ? dealerships : data?.dealerships ?? [];
+  const dealerScoped = ["dealer_manager", "concession"].includes(me.role);
+  const visibleDealerships = data?.dealerships ?? (dealerScoped ? dealerships.filter((dealer) => dealer.id === me.dealershipId) : dealerships);
+  const singleScopedDealership = dealerScoped && visibleDealerships.length === 1 ? visibleDealerships[0] : null;
+  const effectiveUploadDealerId = dealerScoped ? uploadDealerId || String(singleScopedDealership?.id ?? "") : uploadDealerId;
   const activeBatch = useMemo(() => data?.imports.find((item) => item.id === activeBatchId) ?? data?.imports[0], [activeBatchId, data?.imports]);
   const reimbursementTotal = (data?.summary.reimbursementN2Cents ?? 0) + (data?.summary.reimbursementN3Cents ?? 0);
 
@@ -214,6 +211,11 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
       setError("Selecione a planilha de vendas.");
       return;
     }
+    const selectedDealership = visibleDealerships.find((dealer) => String(dealer.id) === effectiveUploadDealerId);
+    if (dealerScoped && !selectedDealership) {
+      setError("Selecione uma concessionária vinculada ao seu usuário antes de processar a planilha.");
+      return;
+    }
 
     setBusy(true);
     setError("");
@@ -243,8 +245,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
           fileName: file.name,
           contentType: file.type,
           totalChunks: init.totalChunks,
-          dealershipId: uploadDealerId ? Number(uploadDealerId) : undefined,
-          toleranceCents: parseCents(tolerance),
+          dealershipId: effectiveUploadDealerId ? Number(effectiveUploadDealerId) : undefined,
         }),
       });
       const complete = await completeResponse.json() as { import?: { id: number }; error?: string };
@@ -429,7 +430,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
             <div className="reimbursement-template">
               <strong>Campos obrigatórios</strong>
               <span>PN · Descrição · Quantidade · Custo Médio Líquido Unitário · Valor Venda Líquido Unitário · Valor Venda NF Unitário · Cliente · CPF/CNPJ · NF · Estado</span>
-              <small>CPF/CNPJ deve ter 11 ou 14 dígitos. A primeira aba do Excel precisa ser <b>Vendas</b>. Concessionário pode ser informado no arquivo ou selecionado abaixo.</small>
+              <small>CPF/CNPJ deve ter 11 ou 14 dígitos. A primeira aba do Excel precisa ser <b>Vendas</b>. {dealerScoped ? "A concessionária do lote é definida pelo seu acesso; a coluna Concessionário do arquivo não altera esse vínculo." : "Concessionário pode ser informado no arquivo ou selecionado abaixo."}</small>
             </div>
 
             <div className="form-grid">
@@ -438,17 +439,26 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
                 <input name="file" type="file" accept=".xlsx,.csv,.tsv" required />
                 <small>Formatos aceitos: Excel (.xlsx), CSV e TSV. Tamanho máximo: 120 MB.</small>
               </label>
+              {dealerScoped && singleScopedDealership ? (
+                <label className="field">
+                  <span>Concessionária vinculada</span>
+                  <input value={singleScopedDealership.name} readOnly aria-readonly="true" />
+                  <small>Definida automaticamente pelo seu acesso.</small>
+                </label>
+              ) : (
+                <label className="field">
+                  <span>{dealerScoped ? "Concessionária vinculada *" : "Concessionária"}</span>
+                  <select value={effectiveUploadDealerId} onChange={(event) => setUploadDealerId(event.target.value)} required={dealerScoped}>
+                    <option value="">{dealerScoped ? "Selecione uma concessionária vinculada" : "Usar concessionária da planilha"}</option>
+                    {visibleDealerships.map((dealer) => <option value={dealer.id} key={dealer.id}>{dealer.name}</option>)}
+                  </select>
+                  {dealerScoped && <small>Somente as concessionárias vinculadas ao seu usuário estão disponíveis.</small>}
+                </label>
+              )}
               <label className="field">
-                <span>Concessionária</span>
-                <select value={uploadDealerId} onChange={(event) => setUploadDealerId(event.target.value)}>
-                  <option value="">Usar concessionária da planilha</option>
-                  {visibleDealerships.map((dealer) => <option value={dealer.id} key={dealer.id}>{dealer.name}</option>)}
-                </select>
-              </label>
-              <label className="field">
-                <span>Tolerância N3 para arredondamento</span>
-                <input value={tolerance} onChange={(event) => setTolerance(event.target.value)} inputMode="decimal" placeholder="0,01" />
-                <small>Diferença máxima em reais entre NF unitária e o valor N3.</small>
+                <span>Tolerância N3</span>
+                <input value="5% do valor N3" readOnly aria-readonly="true" />
+                <small>Aplicada automaticamente entre a NF unitária e o valor N3 do PN/UF.</small>
               </label>
             </div>
 
@@ -463,7 +473,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
               <li>Não há processamento parcial: campos obrigatórios, CPF/CNPJ e UF são conferidos antes da criação do lote.</li>
               <li>O cliente é localizado pelo CPF/CNPJ e UF na base de clientes N2/N3.</li>
               <li>N2: margem menor ou igual a 20% e reembolso de 4% sobre a base.</li>
-              <li>N3: NF unitária compatível com N3 do PN/UF e reembolso de 7%.</li>
+              <li>N3: NF unitária compatível com N3 do PN/UF, com tolerância fixa de 5%, e reembolso de 7%.</li>
               <li>Base: Net Price vigente × quantidade; sem Net Price, custo médio líquido × quantidade.</li>
               <li>Margem negativa em N3 gera valor para negociação com a fábrica.</li>
             </ul>
@@ -490,7 +500,11 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
           <div className="reimbursement-filter-grid">
             <label>PN ou descrição<input value={pnFilter} onChange={(event) => setPnFilter(event.target.value)} placeholder="Buscar PN ou descrição..." /></label>
             <label>Status<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">Todos</option>{data.statuses.map((status) => <option value={status} key={status}>{status}</option>)}</select></label>
-            <label>Concessionária<select value={dealerFilter} onChange={(event) => setDealerFilter(event.target.value)}><option value="">Todas</option>{visibleDealerships.map((dealer) => <option value={dealer.id} key={dealer.id}>{dealer.name}</option>)}</select></label>
+            {dealerScoped && singleScopedDealership ? (
+              <label>Concessionária<input value={singleScopedDealership.name} readOnly aria-readonly="true" /></label>
+            ) : (
+              <label>Concessionária<select value={dealerFilter} onChange={(event) => setDealerFilter(event.target.value)}><option value="">{dealerScoped ? "Todas as vinculadas" : "Todas"}</option>{visibleDealerships.map((dealer) => <option value={dealer.id} key={dealer.id}>{dealer.name}</option>)}</select></label>
+            )}
           </div>
 
           <div className="reimbursement-table-wrap wide">
