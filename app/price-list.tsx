@@ -203,14 +203,29 @@ export function PriceListView({ me, mode = "consult" }: { me: PriceListAccess; m
     }
   }
 
-  async function saveRow(row: PriceRow, draft: { net: string; final: string; effectiveAt: string }) {
-    const response = await fetch("/api/price-list", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: row.id, state: row.state, netPriceCents: parseMoney(draft.net), finalPriceCents: parseMoney(draft.final), effectiveAt: draft.effectiveAt }) });
+  async function saveRow(row: PriceRow, draft: { partNumber: string; description: string; family: string; unit: string; ncm: string; vt: string; origin: string; net: string; final: string; effectiveAt: string }) {
+    const response = await fetch("/api/price-list", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: row.id, state: row.state, partNumber: draft.partNumber, description: draft.description, family: draft.family, unit: draft.unit, ncm: draft.ncm, vt: draft.vt, origin: draft.origin, netPriceCents: parseMoney(draft.net), finalPriceCents: parseMoney(draft.final), effectiveAt: draft.effectiveAt }) });
     const payload = (await response.json()) as { error?: string; notification?: { recipientCount: number } | null };
     if (!response.ok) throw new Error(payload.error || "Não foi possível salvar o ajuste.");
     setEditing(null);
     setNotificationRefreshKey((current) => current + 1);
     setNotice(`PN ${row.partNumber} atualizado para ${row.state}${payload.notification ? ` · aviso enviado para ${payload.notification.recipientCount} usuários` : ""}.`);
     await load();
+  }
+
+  async function deleteRow(row: PriceRow) {
+    if (!window.confirm(`Excluir o PN ${row.partNumber} da lista vigente? Essa ação remove o item de todas as UFs.`)) return;
+    setError("");
+    try {
+      const response = await fetch("/api/price-list", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: row.id, effectiveAt: publishEffectiveAt }) });
+      const payload = (await response.json()) as { error?: string; notification?: { recipientCount: number } | null };
+      if (!response.ok) throw new Error(payload.error || "Não foi possível excluir o item.");
+      setNotificationRefreshKey((current) => current + 1);
+      setNotice(`PN ${row.partNumber} excluído da lista vigente${payload.notification ? ` · aviso enviado para ${payload.notification.recipientCount} usuários` : ""}.`);
+      await load();
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Não foi possível excluir o item.");
+    }
   }
 
   function exportList() {
@@ -233,7 +248,7 @@ export function PriceListView({ me, mode = "consult" }: { me: PriceListAccess; m
       <section className="panel price-list-panel">
         <header className="panel-header price-list-toolbar"><div><span className="eyebrow">{stateLabel}</span><h2>Itens e valores autorizados</h2><p>{(data?.import?.rowCount ?? 0).toLocaleString("pt-BR")} itens na estrutura vigente.</p></div><div className="price-list-toolbar-meta">{summary.visible ? `${summary.visible} itens exibidos` : "Sem itens para exibir"}</div></header>
         {error && <div className="price-list-error">{error}</div>}
-        {loading ? <div className="empty-mini">Carregando preços vigentes...</div> : !data?.import ? <EmptyPriceState text={canManage ? "Importe o primeiro arquivo na aba Administração." : "A Fábrica ainda não publicou uma lista de preços vigente."} /> : !data.rows.length ? <EmptyPriceState text="Nenhum item corresponde ao filtro informado." /> : <div className="price-list-table-wrap"><table className="price-list-table"><thead><tr><th>PN (PART NUMBER)</th><th>Descrição</th><th>Família</th><th>Unidade</th><th>NCM</th><th>VT</th><th>Origem</th><th>Netprice</th><th>Cliente final</th><th>Cliente nível 2</th><th>Cliente nível 3</th>{canManage && <th aria-label="Ações" />}</tr></thead><tbody>{data.rows.map((row) => <tr key={row.id}><td><strong>{row.partNumber}</strong></td><td><span>{row.description || "—"}</span></td><td>{row.family || "—"}</td><td>{row.unit || "—"}</td><td>{row.ncm || "—"}</td><td>{row.vt || "—"}</td><td>{row.origin || "—"}</td><td className="price-cell">{money(row.netPriceCents)}</td><td className="price-cell">{money(row.finalPriceCents)}</td><td className="price-cell">{money(row.n2PriceCents)}</td><td className="price-cell">{money(row.n3PriceCents)}</td>{canManage && <td><button type="button" className="table-action-button" aria-label={`Editar ${row.partNumber}`} onClick={() => setEditing(row)}>✎</button></td>}</tr>)}</tbody></table></div>}
+        {loading ? <div className="empty-mini">Carregando preços vigentes...</div> : !data?.import ? <EmptyPriceState text={canManage ? "Importe o primeiro arquivo na aba Administração." : "A Fábrica ainda não publicou uma lista de preços vigente."} /> : !data.rows.length ? <EmptyPriceState text="Nenhum item corresponde ao filtro informado." /> : <div className="price-list-table-wrap"><table className="price-list-table"><thead><tr><th>PN (PART NUMBER)</th><th>Descrição</th><th>Família</th><th>Unidade</th><th>NCM</th><th>VT</th><th>Origem</th><th>Netprice</th><th>Cliente final</th><th>Cliente nível 2</th><th>Cliente nível 3</th>{canManage && <th aria-label="Ações" />}</tr></thead><tbody>{data.rows.map((row) => <tr key={row.id}><td><strong>{row.partNumber}</strong></td><td><span>{row.description || "—"}</span></td><td>{row.family || "—"}</td><td>{row.unit || "—"}</td><td>{row.ncm || "—"}</td><td>{row.vt || "—"}</td><td>{row.origin || "—"}</td><td className="price-cell">{money(row.netPriceCents)}</td><td className="price-cell">{money(row.finalPriceCents)}</td><td className="price-cell">{money(row.n2PriceCents)}</td><td className="price-cell">{money(row.n3PriceCents)}</td>{canManage && <td><div className="table-row-actions"><button type="button" className="table-action-button" aria-label={`Editar ${row.partNumber}`} onClick={() => setEditing(row)}>✎</button><button type="button" className="table-action-button danger" aria-label={`Excluir ${row.partNumber}`} onClick={() => void deleteRow(row)}>×</button></div></td>}</tr>)}</tbody></table></div>}
         {data?.total ? <footer className="price-list-pagination"><span>{((page - 1) * (data.pageSize ?? 50) + 1).toLocaleString("pt-BR")}–{Math.min(page * (data.pageSize ?? 50), data.total).toLocaleString("pt-BR")} de {data.total.toLocaleString("pt-BR")} itens</span><div><button type="button" className="outline-button compact" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>Anterior</button><strong>Página {page} de {totalPages}</strong><button type="button" className="outline-button compact" disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>Próxima</button></div></footer> : null}
       </section>
     </>}
@@ -392,8 +407,8 @@ function EmptyPriceState({ text }: { text: string }) {
   return <div className="price-list-empty"><span>₿</span><strong>Lista de preços indisponível</strong><p>{text}</p></div>;
 }
 
-function PriceEditor({ row, onClose, onSave }: { row: PriceRow; onClose: () => void; onSave: (row: PriceRow, draft: { net: string; final: string; effectiveAt: string }) => Promise<void> }) {
-  const [draft, setDraft] = useState({ net: inputMoney(row.netPriceCents), final: inputMoney(row.finalPriceCents), effectiveAt: localDateValue() });
+function PriceEditor({ row, onClose, onSave }: { row: PriceRow; onClose: () => void; onSave: (row: PriceRow, draft: { partNumber: string; description: string; family: string; unit: string; ncm: string; vt: string; origin: string; net: string; final: string; effectiveAt: string }) => Promise<void> }) {
+  const [draft, setDraft] = useState({ partNumber: row.partNumber, description: row.description, family: row.family, unit: row.unit, ncm: row.ncm, vt: row.vt, origin: row.origin, net: inputMoney(row.netPriceCents), final: inputMoney(row.finalPriceCents), effectiveAt: localDateValue() });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   async function submit(event: FormEvent) {
@@ -408,6 +423,13 @@ function PriceEditor({ row, onClose, onSave }: { row: PriceRow; onClose: () => v
         <header className="modal-header"><div><span className="eyebrow">Ajuste administrativo · {row.state}</span><h2>{row.partNumber}</h2><p>{row.description}</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Fechar">×</button></header>
         <div className="form-scroll">
           <div className="price-editor-grid">
+            <label className="field"><span>PN</span><input value={draft.partNumber} onChange={(event) => setDraft({ ...draft, partNumber: event.target.value })} required /></label>
+            <label className="field price-editor-wide"><span>Descrição</span><input value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
+            <label className="field"><span>Família</span><input value={draft.family} onChange={(event) => setDraft({ ...draft, family: event.target.value })} /></label>
+            <label className="field"><span>Unidade</span><input value={draft.unit} onChange={(event) => setDraft({ ...draft, unit: event.target.value })} /></label>
+            <label className="field"><span>NCM</span><input value={draft.ncm} onChange={(event) => setDraft({ ...draft, ncm: event.target.value })} /></label>
+            <label className="field"><span>VT</span><input value={draft.vt} onChange={(event) => setDraft({ ...draft, vt: event.target.value })} /></label>
+            <label className="field"><span>Origem</span><input value={draft.origin} onChange={(event) => setDraft({ ...draft, origin: event.target.value })} /></label>
             <label className="field"><span>Netprice unitário</span><input inputMode="decimal" value={draft.net} onChange={(event) => setDraft({ ...draft, net: event.target.value })} /></label>
             <label className="field"><span>Cliente final</span><input inputMode="decimal" value={draft.final} onChange={(event) => setDraft({ ...draft, final: event.target.value })} /></label>
             <label className="field"><span>Cliente nível 2 · 90%</span><input inputMode="decimal" value={derivedInputMoney(draft.final, 0.9)} readOnly aria-label="Cliente nível 2 calculado automaticamente" /></label>

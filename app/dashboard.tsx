@@ -649,19 +649,41 @@ function DatabaseView({ me }: { me: PriceListAccess }) {
 function MachineModelsDatabase() {
   const [models, setModels] = useState<Array<{ id: number; name: string; active: boolean }>>([]);
   const [name, setName] = useState("");
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingName, setEditingName] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const load = useCallback(async () => {
     setLoading(true); setError("");
-    try { const response = await fetch("/api/master-data", { cache: "no-store" }); const payload = await response.json() as { models?: typeof models; error?: string }; if (!response.ok) throw new Error(payload.error || "Não foi possível carregar os modelos."); setModels(payload.models ?? []); } catch (loadError) { setError(loadError instanceof Error ? loadError.message : "Não foi possível carregar os modelos."); } finally { setLoading(false); }
+    try { const response = await fetch("/api/master-data?all=1", { cache: "no-store" }); const payload = await response.json() as { models?: typeof models; error?: string }; if (!response.ok) throw new Error(payload.error || "Não foi possível carregar os modelos."); setModels(payload.models ?? []); } catch (loadError) { setError(loadError instanceof Error ? loadError.message : "Não foi possível carregar os modelos."); } finally { setLoading(false); }
   }, []);
   useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
   async function addModel(event: FormEvent) {
     event.preventDefault(); if (!name.trim()) return; setSaving(true); setError("");
     try { const response = await fetch("/api/master-data", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }); const payload = await response.json() as { error?: string }; if (!response.ok) throw new Error(payload.error || "Não foi possível salvar o modelo."); setName(""); await load(); } catch (saveError) { setError(saveError instanceof Error ? saveError.message : "Não foi possível salvar o modelo."); } finally { setSaving(false); }
   }
-  return <section className="database-models-section"><div className="panel database-models-intro"><span className="eyebrow">Base de dados — Modelos de máquinas</span><h2>Modelos disponíveis no Leads</h2><p>Cadastre aqui os modelos oficiais. Eles aparecem como seleção padronizada no formulário; a opção de digitação manual continua disponível para exceções.</p><form className="database-model-form" onSubmit={(event) => void addModel(event)}><label className="field"><span>Novo modelo</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Ex.: Fortis" maxLength={80} /></label><button className="primary-button" type="submit" disabled={saving}>{saving ? "Salvando..." : "Adicionar modelo"}</button></form>{error && <p className="form-error">{error}</p>}</div><section className="panel database-models-list"><header className="panel-header"><div><span className="eyebrow">Fonte espelhada no Leads</span><h2>Modelos cadastrados</h2></div><strong>{models.length} ativos</strong></header>{loading ? <div className="empty-mini">Carregando modelos...</div> : models.length ? <div className="database-model-list">{models.map((model) => <div className="database-model-row" key={model.id}><span className="database-model-status" /><strong>{model.name}</strong><small>Disponível para seleção</small></div>)}</div> : <div className="empty-mini">Nenhum modelo cadastrado.</div>}</section></section>;
+  async function updateModel(id: number, body: { name?: string; active?: boolean }) {
+    setSaving(true); setError("");
+    try {
+      const response = await fetch("/api/master-data", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...body }) });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Não foi possível atualizar o modelo.");
+      setEditingId(null); setEditingName(""); await load();
+    } catch (updateError) { setError(updateError instanceof Error ? updateError.message : "Não foi possível atualizar o modelo."); } finally { setSaving(false); }
+  }
+  async function removeModel(model: { id: number; name: string }) {
+    if (!window.confirm(`Excluir o modelo ${model.name}? Ele será removido das seleções futuras, mas o histórico será preservado.`)) return;
+    setSaving(true); setError("");
+    try {
+      const response = await fetch("/api/master-data", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: model.id }) });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Não foi possível excluir o modelo.");
+      await load();
+    } catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : "Não foi possível excluir o modelo."); } finally { setSaving(false); }
+  }
+  const activeCount = models.filter((model) => model.active).length;
+  return <section className="database-models-section"><div className="panel database-models-intro"><span className="eyebrow">Base de dados — Modelos de máquinas</span><h2>Modelos disponíveis no Leads</h2><p>Cadastre aqui os modelos oficiais. Eles aparecem como seleção padronizada no formulário; a opção de digitação manual continua disponível para exceções.</p><form className="database-model-form" onSubmit={(event) => void addModel(event)}><label className="field"><span>Novo modelo</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Ex.: Fortis" maxLength={80} /></label><button className="primary-button" type="submit" disabled={saving}>{saving ? "Salvando..." : "Adicionar modelo"}</button></form>{error && <p className="form-error">{error}</p>}</div><section className="panel database-models-list"><header className="panel-header"><div><span className="eyebrow">Fonte espelhada no Leads</span><h2>Modelos cadastrados</h2></div><strong>{activeCount} ativos · {models.length} no total</strong></header>{loading ? <div className="empty-mini">Carregando modelos...</div> : models.length ? <div className="database-model-list">{models.map((model) => <div className={`database-model-row ${model.active ? "" : "inactive"}`} key={model.id}><span className="database-model-status" />{editingId === model.id ? <div className="database-model-edit"><input value={editingName} onChange={(event) => setEditingName(event.target.value)} maxLength={80} autoFocus /><button type="button" className="primary-button compact" disabled={saving || !editingName.trim()} onClick={() => void updateModel(model.id, { name: editingName })}>Salvar</button><button type="button" className="ghost-button compact" disabled={saving} onClick={() => { setEditingId(null); setEditingName(""); }}>Cancelar</button></div> : <><strong>{model.name}</strong><small>{model.active ? "Disponível para seleção" : "Inativo · preservado no histórico"}</small><div className="database-model-actions"><button type="button" disabled={saving} onClick={() => { setEditingId(model.id); setEditingName(model.name); }}>Editar</button>{model.active ? <button type="button" disabled={saving} onClick={() => void removeModel(model)}>Excluir</button> : <button type="button" disabled={saving} onClick={() => void updateModel(model.id, { active: true })}>Reativar</button>}</div></>}</div>)}</div> : <div className="empty-mini">Nenhum modelo cadastrado.</div>}</section></section>;
 }
 
 function NavButton({ active, icon, children, onClick }: { active: boolean; icon: IconName; children: ReactNode; onClick: () => void }) {
