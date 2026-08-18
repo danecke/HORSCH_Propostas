@@ -377,6 +377,7 @@ export function Dashboard({ user }: { user: AppUser }) {
         <div className="brand-lockup"><BrandMark className="brand-mark" /><div><strong>HORSCH</strong><span>Brasil</span></div></div>
         <div className="role-card"><span>Perfil ativo</span><strong>{data.me.roleLabel}</strong><small>{scopeDescription(data.me)}</small></div>
         <nav className="sidebar-nav" aria-label="Navegação principal">
+          <span className="nav-section-label">Navegação operacional</span>
           {concessionOnly ? <>{quotesEnabled && <NavButton active={view === "quotes"} icon="clock" onClick={() => setView("quotes")}>Cotações</NavButton>}{priceListEnabled && <NavButton active={view === "price-list"} icon="file" onClick={() => setView("price-list")}>Lista de preços</NavButton>}{leadsEnabled && <NavButton active={view === "leads"} icon="trend" onClick={() => setView("leads")}>Horsch Leads</NavButton>}{reimbursementsEnabled && <NavButton active={view === "reimbursements"} icon="money" onClick={() => setView("reimbursements")}>Reembolsos N2/N3</NavButton>}</> : <><NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão geral</NavButton>{proposalsEnabled && <NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton>}{quotesEnabled && <NavButton active={view === "quotes"} icon="clock" onClick={() => setView("quotes")}>Cotações</NavButton>}{priceListEnabled && <NavButton active={view === "price-list"} icon="money" onClick={() => setView("price-list")}>Lista de preços</NavButton>}{leadsEnabled && <NavButton active={view === "leads"} icon="trend" onClick={() => setView("leads")}>Horsch Leads</NavButton>}{reimbursementsEnabled && <NavButton active={view === "reimbursements"} icon="money" onClick={() => setView("reimbursements")}>Reembolsos N2/N3</NavButton>}<NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Concessionárias</NavButton>{data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}</>}
           {databaseEnabled && <NavButton active={view === "database"} icon="grid" onClick={() => setView("database")}>Base de dados</NavButton>}</nav>
         {(canCreate || canRequestProposal) && <button className="sidebar-new" onClick={() => canRequestProposal ? setShowNewProposalRequest(true) : setShowNewProposal(true)}><Icon name="plus" size={17} />{canRequestProposal ? "Solicitar proposta" : "Nova proposta"}</button>}
@@ -386,6 +387,10 @@ export function Dashboard({ user }: { user: AppUser }) {
 
       <section className="workspace">
         <header className="mobile-header"><div className="mobile-lockup"><BrandMark className="mobile-mark" /><strong>HORSCH</strong></div><span className="mobile-role">{data.me.roleLabel}</span></header>
+        <header className="workspace-topbar">
+          <div className="workspace-topbar-copy"><span>HORSCH Brasil</span><strong>Portal de gestão comercial</strong></div>
+          <div className="workspace-status"><i aria-hidden="true" /><span>Operação integrada</span></div>
+        </header>
         {notice && <div className="toast" role="status"><Icon name="check" size={17} />{notice}</div>}
         {view === "history" && <button type="button" className="outline-button compact back-button workspace-back-button" onClick={() => { setView(proposalsEnabled ? "proposals" : "overview"); setHistoryProposalId(null); }}>← Voltar</button>}
         {view === "leads" && leadsEnabled && leadData ? (
@@ -762,7 +767,12 @@ function Overview({ data, onNew, onOpen, onHistory, onAll }: { data: DashboardDa
   const pending = data.proposals.filter((proposal) => ["sent", "counteroffer"].includes(proposal.status)).length;
   const counteroffers = data.proposals.filter((proposal) => proposal.status === "counteroffer");
   return <div className="content-frame">
-    <header className="page-heading overview-heading"><div><span className="eyebrow">{data.me.roleLabel}</span><h1>Olá, {firstName(data.me.name)}.</h1><p>{scopeDescription(data.me)}</p></div>{data.me.permissions.createProposal && <button className="primary-button" onClick={onNew}><Icon name="plus" size={18} />Nova proposta</button>}</header>
+    <section className="overview-hero">
+      <header className="page-heading overview-heading"><div><span className="eyebrow">{data.me.roleLabel}</span><h1>Olá, {firstName(data.me.name)}.</h1><p>{scopeDescription(data.me)}</p></div>{data.me.permissions.createProposal && <button className="primary-button" onClick={onNew}><Icon name="plus" size={18} />Nova proposta</button>}</header>
+      <aside className="overview-hero-status" aria-label="Pendências comerciais">
+        <span>Agenda comercial</span><strong>{pending}</strong><small>{pending === 1 ? "decisão aguardando retorno" : "decisões aguardando retorno"}</small>
+      </aside>
+    </section>
     <section className="metric-grid" aria-label="Indicadores comerciais">
       <MetricCard label="Valor em propostas" value={formatBRL(totalCents)} meta={`${data.proposals.length} propostas visíveis`} icon="money" tone="red" />
       <MetricCard label="Aguardando decisão" value={String(pending)} meta="Enviadas e contrapropostas" icon="clock" tone="amber" />
