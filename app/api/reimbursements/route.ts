@@ -13,11 +13,14 @@ const CHUNK_SIZE = 1 * 1024 * 1024;
 const STATES = ["AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO", "PY"];
 const STATUS_VALUES = ["N2 Elegível", "N3 Elegível", "N2 Não Elegível", "N3 Não Elegível", "N3 com Negociação", "Divergência de Preço", "Estado sem Cadastro", "Net Price não Encontrado", "NF Duplicada"] as const;
 type SaleStatus = (typeof STATUS_VALUES)[number];
+type ReimbursementSegment = "N2" | "N3" | "normal";
 type ParsedSale = { sourceRow: number; partNumber: string; description: string; quantity: number; costUnitCents: number; saleNetUnitCents: number; invoiceUnitCents: number; clientName: string; clientCnpj: string; invoiceNumber: string; state: string; dealershipName: string };
 
 function errorResponse(message: string, status = 400) { return Response.json({ error: message }, { status }); }
 function isManager(profile: AccessProfile) { return ["general_admin", "global_management", "factory_manager"].includes(profile.role); }
 function isClientManager(profile: AccessProfile) { return ["general_admin", "global_management"].includes(profile.role); }
+function reimbursementSegment(program: string): ReimbursementSegment { return program === "N2" ? "N2" : program === "N3" ? "N3" : "normal"; }
+function calculatedMarginBps(salesCents: number, costCents: number) { return salesCents ? Math.round(((salesCents - costCents) / salesCents) * 10000) : 0; }
 function isValidUploadId(value: unknown) { return typeof value === "string" && /^[a-f0-9-]{36}$/i.test(value); }
 function normalize(value: unknown) { return String(value ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").trim().replace(/\s+/g, " ").toLocaleLowerCase("pt-BR"); }
 function normalizeDocument(value: unknown) { return String(value ?? "").replace(/\D/g, ""); }
@@ -172,11 +175,39 @@ export async function GET(request: Request) {
     const params = new URL(request.url).searchParams; const requestedImportId = Number(params.get("batchId") ?? 0); const activeImportId = requestedImportId && imports.some((item) => item.id === requestedImportId) ? requestedImportId : imports[0]?.id ?? 0;
     const allSales = dealerIds.length ? await db.select().from(reimbursementSales).where(isManager(profile) ? or(inArray(reimbursementSales.dealershipId, dealerIds), isNull(reimbursementSales.dealershipId)) : inArray(reimbursementSales.dealershipId, dealerIds)).orderBy(desc(reimbursementSales.createdAt), desc(reimbursementSales.id)) : [];
     const pnFilter = normalize(params.get("pn")); const statusFilter = params.get("status")?.trim() ?? "all"; const dealershipFilter = Number(params.get("dealershipId") ?? 0);
-    const filtered = allSales.filter((sale) => (!activeImportId || sale.importId === activeImportId) && (!pnFilter || normalize(sale.partNumber).includes(pnFilter) || normalize(sale.description).includes(pnFilter)) && (statusFilter === "all" || sale.status === statusFilter) && (!dealershipFilter || sale.dealershipId === dealershipFilter));
+    const matchesFilters = (sale: typeof reimbursementSales.$inferSelect) => (!pnFilter || normalize(sale.partNumber).includes(pnFilter) || normalize(sale.description).includes(pnFilter)) && (statusFilter === "all" || sale.status === statusFilter) && (!dealershipFilter || sale.dealershipId === dealershipFilter);
+    const filtered = allSales.filter((sale) => (!activeImportId || sale.importId === activeImportId) && matchesFilters(sale));
+    const factoryHistorySales = allSales.filter(matchesFilters);
     const base = filtered.reduce((sum, sale) => ({ quantity: sum.quantity + sale.quantity, sales: sum.sales + sale.liquidTotalCents, cost: sum.cost + sale.costTotalCents, n2: sum.n2 + (sale.reimbursementProgram === "N2" ? sale.reimbursementCents : 0), n3: sum.n3 + (sale.reimbursementProgram === "N3" ? sale.reimbursementCents : 0), negotiation: sum.negotiation + sale.negotiationCents }), { quantity: 0, sales: 0, cost: 0, n2: 0, n3: 0, negotiation: 0 });
-    const rowsByDealer = new Map<string, { label: string; rows: number; quantity: number; salesCents: number; reimbursementCents: number; marginBps: number }>();
-    const rowsByPart = new Map<string, { partNumber: string; description: string; quantity: number; salesCents: number; reimbursementCents: number; marginBps: number; rows: number }>();
-    for (const sale of filtered) { const dealer = sale.dealershipName || "Não identificado"; const dealerEntry = rowsByDealer.get(dealer) ?? { label: dealer, rows: 0, quantity: 0, salesCents: 0, reimbursementCents: 0, marginBps: 0 }; dealerEntry.rows += 1; dealerEntry.quantity += sale.quantity; dealerEntry.salesCents += sale.liquidTotalCents; dealerEntry.reimbursementCents += sale.reimbursementCents; dealerEntry.marginBps += sale.marginBps; rowsByDealer.set(dealer, dealerEntry); const partEntry = rowsByPart.get(sale.partNumber) ?? { partNumber: sale.partNumber, description: sale.description, quantity: 0, salesCents: 0, reimbursementCents: 0, marginBps: 0, rows: 0 }; partEntry.rows += 1; partEntry.quantity += sale.quantity; partEntry.salesCents += sale.liquidTotalCents; partEntry.reimbursementCents += sale.reimbursementCents; partEntry.marginBps += sale.marginBps; rowsByPart.set(sale.partNumber, partEntry); }
+    const rowsByDealer = new Map<string, { label: string; rows: number; quantity: number; salesCents: number; costCents: number; reimbursementCents: number }>();
+    const rowsByPart = new Map<string, { partNumber: string; description: string; quantity: number; salesCents: number; costCents: number; reimbursementCents: number; rows: number }>();
+    for (const sale of filtered) {
+      const dealer = sale.dealershipName || "Não identificado";
+      const dealerEntry = rowsByDealer.get(dealer) ?? { label: dealer, rows: 0, quantity: 0, salesCents: 0, costCents: 0, reimbursementCents: 0 };
+      dealerEntry.rows += 1; dealerEntry.quantity += sale.quantity; dealerEntry.salesCents += sale.liquidTotalCents; dealerEntry.costCents += sale.costTotalCents; dealerEntry.reimbursementCents += sale.reimbursementCents; rowsByDealer.set(dealer, dealerEntry);
+      const partEntry = rowsByPart.get(sale.partNumber) ?? { partNumber: sale.partNumber, description: sale.description, quantity: 0, salesCents: 0, costCents: 0, reimbursementCents: 0, rows: 0 };
+      partEntry.rows += 1; partEntry.quantity += sale.quantity; partEntry.salesCents += sale.liquidTotalCents; partEntry.costCents += sale.costTotalCents; partEntry.reimbursementCents += sale.reimbursementCents; rowsByPart.set(sale.partNumber, partEntry);
+    }
+    const factoryMarginByProgram: Record<ReimbursementSegment, { key: ReimbursementSegment; label: string; rows: number; quantity: number; salesCents: number; costCents: number; reimbursementCents: number }> = {
+      N2: { key: "N2", label: "Cliente Nível 2", rows: 0, quantity: 0, salesCents: 0, costCents: 0, reimbursementCents: 0 },
+      N3: { key: "N3", label: "Cliente Nível 3", rows: 0, quantity: 0, salesCents: 0, costCents: 0, reimbursementCents: 0 },
+      normal: { key: "normal", label: "Vendas normais", rows: 0, quantity: 0, salesCents: 0, costCents: 0, reimbursementCents: 0 },
+    };
+    const factorySalesByMonth = new Map<string, { month: string; dealershipName: string; rows: number; quantity: number; salesCents: number; costCents: number; n2SalesCents: number; n2CostCents: number; n3SalesCents: number; n3CostCents: number; normalSalesCents: number; normalCostCents: number }>();
+    for (const sale of factoryHistorySales) {
+      const segment = reimbursementSegment(sale.reimbursementProgram);
+      const segmentEntry = factoryMarginByProgram[segment];
+      segmentEntry.rows += 1; segmentEntry.quantity += sale.quantity; segmentEntry.salesCents += sale.liquidTotalCents; segmentEntry.costCents += sale.costTotalCents; segmentEntry.reimbursementCents += sale.reimbursementCents;
+      const dealershipName = sale.dealershipName || "Não identificado";
+      const month = sale.createdAt?.slice(0, 7) || "Sem referência";
+      const key = `${month}::${dealershipName}`;
+      const monthlyEntry = factorySalesByMonth.get(key) ?? { month, dealershipName, rows: 0, quantity: 0, salesCents: 0, costCents: 0, n2SalesCents: 0, n2CostCents: 0, n3SalesCents: 0, n3CostCents: 0, normalSalesCents: 0, normalCostCents: 0 };
+      monthlyEntry.rows += 1; monthlyEntry.quantity += sale.quantity; monthlyEntry.salesCents += sale.liquidTotalCents; monthlyEntry.costCents += sale.costTotalCents;
+      if (segment === "N2") { monthlyEntry.n2SalesCents += sale.liquidTotalCents; monthlyEntry.n2CostCents += sale.costTotalCents; }
+      else if (segment === "N3") { monthlyEntry.n3SalesCents += sale.liquidTotalCents; monthlyEntry.n3CostCents += sale.costTotalCents; }
+      else { monthlyEntry.normalSalesCents += sale.liquidTotalCents; monthlyEntry.normalCostCents += sale.costTotalCents; }
+      factorySalesByMonth.set(key, monthlyEntry);
+    }
     const statusBreakdown = STATUS_VALUES.map((status) => {
       const rows = filtered.filter((sale) => sale.status === status);
       return {
@@ -198,7 +229,7 @@ export async function GET(request: Request) {
       summary: {
         salesCents: base.sales,
         costCents: base.cost,
-        marginBps: base.sales ? Math.round(((base.sales - base.cost) / base.sales) * 10000) : 0,
+        marginBps: calculatedMarginBps(base.sales, base.cost),
         reimbursementN2Cents: base.n2,
         reimbursementN3Cents: base.n3,
         negotiationCents: base.negotiation,
@@ -209,8 +240,8 @@ export async function GET(request: Request) {
         attentionRecords: alerts.reduce((sum, item) => sum + item.count, 0),
         fallbackBaseRecords,
       },
-      byDealership: [...rowsByDealer.values()].map((item) => ({ ...item, marginBps: item.rows ? Math.round(item.marginBps / item.rows) : 0 })).sort((left, right) => right.salesCents - left.salesCents),
-      byPartNumber: [...rowsByPart.values()].map((item) => ({ ...item, marginBps: item.rows ? Math.round(item.marginBps / item.rows) : 0 })).sort((left, right) => right.reimbursementCents - left.reimbursementCents).slice(0, 30),
+      byDealership: [...rowsByDealer.values()].map((item) => ({ ...item, marginBps: calculatedMarginBps(item.salesCents, item.costCents) })).sort((left, right) => right.salesCents - left.salesCents),
+      byPartNumber: [...rowsByPart.values()].map((item) => ({ ...item, marginBps: calculatedMarginBps(item.salesCents, item.costCents) })).sort((left, right) => right.reimbursementCents - left.reimbursementCents).slice(0, 30),
       alerts,
       statusBreakdown,
       approvals,
@@ -218,6 +249,17 @@ export async function GET(request: Request) {
       activeImportId,
       canReview: isManager(profile),
       canManageClients: isClientManager(profile),
+      canViewFactoryDashboard: isManager(profile),
+      factoryDashboard: isManager(profile) ? {
+        marginByProgram: Object.values(factoryMarginByProgram).map((item) => ({ ...item, marginBps: calculatedMarginBps(item.salesCents, item.costCents) })),
+        salesByMonthAndDealership: [...factorySalesByMonth.values()].map((item) => ({
+          ...item,
+          totalMarginBps: calculatedMarginBps(item.salesCents, item.costCents),
+          n2MarginBps: calculatedMarginBps(item.n2SalesCents, item.n2CostCents),
+          n3MarginBps: calculatedMarginBps(item.n3SalesCents, item.n3CostCents),
+          normalMarginBps: calculatedMarginBps(item.normalSalesCents, item.normalCostCents),
+        })).sort((left, right) => right.month.localeCompare(left.month) || right.salesCents - left.salesCents).slice(0, 120),
+      } : null,
       canSubmit: true,
       statuses: STATUS_VALUES,
     });

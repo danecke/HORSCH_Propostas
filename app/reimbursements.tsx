@@ -67,6 +67,10 @@ type Summary = {
 type Client = { id: number; legalName: string; cnpj: string; state: string; clientType: string; n2: boolean; n3: boolean; status: string };
 type ClientForm = { legalName: string; cnpj: string; state: string; clientType: string; n2: boolean; n3: boolean; status: string };
 type StatusBreakdown = { status: string; count: number; liquidTotalCents: number; reimbursementCents: number };
+type FactoryDashboard = {
+  marginByProgram: Array<{ key: "N2" | "N3" | "normal"; label: string; rows: number; quantity: number; salesCents: number; costCents: number; reimbursementCents: number; marginBps: number }>;
+  salesByMonthAndDealership: Array<{ month: string; dealershipName: string; rows: number; quantity: number; salesCents: number; costCents: number; n2SalesCents: number; n2CostCents: number; n3SalesCents: number; n3CostCents: number; normalSalesCents: number; normalCostCents: number; totalMarginBps: number; n2MarginBps: number; n3MarginBps: number; normalMarginBps: number }>;
+};
 type DashboardData = {
   imports: Batch[];
   sales: Sale[];
@@ -80,6 +84,8 @@ type DashboardData = {
   activeImportId: number;
   canReview: boolean;
   canManageClients: boolean;
+  canViewFactoryDashboard: boolean;
+  factoryDashboard: FactoryDashboard | null;
   statuses: string[];
 };
 
@@ -92,6 +98,11 @@ function formatBRL(cents: number | null | undefined) {
 
 function formatDate(value: string) {
   return value ? new Date(value).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "—";
+}
+
+function formatMonth(value: string) {
+  if (!/^\d{4}-\d{2}$/.test(value)) return value || "Sem referência";
+  return new Date(`${value}-01T12:00:00Z`).toLocaleDateString("pt-BR", { month: "short", year: "numeric", timeZone: "UTC" });
 }
 
 function formatPercent(basisPoints: number) {
@@ -460,7 +471,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
         </section>
       )}
 
-      {tab === "overview" && data && <ExecutiveOverview data={data} reimbursementTotal={reimbursementTotal} activeBatch={activeBatch} />}
+      {tab === "overview" && data && <ExecutiveOverview data={data} reimbursementTotal={reimbursementTotal} activeBatch={activeBatch} isFactoryView={data.canViewFactoryDashboard} />}
 
       {tab === "sales" && data && (
         <section className="panel reimbursement-detail-panel">
@@ -564,14 +575,23 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
   );
 }
 
-function ExecutiveOverview({ data, reimbursementTotal, activeBatch }: { data: DashboardData; reimbursementTotal: number; activeBatch?: Batch }) {
+function ExecutiveOverview({ data, reimbursementTotal, activeBatch, isFactoryView }: { data: DashboardData; reimbursementTotal: number; activeBatch?: Batch; isFactoryView: boolean }) {
   const maxStatus = Math.max(1, ...data.statusBreakdown.map((item) => item.count));
   return (
     <>
+      <section className={`reimbursement-view-context ${isFactoryView ? "factory" : "dealership"}`}>
+        <div>
+          <span className="eyebrow">{isFactoryView ? "Visão da fábrica" : "Visão da concessionária"}</span>
+          <h2>{isFactoryView ? "Controle consolidado da carteira" : "Acompanhamento da sua operação"}</h2>
+          <p>{isFactoryView ? "Acompanhe o lote atual e o histórico de vendas processadas por concessionária, mês e tipo de operação." : "Todos os indicadores operacionais permanecem disponíveis, sem a exibição da margem consolidada."}</p>
+        </div>
+        <span className="reimbursement-view-badge">{isFactoryView ? "Análise ampliada" : "Escopo da concessionária"}</span>
+      </section>
+
       <section className="reimbursement-kpi-grid">
         <article className="reimbursement-kpi primary"><span>Valor líquido vendido</span><strong>{formatBRL(data.summary.salesCents)}</strong><small>{data.summary.processedRows} registros no filtro atual</small></article>
         <article className="reimbursement-kpi accent"><span>Reembolso projetado</span><strong>{formatBRL(reimbursementTotal)}</strong><small>N2 + N3 elegíveis</small></article>
-        <article className="reimbursement-kpi"><span>Margem consolidada</span><strong>{formatPercent(data.summary.marginBps)}%</strong><small>Vendas líquidas versus custo</small></article>
+        {isFactoryView && <article className="reimbursement-kpi"><span>Margem consolidada</span><strong>{formatPercent(data.summary.marginBps)}%</strong><small>Vendas líquidas versus custo</small></article>}
         <article className="reimbursement-kpi"><span>Reembolso Nível 2</span><strong>{formatBRL(data.summary.reimbursementN2Cents)}</strong><small>{data.summary.eligibleN2Records} vendas elegíveis · 4%</small></article>
         <article className="reimbursement-kpi"><span>Reembolso Nível 3</span><strong>{formatBRL(data.summary.reimbursementN3Cents)}</strong><small>{data.summary.eligibleN3Records} vendas elegíveis · 7%</small></article>
         <article className="reimbursement-kpi danger"><span>Negociação fábrica</span><strong>{formatBRL(data.summary.negotiationCents)}</strong><small>Margem negativa em Nível 3</small></article>
@@ -617,8 +637,75 @@ function ExecutiveOverview({ data, reimbursementTotal, activeBatch }: { data: Da
         </article>
       </section>
 
+      {isFactoryView && data.factoryDashboard && <FactoryPerformanceDashboard dashboard={data.factoryDashboard} />}
+
       <ReimbursementVariationPanel sales={data.sales} />
     </>
+  );
+}
+
+function FactoryPerformanceDashboard({ dashboard }: { dashboard: FactoryDashboard }) {
+  return (
+    <section className="factory-dashboard">
+      <div className="factory-dashboard-heading">
+        <div>
+          <span className="eyebrow">Visão da fábrica</span>
+          <h2>Margem por tipo de venda</h2>
+          <p>O histórico acessível é separado entre Cliente Nível 2, Cliente Nível 3 e vendas normais para apoiar a decisão comercial.</p>
+        </div>
+      </div>
+
+      <div className="factory-margin-grid">
+        {dashboard.marginByProgram.map((segment) => (
+          <article className={`panel factory-margin-card ${segment.key}`} key={segment.key}>
+            <span className="eyebrow">{segment.label}</span>
+            <strong>{formatPercent(segment.marginBps)}%</strong>
+            <small>Margem sobre vendas líquidas</small>
+            <dl>
+              <div><dt>Faturamento</dt><dd>{formatBRL(segment.salesCents)}</dd></div>
+              <div><dt>Custo</dt><dd>{formatBRL(segment.costCents)}</dd></div>
+              <div><dt>Quantidade</dt><dd>{segment.quantity.toLocaleString("pt-BR")}</dd></div>
+              <div><dt>Reembolso</dt><dd>{formatBRL(segment.reimbursementCents)}</dd></div>
+            </dl>
+          </article>
+        ))}
+      </div>
+
+      <article className="panel factory-monthly-panel">
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">Histórico da carteira</span>
+            <h2>Vendas por mês e concessionária</h2>
+            <p>O mês usa a data de processamento do lote e respeita os filtros de PN, status e concessionária aplicados na conferência.</p>
+          </div>
+          <span className="section-count">{dashboard.salesByMonthAndDealership.length} agrupamentos</span>
+        </div>
+        <div className="reimbursement-table-wrap">
+          <table className="reimbursement-table factory-monthly-table">
+            <thead><tr><th>Mês</th><th>Concessionária</th><th>Linhas</th><th>Qtd.</th><th>Faturamento</th><th>Margem total</th><th>Vendas N2</th><th>Margem N2</th><th>Vendas N3</th><th>Margem N3</th><th>Vendas normais</th><th>Margem normal</th></tr></thead>
+            <tbody>
+              {dashboard.salesByMonthAndDealership.map((row) => (
+                <tr key={`${row.month}-${row.dealershipName}`}>
+                  <td><strong>{formatMonth(row.month)}</strong></td>
+                  <td>{row.dealershipName}</td>
+                  <td>{row.rows}</td>
+                  <td>{row.quantity.toLocaleString("pt-BR")}</td>
+                  <td>{formatBRL(row.salesCents)}</td>
+                  <td>{formatPercent(row.totalMarginBps)}%</td>
+                  <td>{formatBRL(row.n2SalesCents)}</td>
+                  <td>{formatPercent(row.n2MarginBps)}%</td>
+                  <td>{formatBRL(row.n3SalesCents)}</td>
+                  <td>{formatPercent(row.n3MarginBps)}%</td>
+                  <td>{formatBRL(row.normalSalesCents)}</td>
+                  <td>{formatPercent(row.normalMarginBps)}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!dashboard.salesByMonthAndDealership.length && <div className="empty-mini">Ainda não há vendas processadas na carteira para montar o histórico mensal.</div>}
+        </div>
+      </article>
+    </section>
   );
 }
 
