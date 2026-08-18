@@ -63,6 +63,18 @@ type NotificationResponse = {
   error?: string;
 };
 
+type PriceHistoryEntry = {
+  id: number;
+  actorName: string;
+  actorEmail: string;
+  action: string;
+  entity: string;
+  details: string;
+  beforeJson: string;
+  afterJson: string;
+  createdAt: string;
+};
+
 const MAX_UPLOAD_SIZE = 120 * 1024 * 1024;
 
 function money(cents: number | null | undefined) {
@@ -203,8 +215,8 @@ export function PriceListView({ me, mode = "consult" }: { me: PriceListAccess; m
     }
   }
 
-  async function saveRow(row: PriceRow, draft: { partNumber: string; description: string; family: string; unit: string; ncm: string; vt: string; origin: string; net: string; final: string; effectiveAt: string }) {
-    const response = await fetch("/api/price-list", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: row.id, state: row.state, partNumber: draft.partNumber, description: draft.description, family: draft.family, unit: draft.unit, ncm: draft.ncm, vt: draft.vt, origin: draft.origin, netPriceCents: parseMoney(draft.net), finalPriceCents: parseMoney(draft.final), effectiveAt: draft.effectiveAt }) });
+  async function saveRow(row: PriceRow, draft: { partNumber: string; description: string; family: string; unit: string; ncm: string; vt: string; origin: string; net: string; final: string; effectiveAt: string; justification: string }) {
+    const response = await fetch("/api/price-list", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: row.id, state: row.state, partNumber: draft.partNumber, description: draft.description, family: draft.family, unit: draft.unit, ncm: draft.ncm, vt: draft.vt, origin: draft.origin, netPriceCents: parseMoney(draft.net), finalPriceCents: parseMoney(draft.final), effectiveAt: draft.effectiveAt, justification: draft.justification }) });
     const payload = (await response.json()) as { error?: string; notification?: { recipientCount: number } | null };
     if (!response.ok) throw new Error(payload.error || "Não foi possível salvar o ajuste.");
     setEditing(null);
@@ -215,9 +227,11 @@ export function PriceListView({ me, mode = "consult" }: { me: PriceListAccess; m
 
   async function deleteRow(row: PriceRow) {
     if (!window.confirm(`Excluir o PN ${row.partNumber} da lista vigente? Essa ação remove o item de todas as UFs.`)) return;
+    const justification = window.prompt("Informe a justificativa da exclusão (mínimo de 10 caracteres):", "");
+    if (!justification || justification.trim().length < 10) return;
     setError("");
     try {
-      const response = await fetch("/api/price-list", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: row.id, effectiveAt: publishEffectiveAt }) });
+      const response = await fetch("/api/price-list", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: row.id, effectiveAt: publishEffectiveAt, justification }) });
       const payload = (await response.json()) as { error?: string; notification?: { recipientCount: number } | null };
       if (!response.ok) throw new Error(payload.error || "Não foi possível excluir o item.");
       setNotificationRefreshKey((current) => current + 1);
@@ -242,7 +256,9 @@ export function PriceListView({ me, mode = "consult" }: { me: PriceListAccess; m
     <PriceListNotificationCenter canManage={canManage} refreshKey={notificationRefreshKey} onNotice={setNotice} />
     {!adminMode && canManage && <div className="price-list-tabs" role="tablist" aria-label="Lista de preços"><button type="button" className={tab === "view" ? "active" : ""} onClick={() => setTab("view")}>Consultar lista</button><button type="button" className={tab === "admin" ? "active" : ""} onClick={() => setTab("admin")}>Administração</button></div>}
     {notice && <div className="price-list-notice" role="status">{notice}</div>}
-    {(adminMode || tab === "admin") && canManage ? <><section className="panel price-list-publish-settings"><div><span className="eyebrow">Vigência da atualização</span><h2>Defina quando a nova lista passa a valer</h2><p>Esta data será registrada no aviso automático enviado após a publicação do Excel.</p></div><label className="field"><span>Vigência a partir de</span><input type="date" value={publishEffectiveAt} onChange={(event) => setPublishEffectiveAt(event.target.value)} /></label></section><AdminPanel file={file} setFile={setFile} uploading={uploading} uploadProgress={uploadProgress} onSubmit={submitUpload} currentImport={data?.import ?? null} /></> : <>
+    {(adminMode || tab === "admin") && canManage && <><section className="panel price-list-publish-settings"><div><span className="eyebrow">Vigência da atualização</span><h2>Defina quando a nova lista passa a valer</h2><p>Esta data será registrada no aviso automático enviado após a publicação do Excel.</p></div><label className="field"><span>Vigência a partir de</span><input type="date" value={publishEffectiveAt} onChange={(event) => setPublishEffectiveAt(event.target.value)} /></label></section><AdminPanel file={file} setFile={setFile} uploading={uploading} uploadProgress={uploadProgress} onSubmit={submitUpload} currentImport={data?.import ?? null} /></>}
+    {canManage && <section className="panel price-list-maintenance-note"><div><span className="eyebrow">Ajuste pontual</span><h2>Edite um PN sem importar uma nova planilha</h2><p>Use o lápis na linha desejada para alterar preços e dados cadastrais. A justificativa é obrigatória e cada mudança ficará registrada no histórico abaixo.</p></div><strong>Histórico por PN</strong></section>}
+    <>
       <div className="price-list-state-tabs" role="tablist" aria-label="Estados disponíveis">{(data?.states ?? []).map((item) => <button type="button" role="tab" aria-selected={selectedState === item} key={item} className={selectedState === item ? "active" : ""} onClick={() => { setState(item); setPage(1); }}>{item}</button>)}</div>
       <div className="price-list-search-row"><label className="price-list-search-box"><span aria-hidden="true">⌕</span><input aria-label="Pesquisar por PN ou descrição" value={searchInput} onChange={(event) => setSearchInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { setSearch(searchInput); setPage(1); } }} placeholder="Pesquisar por PN (ex: 60027753) ou Descrição (ex: Tubo)..." /></label><button type="button" className="price-list-search-button" onClick={() => { setSearch(searchInput); setPage(1); }}>Buscar</button><button type="button" className="price-list-export-button" onClick={exportList} disabled={!data?.import || !selectedState}>⇩&nbsp; Exportar XLSX</button></div>
       <section className="panel price-list-panel">
@@ -251,7 +267,8 @@ export function PriceListView({ me, mode = "consult" }: { me: PriceListAccess; m
         {loading ? <div className="empty-mini">Carregando preços vigentes...</div> : !data?.import ? <EmptyPriceState text={canManage ? "Importe o primeiro arquivo na aba Administração." : "A Fábrica ainda não publicou uma lista de preços vigente."} /> : !data.rows.length ? <EmptyPriceState text="Nenhum item corresponde ao filtro informado." /> : <div className="price-list-table-wrap"><table className="price-list-table"><thead><tr><th>PN (PART NUMBER)</th><th>Descrição</th><th>Família</th><th>Unidade</th><th>NCM</th><th>VT</th><th>Origem</th><th>Netprice</th><th>Cliente final</th><th>Cliente nível 2</th><th>Cliente nível 3</th>{canManage && <th aria-label="Ações" />}</tr></thead><tbody>{data.rows.map((row) => <tr key={row.id}><td><strong>{row.partNumber}</strong></td><td><span>{row.description || "—"}</span></td><td>{row.family || "—"}</td><td>{row.unit || "—"}</td><td>{row.ncm || "—"}</td><td>{row.vt || "—"}</td><td>{row.origin || "—"}</td><td className="price-cell">{money(row.netPriceCents)}</td><td className="price-cell">{money(row.finalPriceCents)}</td><td className="price-cell">{money(row.n2PriceCents)}</td><td className="price-cell">{money(row.n3PriceCents)}</td>{canManage && <td><div className="table-row-actions"><button type="button" className="table-action-button" aria-label={`Editar ${row.partNumber}`} onClick={() => setEditing(row)}>✎</button><button type="button" className="table-action-button danger" aria-label={`Excluir ${row.partNumber}`} onClick={() => void deleteRow(row)}>×</button></div></td>}</tr>)}</tbody></table></div>}
         {data?.total ? <footer className="price-list-pagination"><span>{((page - 1) * (data.pageSize ?? 50) + 1).toLocaleString("pt-BR")}–{Math.min(page * (data.pageSize ?? 50), data.total).toLocaleString("pt-BR")} de {data.total.toLocaleString("pt-BR")} itens</span><div><button type="button" className="outline-button compact" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>Anterior</button><strong>Página {page} de {totalPages}</strong><button type="button" className="outline-button compact" disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>Próxima</button></div></footer> : null}
       </section>
-    </>}
+    </>
+    {canManage && <PriceListHistory refreshKey={notificationRefreshKey} />}
     {editing && <PriceEditor row={editing} onClose={() => setEditing(null)} onSave={saveRow} />}
   </div>;
 }
@@ -407,8 +424,8 @@ function EmptyPriceState({ text }: { text: string }) {
   return <div className="price-list-empty"><span>₿</span><strong>Lista de preços indisponível</strong><p>{text}</p></div>;
 }
 
-function PriceEditor({ row, onClose, onSave }: { row: PriceRow; onClose: () => void; onSave: (row: PriceRow, draft: { partNumber: string; description: string; family: string; unit: string; ncm: string; vt: string; origin: string; net: string; final: string; effectiveAt: string }) => Promise<void> }) {
-  const [draft, setDraft] = useState({ partNumber: row.partNumber, description: row.description, family: row.family, unit: row.unit, ncm: row.ncm, vt: row.vt, origin: row.origin, net: inputMoney(row.netPriceCents), final: inputMoney(row.finalPriceCents), effectiveAt: localDateValue() });
+function PriceEditor({ row, onClose, onSave }: { row: PriceRow; onClose: () => void; onSave: (row: PriceRow, draft: { partNumber: string; description: string; family: string; unit: string; ncm: string; vt: string; origin: string; net: string; final: string; effectiveAt: string; justification: string }) => Promise<void> }) {
+  const [draft, setDraft] = useState({ partNumber: row.partNumber, description: row.description, family: row.family, unit: row.unit, ncm: row.ncm, vt: row.vt, origin: row.origin, net: inputMoney(row.netPriceCents), final: inputMoney(row.finalPriceCents), effectiveAt: localDateValue(), justification: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   async function submit(event: FormEvent) {
@@ -435,6 +452,7 @@ function PriceEditor({ row, onClose, onSave }: { row: PriceRow; onClose: () => v
             <label className="field"><span>Cliente nível 2 · 90%</span><input inputMode="decimal" value={derivedInputMoney(draft.final, 0.9)} readOnly aria-label="Cliente nível 2 calculado automaticamente" /></label>
             <label className="field"><span>Cliente nível 3 · 80%</span><input inputMode="decimal" value={derivedInputMoney(draft.final, 0.8)} readOnly aria-label="Cliente nível 3 calculado automaticamente" /></label>
             <label className="field"><span>Vigência do ajuste</span><input type="date" value={draft.effectiveAt} onChange={(event) => setDraft({ ...draft, effectiveAt: event.target.value })} required /></label>
+            <label className="field price-editor-wide"><span>Justificativa da alteração</span><textarea value={draft.justification} onChange={(event) => setDraft({ ...draft, justification: event.target.value })} placeholder="Explique por que o PN ou o preço precisa ser alterado." minLength={10} maxLength={1000} rows={4} required /></label>
           </div>
           {error && <p className="form-error">{error}</p>}
         </div>
@@ -442,4 +460,56 @@ function PriceEditor({ row, onClose, onSave }: { row: PriceRow; onClose: () => v
       </form>
     </div>
   );
+}
+
+function PriceListHistory({ refreshKey }: { refreshKey: number }) {
+  const [entries, setEntries] = useState<PriceHistoryEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const load = useCallback(async () => {
+    setLoading(true); setError("");
+    try {
+      const response = await fetch(`/api/price-list?history=1&refresh=${refreshKey}`, { cache: "no-store" });
+      const payload = await response.json() as { entries?: PriceHistoryEntry[]; error?: string };
+      if (!response.ok) throw new Error(payload.error || "Não foi possível carregar o histórico.");
+      setEntries(payload.entries ?? []);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Não foi possível carregar o histórico.");
+    } finally { setLoading(false); }
+  }, [refreshKey]);
+  useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
+
+  return <section className="panel price-history-panel"><header className="panel-header"><div><span className="eyebrow">Governança dos preços</span><h2>Histórico de ajustes pontuais</h2><p>Registro dos PNs alterados, com justificativa, usuário, vigência e valores antes e depois.</p></div><strong>{entries.length} registros</strong></header>{loading ? <div className="empty-mini">Carregando histórico...</div> : error ? <div className="price-list-error">{error}</div> : !entries.length ? <div className="empty-mini">Nenhum ajuste pontual registrado.</div> : <div className="price-history-list">{entries.map((entry) => <PriceHistoryRow entry={entry} key={entry.id} />)}</div>}</section>;
+}
+
+function PriceHistoryRow({ entry }: { entry: PriceHistoryEntry }) {
+  const before = parseHistoryJson(entry.beforeJson);
+  const after = parseHistoryJson(entry.afterJson);
+  const state = String(after.state ?? before.state ?? "");
+  const beforePrices = historyStatePrices(before, state);
+  const afterPrices = historyStatePrices(after, state);
+  const justification = String(after.justification ?? entry.details.split("Justificativa:").slice(1).join("Justificativa:").trim() ?? "");
+  const pn = String(after.partNumber ?? before.partNumber ?? "—");
+  const action = entry.action === "price_list_item_deleted" ? "PN excluído" : "PN ajustado";
+  const values = [
+    ["Netprice", money(historyNumber(beforePrices.netPriceCents)), money(historyNumber(afterPrices.netPriceCents))],
+    ["Cliente final", money(historyNumber(beforePrices.final)), money(historyNumber(afterPrices.final))],
+  ].filter((item) => item[1] !== item[2]);
+  const textChanges = ["description", "family", "unit", "ncm", "vt", "origin"].filter((field) => String(before[field] ?? "") !== String(after[field] ?? ""));
+  return <article className="price-history-row"><div className="price-history-row-head"><div><strong>PN {pn}</strong><span>{state ? `UF ${state}` : "Lista vigente"} · {action}</span></div><div><strong>{formatDate(entry.createdAt)}</strong><small>{entry.actorName || entry.actorEmail}</small></div></div><div className="price-history-row-body"><div className="price-history-values">{values.map(([label, oldValue, newValue]) => <div key={label}><span>{label}</span><small>{oldValue}</small><b>→</b><strong>{newValue}</strong></div>)}{textChanges.length > 0 && <div><span>Dados alterados</span><strong>{textChanges.join(", ")}</strong></div>}{!values.length && !textChanges.length && <div><span>Registro</span><strong>Exclusão do item</strong></div>}</div><p><strong>Justificativa:</strong> {justification || entry.details}</p><small>Vigência: {String(after.effectiveAt ?? "não informada")}</small></div></article>;
+}
+
+function parseHistoryJson(value: string): Record<string, unknown> {
+  try { const parsed = JSON.parse(value) as unknown; return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : {}; } catch { return {}; }
+}
+
+function historyStatePrices(snapshot: Record<string, unknown>, state: string) {
+  const prices = snapshot.statePrices;
+  if (!prices || typeof prices !== "object") return {} as Record<string, unknown>;
+  const selected = (prices as Record<string, unknown>)[state];
+  return selected && typeof selected === "object" ? selected as Record<string, unknown> : {} as Record<string, unknown>;
+}
+
+function historyNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }

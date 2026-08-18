@@ -1,7 +1,7 @@
 import { desc, eq, ne } from "drizzle-orm";
 import { unzipSync, zipSync } from "fflate";
 import { getDb } from "../../../db";
-import { dealerships, priceListImports, priceListItems } from "../../../db/schema";
+import { auditLogs, dealerships, priceListImports, priceListItems } from "../../../db/schema";
 import { getAccessProfile, isModuleEnabled, type AccessProfile } from "../../../lib/access";
 import { recordAudit } from "../../../lib/audit";
 import { createPriceListNotification } from "../../../lib/price-list-notifications";
@@ -323,6 +323,11 @@ export async function GET(request: Request) {
   if (!profile) return errorResponse("Acesso não autorizado.", 403);
   try {
     const db = await getDb();
+    if (new URL(request.url).searchParams.get("history") === "1") {
+      if (!canManage(profile)) return errorResponse("Somente Gestão Global e ADM Geral podem visualizar os ajustes pontuais.", 403);
+      const entries = await db.select().from(auditLogs).where(eq(auditLogs.entity, "price_list")).orderBy(desc(auditLogs.createdAt), desc(auditLogs.id)).limit(500);
+      return Response.json({ entries: entries.filter((entry) => ["price_list_item_updated", "price_list_item_deleted"].includes(entry.action)) });
+    }
     const record = await activeImport(db);
     if (!record) return Response.json({ import: null, rows: [], catalog: [], total: 0, states: [], selectedState: "", canManage: canManage(profile) });
     const available = JSON.parse(record.statesJson) as string[];
@@ -480,12 +485,14 @@ export async function PATCH(request: Request) {
   if (!profile) return errorResponse("Acesso não autorizado.", 403);
   if (!canManage(profile)) return errorResponse("Somente Gestão Global e ADM Geral podem alterar a lista de preços.", 403);
   try {
-    const payload = (await request.json()) as { id?: number; state?: string; partNumber?: string; description?: string; family?: string; unit?: string; ncm?: string; vt?: string; origin?: string; netPriceCents?: number | null; finalPriceCents?: number | null; effectiveAt?: string };
+    const payload = (await request.json()) as { id?: number; state?: string; partNumber?: string; description?: string; family?: string; unit?: string; ncm?: string; vt?: string; origin?: string; netPriceCents?: number | null; finalPriceCents?: number | null; effectiveAt?: string; justification?: string };
     const id = Math.trunc(Number(payload.id) || 0);
     const state = String(payload.state ?? "").trim().toUpperCase();
     const requestedEffectiveAt = String(payload.effectiveAt ?? "").trim();
+    const justification = String(payload.justification ?? "").trim().replace(/\s+/g, " ");
     if (!id || !STATES.includes(state)) return errorResponse("Informe item e UF válidos.");
     if (requestedEffectiveAt && !isValidEffectiveDate(requestedEffectiveAt)) return errorResponse("Informe uma data de vigência válida.");
+    if (justification.length < 10 || justification.length > 1000) return errorResponse("Informe uma justificativa entre 10 e 1.000 caracteres.");
     const db = await getDb();
     const record = await activeImport(db);
     if (!record) return errorResponse("Importe uma lista de preços antes de editar.", 409);
@@ -507,7 +514,7 @@ export async function PATCH(request: Request) {
     statePrices[state] = next;
     const nextNet = payload.netPriceCents === undefined || payload.netPriceCents === null ? item.netPriceCents : Math.max(0, Math.trunc(Number(payload.netPriceCents) || 0));
     await db.update(priceListItems).set({ ...textUpdates, netPriceCents: nextNet, statePricesJson: JSON.stringify(statePrices), updatedAt: new Date().toISOString() }).where(eq(priceListItems.id, id));
-    await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "price_list_item_updated", entity: "price_list", details: `Item ${item.partNumber} ajustado para ${state}.`, before: { partNumber: item.partNumber, state, statePrices: current }, after: { partNumber: item.partNumber, state, statePrices: next } });
+    await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "price_list_item_updated", entity: "price_list", details: `Item ${item.partNumber} ajustado para ${state}. Justificativa: ${justification}`, before: { partNumber: item.partNumber, description: item.description, family: item.family, unit: item.unit, ncm: item.ncm, vt: item.vt, origin: item.origin, state, statePrices: current }, after: { partNumber: textUpdates.partNumber ?? item.partNumber, description: textUpdates.description ?? item.description, family: textUpdates.family ?? item.family, unit: textUpdates.unit ?? item.unit, ncm: textUpdates.ncm ?? item.ncm, vt: textUpdates.vt ?? item.vt, origin: textUpdates.origin ?? item.origin, state, statePrices: next, justification, effectiveAt: requestedEffectiveAt || new Date().toISOString().slice(0, 10) } });
     const notification = await automaticPriceListNotification(db, profile, item.partNumber, 1, requestedEffectiveAt || new Date().toISOString().slice(0, 10));
     return Response.json({ ok: true, notification });
   } catch (error) {
@@ -520,18 +527,20 @@ export async function DELETE(request: Request) {
   if (!profile) return errorResponse("Acesso não autorizado.", 403);
   if (!canManage(profile)) return errorResponse("Somente Gestão Global e ADM Geral podem excluir itens da lista de preços.", 403);
   try {
-    const payload = (await request.json()) as { id?: number; effectiveAt?: string };
+    const payload = (await request.json()) as { id?: number; effectiveAt?: string; justification?: string };
     const id = Math.trunc(Number(payload.id) || 0);
     const requestedEffectiveAt = String(payload.effectiveAt ?? "").trim();
+    const justification = String(payload.justification ?? "").trim().replace(/\s+/g, " ");
     if (!id) return errorResponse("Informe um item válido.");
     if (requestedEffectiveAt && !isValidEffectiveDate(requestedEffectiveAt)) return errorResponse("Informe uma data de vigência válida.");
+    if (justification.length < 10 || justification.length > 1000) return errorResponse("Informe uma justificativa entre 10 e 1.000 caracteres.");
     const db = await getDb();
     const record = await activeImport(db);
     if (!record) return errorResponse("Não há lista de preços vigente para alterar.", 409);
     const [item] = await db.select().from(priceListItems).where(eq(priceListItems.id, id)).limit(1);
     if (!item || item.importId !== record.id) return errorResponse("Item não encontrado na lista vigente.", 404);
     await db.delete(priceListItems).where(eq(priceListItems.id, id));
-    await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "price_list_item_deleted", entity: "price_list", details: `Item ${item.partNumber} excluído da lista vigente.`, before: { id: item.id, partNumber: item.partNumber, description: item.description, family: item.family } });
+    await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "price_list_item_deleted", entity: "price_list", details: `Item ${item.partNumber} excluído da lista vigente. Justificativa: ${justification}`, before: { id: item.id, partNumber: item.partNumber, description: item.description, family: item.family, statePricesJson: item.statePricesJson }, after: { partNumber: item.partNumber, justification, effectiveAt: requestedEffectiveAt || new Date().toISOString().slice(0, 10) } });
     const notification = await automaticPriceListNotification(db, profile, item.partNumber, 1, requestedEffectiveAt || new Date().toISOString().slice(0, 10));
     return Response.json({ ok: true, notification });
   } catch (error) {
