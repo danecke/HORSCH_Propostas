@@ -324,17 +324,22 @@ export async function GET(request: Request) {
   try {
     const db = await getDb();
     const record = await activeImport(db);
-    if (!record) return Response.json({ import: null, rows: [], total: 0, states: [], selectedState: "", canManage: canManage(profile) });
+    if (!record) return Response.json({ import: null, rows: [], catalog: [], total: 0, states: [], selectedState: "", canManage: canManage(profile) });
     const available = JSON.parse(record.statesJson) as string[];
     const states = await visibleStates(db, profile, available);
     if (profile.dealershipId && !(await isModuleEnabled(db, profile.dealershipId, "price_list")) && !canManage(profile)) return errorResponse("O módulo Lista de preços não está habilitado para esta concessionária.", 403);
     const requestedState = new URL(request.url).searchParams.get("state")?.trim().toUpperCase() ?? "";
     const selectedState = states.includes(requestedState) ? requestedState : states[0] ?? "";
     const search = new URL(request.url).searchParams.get("q")?.trim().toLocaleLowerCase("pt-BR") ?? "";
+    const catalogMode = new URL(request.url).searchParams.get("catalog") === "1";
     const page = Math.max(1, Math.trunc(Number(new URL(request.url).searchParams.get("page") ?? 1) || 1));
     const pageSize = Math.min(100, Math.max(10, Math.trunc(Number(new URL(request.url).searchParams.get("pageSize") ?? 50) || 50)));
     const items = await db.select().from(priceListItems).where(eq(priceListItems.importId, record.id));
     const filtered = items.filter((item) => !search || [item.partNumber, item.description, item.family, item.vt].some((value) => value.toLocaleLowerCase("pt-BR").includes(search)));
+    if (catalogMode) {
+      const catalog = filtered.map((item) => ({ partNumber: item.partNumber, description: item.description, family: item.family })).sort((left, right) => left.partNumber.localeCompare(right.partNumber, "pt-BR"));
+      return Response.json({ import: importSummary(record), catalog, total: catalog.length, states, selectedState, canManage: canManage(profile) });
+    }
     const projected = selectedState ? filtered.map((item) => projectItem(item, selectedState)) : [];
     if (new URL(request.url).searchParams.get("export") === "xlsx" && selectedState) return exportXlsx(projected, selectedState);
     const start = (page - 1) * pageSize;

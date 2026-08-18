@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 export type LeadStage = "new" | "contacted" | "qualified" | "proposal" | "negotiation" | "won" | "lost";
 export type LeadTemperature = "cold" | "warm" | "hot";
@@ -30,12 +30,14 @@ export type LeadGroup = { label: string; total: number; open: number; won: numbe
 export type LeadPartInsight = { partNumber: string; stage: LeadStage; stageLabel: string; customers: string[]; leadCount: number; valueCents: number };
 export type LeadCustomerMachineInsight = { customerName: string; machineDomain: string; dealership: string; sellerName: string; stage: LeadStage; partNumbers: string; temperature: LeadTemperature; negotiatedValueCents: number; updatedAt: string };
 export type LeadModuleData = { leads: Lead[]; leadDetails: Lead[]; byPartNumberStage: LeadPartInsight[]; customerMachines: LeadCustomerMachineInsight[]; metrics: LeadGroup; byDealership: LeadGroup[]; bySeller: LeadGroup[]; sellers: Array<{ email: string; name: string; dealershipId: number | null }>; canEdit: boolean; metricsOnly: boolean };
+type PriceCatalogItem = { partNumber: string; description: string; family: string };
 
 type CurrentAccess = { email: string; name: string; role: string };
 
 const STAGE_LABELS: Record<LeadStage, string> = { new: "Novo", contacted: "Contato", qualified: "Qualificado", proposal: "Proposta", negotiation: "Negociação", won: "Fechado", lost: "Perdido" };
 const TEMPERATURE_LABELS: Record<LeadTemperature, string> = { cold: "Frio", warm: "Morno", hot: "Quente" };
 const STAGE_ORDER: LeadStage[] = ["new", "contacted", "qualified", "proposal", "negotiation", "won", "lost"];
+const MACHINE_MODEL_OPTIONS = ["Joker", "Terrano", "Tiger", "Pronto", "Cruiser", "Maestro", "Avatar", "Leeb", "Finer", "Transformer", "Sprinter", "Focus", "Partner", "Express", "Cultro"];
 
 function money(cents: number) {
   return (cents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -61,10 +63,24 @@ function stageClass(stage: LeadStage) {
   return `lead-stage ${stage}`;
 }
 
+function splitValues(value: string) {
+  return value.split(/[,;\n]+/).map((item) => item.trim()).filter(Boolean);
+}
+
 export function HorschLeadsView({ data, me, onChanged }: { data: LeadModuleData; me: CurrentAccess; onChanged: (message: string) => Promise<void> }) {
   const [term, setTerm] = useState("");
   const [editing, setEditing] = useState<Lead | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [priceCatalog, setPriceCatalog] = useState<PriceCatalogItem[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/price-list?catalog=1", { cache: "no-store" }).then(async (response) => {
+      if (!response.ok) return;
+      const payload = await response.json() as { catalog?: PriceCatalogItem[] };
+      if (!cancelled) setPriceCatalog(payload.catalog ?? []);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
   const filtered = useMemo(() => {
     const normalized = term.trim().toLocaleLowerCase("pt-BR");
     return data.leads.filter((lead) => !normalized || [lead.customerName, lead.phone, lead.email, lead.machineDomain, lead.partNumbers, lead.partsOfInterest, lead.sellerName].some((value) => value.toLocaleLowerCase("pt-BR").includes(normalized)));
@@ -90,7 +106,7 @@ export function HorschLeadsView({ data, me, onChanged }: { data: LeadModuleData;
     {data.metricsOnly ? <MetricsOnly data={data} /> : <>
       <section className="panel leads-list-panel"><header className="panel-header"><div><h2>Leads da concessionária</h2><p>Dados preenchidos pelos cargos da concessionária.</p></div><label className="leads-search"><span>Buscar</span><input value={term} onChange={(event) => setTerm(event.target.value)} placeholder="Nome, máquina, peça ou vendedor" /></label></header>{filtered.length ? <div className="lead-list">{filtered.map((lead) => <LeadCard key={lead.id} lead={lead} onEdit={() => { setEditing(lead); setShowForm(true); }} />)}</div> : <div className="leads-empty"><strong>Nenhum lead registrado</strong><span>{term ? "Ajuste a busca ou cadastre uma nova oportunidade." : "Cadastre o primeiro lead para iniciar o funil."}</span></div>}</section>
     </>}
-    {showForm && <LeadModal lead={editing} me={me} sellers={data.sellers} onClose={() => { setShowForm(false); setEditing(null); }} onSaved={async (message) => { setShowForm(false); setEditing(null); await onChanged(message); }} />}
+    {showForm && <LeadModalEnhanced lead={editing} me={me} sellers={data.sellers} priceCatalog={priceCatalog} onClose={() => { setShowForm(false); setEditing(null); }} onSaved={async (message) => { setShowForm(false); setEditing(null); await onChanged(message); }} />}
   </div>;
 }
 
@@ -111,14 +127,58 @@ function MetricsOnly({ data }: { data: LeadModuleData }) {
   return <div className="lead-report-grid"><section className="panel lead-report-panel"><header className="panel-header"><div><h2>Temperatura dos negócios</h2><p>Prioridade comercial da rede.</p></div></header><div className="lead-report-list">{data.metrics.byTemperature.map((item) => <div key={item.label}><span className={`lead-temperature ${item.label.toLowerCase()}`}>{item.label}</span><strong>{item.count}</strong><small>{money(item.valueCents)}</small></div>)}</div></section><section className="panel lead-report-panel"><header className="panel-header"><div><h2>Por concessionária</h2><p>Volume, fechamentos e pipeline.</p></div></header><div className="lead-report-list">{data.byDealership.length ? data.byDealership.map((item) => <div key={item.label}><span>{item.label}</span><strong>{item.total}</strong><small>{item.won} fechados · {money(item.pipelineCents)} aberto</small></div>) : <div className="leads-empty">Sem dados para o módulo.</div>}</div></section><section className="panel lead-report-panel"><header className="panel-header"><div><h2>Por vendedor</h2><p>Resultado atribuído ao responsável.</p></div></header><div className="lead-report-list">{data.bySeller.length ? data.bySeller.map((item) => <div key={item.label}><span>{item.label}</span><strong>{item.total}</strong><small>{item.won} fechados · {money(item.wonCents)}</small></div>) : <div className="leads-empty">Sem vendedores registrados.</div>}</div></section></div>;
 }
 
-function LeadModal({ lead, me, sellers, onClose, onSaved }: { lead: Lead | null; me: CurrentAccess; sellers: LeadModuleData["sellers"]; onClose: () => void; onSaved: (message: string) => Promise<void> }) {
+function LeadModalEnhanced({ lead, me, sellers, priceCatalog, onClose, onSaved }: { lead: Lead | null; me: CurrentAccess; sellers: LeadModuleData["sellers"]; priceCatalog: PriceCatalogItem[]; onClose: () => void; onSaved: (message: string) => Promise<void> }) {
+  const sellerOptions = sellers.length ? sellers : [{ email: me.email, name: me.name, dealershipId: null }];
+  const existingMachine = lead?.machineDomain ?? "";
+  const [customerName, setCustomerName] = useState(lead?.customerName ?? "");
+  const [phone, setPhone] = useState(lead?.phone ?? "");
+  const [email, setEmail] = useState(lead?.email ?? "");
+  const [machineModel, setMachineModel] = useState(MACHINE_MODEL_OPTIONS.includes(existingMachine) ? existingMachine : "");
+  const [manualMachineModel, setManualMachineModel] = useState(MACHINE_MODEL_OPTIONS.includes(existingMachine) ? "" : existingMachine);
+  const [useManualMachine, setUseManualMachine] = useState(Boolean(existingMachine && !MACHINE_MODEL_OPTIONS.includes(existingMachine)));
+  const [partSearch, setPartSearch] = useState("");
+  const [selectedPartNumbers, setSelectedPartNumbers] = useState<string[]>([]);
+  const [manualPartNumber, setManualPartNumber] = useState(lead?.partNumbers ?? "");
+  const [selectedFamilies, setSelectedFamilies] = useState<string[]>(() => splitValues(lead?.partsOfInterest ?? ""));
+  const [manualFamily, setManualFamily] = useState("");
+  const [temperature, setTemperature] = useState<LeadTemperature>(lead?.temperature ?? "warm");
+  const [stage, setStage] = useState<LeadStage>(lead?.stage ?? "new");
+  const [negotiatedValue, setNegotiatedValue] = useState(lead?.negotiatedValueCents ? formatMoneyInput(String(lead.negotiatedValueCents / 100)) : "");
+  const [invoiceNumber, setInvoiceNumber] = useState(lead?.invoiceNumber ?? "");
+  const [invoiceValue, setInvoiceValue] = useState(lead?.invoiceValueCents ? formatMoneyInput(String(lead.invoiceValueCents / 100)) : "");
+  const [sellerName, setSellerName] = useState(lead?.sellerName || me.name);
+  const [sellerEmail, setSellerEmail] = useState(lead?.sellerEmail || me.email);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const familyOptions = useMemo(() => Array.from(new Set(priceCatalog.map((item) => item.family.trim()).filter(Boolean))).sort((left, right) => left.localeCompare(right, "pt-BR")), [priceCatalog]);
+  const partMatches = useMemo(() => {
+    const normalized = partSearch.trim().toLocaleLowerCase("pt-BR");
+    if (!normalized) return priceCatalog.slice(0, 10);
+    return priceCatalog.filter((item) => [item.partNumber, item.description].some((value) => value.toLocaleLowerCase("pt-BR").includes(normalized))).slice(0, 12);
+  }, [partSearch, priceCatalog]);
+  function chooseSeller(value: string) { setSellerName(value); const option = sellerOptions.find((item) => item.name === value); if (option) setSellerEmail(option.email); }
+  function togglePartNumber(value: string) { setSelectedPartNumbers((current) => current.includes(value) ? current.filter((item) => item !== value) : [...current, value]); }
+  async function submit(event: React.FormEvent) {
+    event.preventDefault(); setSaving(true); setError("");
+    const resolvedMachineModel = useManualMachine ? manualMachineModel.trim() : machineModel;
+    const resolvedPartNumbers = [...selectedPartNumbers, ...splitValues(manualPartNumber)].filter((value, index, values) => values.indexOf(value) === index).join(", ");
+    const resolvedFamilies = [...selectedFamilies, ...splitValues(manualFamily)].filter((value, index, values) => values.indexOf(value) === index).join(", ");
+    const response = await fetch("/api/leads", { method: lead ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...(lead ? { id: lead.id } : {}), customerName, phone, email, machineDomain: resolvedMachineModel, partNumbers: resolvedPartNumbers, partsOfInterest: resolvedFamilies, temperature, stage, negotiatedValueCents: parseMoney(negotiatedValue), invoiceNumber, invoiceValueCents: parseMoney(invoiceValue), sellerName, sellerEmail }) });
+    const payload = await response.json() as { error?: string };
+    if (!response.ok) { setError(payload.error || "Não foi possível salvar o lead."); setSaving(false); return; }
+    await onSaved(lead ? "Lead atualizado com sucesso." : "Lead cadastrado no funil.");
+  }
+  return <div className="modal-backdrop" role="dialog" aria-modal="true"><form className="lead-modal" onSubmit={(event) => void submit(event)}><header className="modal-header"><div><span className="eyebrow">Horsch Leads</span><h2>{lead ? "Editar lead" : "Novo lead"}</h2><p>Use as listas oficiais para manter modelos, famílias e PNs padronizados.</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Fechar">×</button></header><div className="form-scroll"><div className="lead-form-grid"><label className="field"><span>Nome do cliente</span><input value={customerName} onChange={(event) => setCustomerName(event.target.value)} required autoFocus /></label><label className="field"><span>Telefone</span><input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="(00) 00000-0000" /></label><label className="field"><span>E-mail</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="cliente@email.com" /></label><label className="field"><span>Vendedor</span><input list="lead-sellers" value={sellerName} onChange={(event) => chooseSeller(event.target.value)} required /><datalist id="lead-sellers">{sellerOptions.map((item) => <option key={item.email} value={item.name}>{item.email}</option>)}</datalist></label><div className="field"><span>Modelo da máquina</span>{useManualMachine ? <><input value={manualMachineModel} onChange={(event) => setManualMachineModel(event.target.value)} placeholder="Digite o modelo não encontrado" autoFocus /><button type="button" className="text-button lead-picker-reset" onClick={() => { setUseManualMachine(false); setManualMachineModel(""); }}>Voltar para a lista</button></> : <select value={machineModel} onChange={(event) => { if (event.target.value === "__manual") { setUseManualMachine(true); setMachineModel(""); } else setMachineModel(event.target.value); }}><option value="">Selecione o modelo</option>{MACHINE_MODEL_OPTIONS.map((model) => <option key={model} value={model}>{model}</option>)}<option value="__manual">Não encontrei o modelo — digitar</option></select>}</div><div className="field lead-pn-field"><span>PNs de interesse da lista de preços</span><input value={partSearch} onChange={(event) => setPartSearch(event.target.value)} placeholder="Pesquisar PN ou descrição" />{partMatches.length ? <div className="lead-pn-options">{partMatches.map((item) => <button type="button" key={item.partNumber} className={selectedPartNumbers.includes(item.partNumber) ? "active" : ""} onClick={() => togglePartNumber(item.partNumber)}><strong>{item.partNumber}</strong><small>{item.description || "Descrição não informada"}</small></button>)}</div> : <small className="field-hint">Nenhum PN da lista foi localizado.</small>}{selectedPartNumbers.length > 0 && <div className="lead-selected-values">{selectedPartNumbers.map((item) => <span key={item}>{item}</span>)}</div>}{(manualPartNumber || (partSearch.trim() && !partMatches.length)) && <label className="field lead-manual-field"><span>PN não encontrado na lista — digitar manualmente</span><input value={manualPartNumber} onChange={(event) => setManualPartNumber(event.target.value)} placeholder="PN manual ou vários separados por vírgula" /></label>}</div><label className="field"><span>Temperatura</span><select value={temperature} onChange={(event) => setTemperature(event.target.value as LeadTemperature)}>{Object.entries(TEMPERATURE_LABELS).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><label className="field"><span>Etapa do funil</span><select value={stage} onChange={(event) => setStage(event.target.value as LeadStage)}>{STAGE_ORDER.map((value) => <option value={value} key={value}>{STAGE_LABELS[value]}</option>)}</select></label><label className="field"><span>Valor negociado</span><input inputMode="decimal" value={negotiatedValue} onChange={(event) => setNegotiatedValue(event.target.value)} onBlur={(event) => setNegotiatedValue(formatMoneyInput(event.target.value))} placeholder="R$ 0,00" /></label>{stage === "won" && <label className="field"><span>Valor da NF</span><input inputMode="decimal" value={invoiceValue} onChange={(event) => setInvoiceValue(event.target.value)} onBlur={(event) => setInvoiceValue(formatMoneyInput(event.target.value))} placeholder="R$ 0,00" required /><small className="field-hint">Deve ser igual ao valor negociado.</small></label>}<div className="field lead-parts-field"><span>Família de peças</span>{familyOptions.length ? <select multiple size={Math.min(7, Math.max(4, familyOptions.length))} value={selectedFamilies.filter((item) => familyOptions.includes(item))} onChange={(event) => setSelectedFamilies(Array.from(event.target.selectedOptions, (option) => option.value))}>{familyOptions.map((family) => <option value={family} key={family}>{family}</option>)}</select> : <small className="field-hint">Carregando as famílias disponíveis na lista de preços...</small>}<small className="field-hint">Use Ctrl ou Command para selecionar mais de uma família.</small><input value={manualFamily} onChange={(event) => setManualFamily(event.target.value)} placeholder="Família não encontrada — digitar manualmente" /></div>{stage === "won" && <label className="field"><span>NF do fechamento</span><input value={invoiceNumber} onChange={(event) => setInvoiceNumber(event.target.value)} placeholder="Número da nota fiscal" required /></label>}</div>{error && <p className="form-error">{error}</p>}</div><footer className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button type="submit" className="primary-button" disabled={saving}>{saving ? "Salvando..." : lead ? "Salvar alterações" : "Cadastrar lead"}</button></footer></form></div>;
+}
+
+export function LeadModal({ lead, me, sellers, onClose, onSaved }: { lead: Lead | null; me: CurrentAccess; sellers: LeadModuleData["sellers"]; onClose: () => void; onSaved: (message: string) => Promise<void> }) {
   const sellerOptions = sellers.length ? sellers : [{ email: me.email, name: me.name, dealershipId: null }];
   const [customerName, setCustomerName] = useState(lead?.customerName ?? "");
   const [phone, setPhone] = useState(lead?.phone ?? "");
   const [email, setEmail] = useState(lead?.email ?? "");
   const [machineDomain, setMachineDomain] = useState(lead?.machineDomain ?? "");
   const [partNumbers, setPartNumbers] = useState(lead?.partNumbers ?? "");
-  const [partsOfInterest, setPartsOfInterest] = useState(lead?.partsOfInterest ?? "");
+ const [partsOfInterest, setPartsOfInterest] = useState(lead?.partsOfInterest ?? "");
   const [temperature, setTemperature] = useState<LeadTemperature>(lead?.temperature ?? "warm");
   const [stage, setStage] = useState<LeadStage>(lead?.stage ?? "new");
   const [negotiatedValue, setNegotiatedValue] = useState(lead?.negotiatedValueCents ? formatMoneyInput(String(lead.negotiatedValueCents / 100)) : "");

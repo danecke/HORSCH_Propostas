@@ -439,7 +439,26 @@ type QuoteInsight = {
   averageCycleDays: number | null;
   lastRequest: string;
   priceListIncluded: boolean;
+  funnelStage: QuoteFunnelStage;
 };
+
+type QuoteFunnelStage = { label: string; detail: string; tone: "positive" | "attention" | "negative" | "neutral" };
+
+function getQuoteFunnelStage(quotes: Quote[]): QuoteFunnelStage {
+  const orderInput = quotes.filter((quote) => quote.status === "order_input").length;
+  const orderPending = quotes.filter((quote) => quote.status === "order_pending").length;
+  const returned = quotes.filter((quote) => quote.status === "returned").length;
+  const analysis = quotes.filter((quote) => ["global_review", "data_pending"].includes(quote.status)).length;
+  const approved = quotes.filter((quote) => quote.status === "approved").length;
+  const rejected = quotes.filter((quote) => quote.status === "rejected").length;
+  if (orderInput) return { label: "Pedido lançado", detail: `${orderInput} pedido(s) · preparar estoque`, tone: "positive" };
+  if (orderPending) return { label: "Aguardando input", detail: `${orderPending} aprovado(s) · reservar estoque`, tone: "attention" };
+  if (returned) return { label: "Aguardando aprovação", detail: `${returned} retorno(s) · sem separação`, tone: "attention" };
+  if (analysis) return { label: "Análise da fábrica", detail: `${analysis} cotação(ões) · sem separação`, tone: "neutral" };
+  if (approved) return { label: "Aprovada", detail: `${approved} aprovada(s) · acompanhar`, tone: "positive" };
+  if (rejected) return { label: "Encerrada", detail: `${rejected} negativa(s) · sem preparação`, tone: "negative" };
+  return { label: "Em cotação", detail: "Sem decisão registrada", tone: "neutral" };
+}
 
 function buildQuoteInsights(quotes: Quote[]) {
   const groups = new Map<string, Quote[]>();
@@ -474,6 +493,7 @@ function buildQuoteInsights(quotes: Quote[]) {
       averageCycleDays: cycleDays.length ? Math.round(cycleDays.reduce((sum, days) => sum + days, 0) / cycleDays.length) : null,
       lastRequest: items.map((quote) => quote.requestedAt).sort().at(-1) || first.requestedAt,
       priceListIncluded: items.some((quote) => quote.priceListIncluded),
+      funnelStage: getQuoteFunnelStage(items),
     };
   }).sort((left, right) => right.requests - left.requests || right.orders - left.orders || right.lastRequest.localeCompare(left.lastRequest));
 }
@@ -526,8 +546,8 @@ function QuoteAnalysisView({ quotes, me, onChanged }: { quotes: Quote[]; me: Cur
     if (!selectedInsights.length) return;
     const escapeCsv = (value: string | number) => `"${String(value).replace(/"/g, '""')}"`;
     const rows = [
-      ["PN", "Descrição", "VT", "Origem", "Net price", "Quantidade aprovada", "Recomendação", "Já incluído na lista"],
-      ...selectedInsights.map((insight) => [insight.partNumber, insight.description, insight.vt, insight.origin, insight.netPriceCents ? formatBRL(insight.netPriceCents) : "", insight.approvedQuantity, quoteRecommendation(insight).label, insight.priceListIncluded ? "Sim" : "Não"]),
+      ["PN", "Descrição", "VT", "Origem", "Net price", "Quantidade aprovada", "Etapa do funil", "Recomendação", "Já incluído na lista"],
+      ...selectedInsights.map((insight) => [insight.partNumber, insight.description, insight.vt, insight.origin, insight.netPriceCents ? formatBRL(insight.netPriceCents) : "", insight.approvedQuantity, insight.funnelStage.label, quoteRecommendation(insight).label, insight.priceListIncluded ? "Sim" : "Não"]),
     ];
     const blob = new Blob(["\ufeff" + rows.map((row) => row.map(escapeCsv).join(";")).join("\n")], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -550,7 +570,7 @@ function QuoteAnalysisView({ quotes, me, onChanged }: { quotes: Quote[]; me: Cur
     <header className="analysis-heading"><div><span className="eyebrow">Decisão de portfólio</span><h2>Análise 360º</h2><p>Exporte os itens recomendados e marque os PNs já incluídos na lista de preços.</p></div><div className="analysis-controls"><label><span>Período</span><select value={period} onChange={(event) => setPeriod(event.target.value as "all" | "30" | "90")}><option value="all">Todo o histórico</option><option value="90">Últimos 90 dias</option><option value="30">Últimos 30 dias</option></select></label><label className="analysis-search"><span>Localizar PN</span><input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="PN, descrição ou VT" /></label></div></header>
     <section className="analysis-summary-grid"><MetricCard label="PNs analisados" value={String(insights.length)} meta="Itens distintos no recorte" icon="file" tone="red" /><MetricCard label="Priorizar lista" value={String(priorityCount)} meta="Quantidade aprovada > 5" icon="check" tone="green" /><MetricCard label="Já controlados" value={String(insights.filter((insight) => insight.priceListIncluded).length)} meta="Marcados na lista de preços" icon="history" tone="dark" /><MetricCard label="Unidades aprovadas" value={String(insights.reduce((sum, insight) => sum + insight.approvedQuantity, 0))} meta={`${orderCount} pedidos concluídos`} icon="money" tone="dark" /><MetricCard label="Em andamento" value={String(pendingCount)} meta="Ainda exigem acompanhamento" icon="clock" tone="amber" /></section>
     <section className="analysis-method panel"><div className="analysis-method-icon"><Icon name="trend" size={20} /></div><div><span className="eyebrow">Critério objetivo</span><strong>Recomendar lista quando a quantidade aprovada superar 5 unidades.</strong><p>A decisão usa a soma das quantidades aprovadas nas cotações do PN. O check registra o controle da lista e evita nova extração do mesmo item.</p></div><div className="analysis-bulk-actions"><button className="outline-button compact" type="button" onClick={selectRecommended}>Selecionar recomendados</button><button className="primary-button compact" type="button" disabled={!selectedInsights.length} onClick={downloadPriceList}>Baixar CSV ({selectedInsights.length})</button></div></section>
-    <div className="analysis-layout"><section className="panel analysis-ranking"><header className="analysis-section-header"><div><span className="eyebrow">Matriz de decisão</span><h2>Itens para lista de preços</h2><p>Marque os itens para exportar em massa. Clique na linha para ver os detalhes.</p></div><strong>{visibleInsights.length} itens</strong></header><div className="analysis-table-wrap"><table className="analysis-table"><thead><tr><th aria-label="Selecionar" /><th>PN / item</th><th>Aprovada</th><th>Pedidos</th><th>Concessionárias</th><th>Recomendação</th><th>Controle</th></tr></thead><tbody>{visibleInsights.map((insight) => { const recommendation = quoteRecommendation(insight); return <tr key={insight.partNumber} className={selected?.partNumber === insight.partNumber ? "selected" : ""} onClick={() => setSelectedPart(insight.partNumber)}><td><input aria-label={`Selecionar PN ${insight.partNumber}`} type="checkbox" checked={selectedParts.includes(insight.partNumber)} onChange={() => togglePart(insight.partNumber)} onClick={(event) => event.stopPropagation()} /></td><td><strong>{insight.partNumber}</strong><small>{insight.description}</small></td><td><strong>{insight.approvedQuantity} un.</strong><small>limite: 5</small></td><td><strong>{insight.orders}</strong><small>{insight.rejected} negativas</small></td><td><strong>{insight.dealerships}</strong><small>{insight.dealerships === 1 ? "rede local" : "rede HORSCH"}</small></td><td><span className={`analysis-recommendation ${recommendation.tone}`}>{recommendation.label}</span></td><td>{insight.priceListIncluded ? <span className="price-list-check"><Icon name="check" size={14} />Incluído</span> : <span className="price-list-pending">Pendente</span>}</td></tr>; })}</tbody></table>{!visibleInsights.length && <div className="empty-mini">Nenhum PN corresponde ao filtro informado.</div>}</div></section>{selected && <QuoteAnalysisDetail insight={selected} canManagePriceList={canManagePriceList} updating={updatingPart === selected.partNumber} onToggle={() => void togglePriceList(selected)} />}</div>
+    <div className="analysis-layout"><section className="panel analysis-ranking"><header className="analysis-section-header"><div><span className="eyebrow">Matriz de decisão</span><h2>Itens para lista de preços</h2><p>Marque os itens para exportar em massa. Clique na linha para ver os detalhes.</p></div><strong>{visibleInsights.length} itens</strong></header><div className="analysis-table-wrap"><table className="analysis-table"><thead><tr><th aria-label="Selecionar" /><th>PN / item</th><th>Aprovada</th><th>Pedidos</th><th>Concessionárias</th><th>Etapa do funil</th><th>Recomendação</th><th>Controle</th></tr></thead><tbody>{visibleInsights.map((insight) => { const recommendation = quoteRecommendation(insight); return <tr key={insight.partNumber} className={selected?.partNumber === insight.partNumber ? "selected" : ""} onClick={() => setSelectedPart(insight.partNumber)}><td><input aria-label={`Selecionar PN ${insight.partNumber}`} type="checkbox" checked={selectedParts.includes(insight.partNumber)} onChange={() => togglePart(insight.partNumber)} onClick={(event) => event.stopPropagation()} /></td><td><strong>{insight.partNumber}</strong><small>{insight.description}</small></td><td><strong>{insight.approvedQuantity} un.</strong><small>limite: 5</small></td><td><strong>{insight.orders}</strong><small>{insight.rejected} negativas</small></td><td><strong>{insight.dealerships}</strong><small>{insight.dealerships === 1 ? "rede local" : "rede HORSCH"}</small></td><td><span className={`analysis-funnel-stage ${insight.funnelStage.tone}`}>{insight.funnelStage.label}</span><small>{insight.funnelStage.detail}</small></td><td><span className={`analysis-recommendation ${recommendation.tone}`}>{recommendation.label}</span></td><td>{insight.priceListIncluded ? <span className="price-list-check"><Icon name="check" size={14} />Incluído</span> : <span className="price-list-pending">Pendente</span>}</td></tr>; })}</tbody></table>{!visibleInsights.length && <div className="empty-mini">Nenhum PN corresponde ao filtro informado.</div>}</div></section>{selected && <QuoteAnalysisDetail insight={selected} canManagePriceList={canManagePriceList} updating={updatingPart === selected.partNumber} onToggle={() => void togglePriceList(selected)} />}</div>
   </div>;
 }
 
