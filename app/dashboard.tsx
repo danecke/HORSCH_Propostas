@@ -2,7 +2,6 @@
 
 import type { FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import type { AppUser } from "../lib/auth";
 import { HorschLeadsView, type LeadModuleData } from "./horsch-leads";
 import { PriceListView, type PriceListAccess } from "./price-list";
@@ -2061,7 +2060,9 @@ function formatAuditValue(field: string, value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 function LoadingState() { return <div className="center-state"><span className="state-mark">H</span><h1>Preparando o portal comercial</h1><p>Carregando seu perfil e as informações autorizadas.</p></div>; }
-function ErrorState({ message, retry }: { message: string; retry: () => Promise<void> }) { return <div className="center-state"><span className="state-mark">!</span><h1>Acesso não disponível</h1><p>{message}</p><div className="state-actions"><button className="primary-button" onClick={() => void retry()}>Tentar novamente</button><Link className="outline-button" href="/">Voltar ao login</Link></div></div>; }
+function ErrorState({ message, retry }: { message: string; retry: () => Promise<void> }) {
+  return <div className="center-state"><span className="state-mark">!</span><h1>Acesso não disponível</h1><p>{message}</p><div className="state-actions"><button className="primary-button" onClick={() => void retry()}>Tentar novamente</button><a className="outline-button" href="/api/auth/logout">Voltar ao login</a></div></div>;
+}
 function EmptyState({ title, text }: { title: string; text: string }) { return <div className="empty-state"><span><Icon name="file" size={24} /></span><h3>{title}</h3><p>{text}</p></div>; }
 function EmptyMini({ text }: { text: string }) { return <div className="empty-mini">{text}</div>; }
 function formatBRL(cents: number) { return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 2 }).format(cents / 100); }
