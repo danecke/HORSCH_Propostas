@@ -1,0 +1,29 @@
+import { getDb } from "../db";
+
+const TABLE_STATEMENTS = [
+  `CREATE TABLE IF NOT EXISTS reimbursement_clients (id INTEGER PRIMARY KEY AUTOINCREMENT, legal_name TEXT NOT NULL, cnpj TEXT NOT NULL, state TEXT NOT NULL, client_type TEXT NOT NULL DEFAULT '', n2 INTEGER NOT NULL DEFAULT 0, n3 INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active', created_by_email TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS reimbursement_clients_cnpj_state_idx ON reimbursement_clients(cnpj, state)`,
+  `CREATE INDEX IF NOT EXISTS reimbursement_clients_state_idx ON reimbursement_clients(state)`,
+  `CREATE INDEX IF NOT EXISTS reimbursement_clients_status_idx ON reimbursement_clients(status)`,
+  `CREATE TABLE IF NOT EXISTS reimbursement_imports (id INTEGER PRIMARY KEY AUTOINCREMENT, file_name TEXT NOT NULL, storage_key TEXT NOT NULL DEFAULT '', content_type TEXT NOT NULL DEFAULT '', dealership_id INTEGER REFERENCES dealerships(id) ON DELETE SET NULL, price_list_import_id INTEGER REFERENCES price_list_imports(id) ON DELETE SET NULL, row_count INTEGER NOT NULL DEFAULT 0, total_quantity INTEGER NOT NULL DEFAULT 0, total_sales_cents INTEGER NOT NULL DEFAULT 0, total_cost_cents INTEGER NOT NULL DEFAULT 0, total_reimbursement_n2_cents INTEGER NOT NULL DEFAULT 0, total_reimbursement_n3_cents INTEGER NOT NULL DEFAULT 0, total_negotiation_cents INTEGER NOT NULL DEFAULT 0, tolerance_cents INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL DEFAULT 'processed', uploaded_by_email TEXT NOT NULL, uploaded_by_name TEXT NOT NULL DEFAULT '', decision_note TEXT NOT NULL DEFAULT '', decided_by_email TEXT NOT NULL DEFAULT '', decided_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+  `CREATE INDEX IF NOT EXISTS reimbursement_imports_dealership_idx ON reimbursement_imports(dealership_id)`,
+  `CREATE INDEX IF NOT EXISTS reimbursement_imports_status_idx ON reimbursement_imports(status)`,
+  `CREATE INDEX IF NOT EXISTS reimbursement_imports_created_at_idx ON reimbursement_imports(created_at)`,
+  `CREATE TABLE IF NOT EXISTS reimbursement_sales (id INTEGER PRIMARY KEY AUTOINCREMENT, import_id INTEGER NOT NULL REFERENCES reimbursement_imports(id) ON DELETE CASCADE, dealership_id INTEGER REFERENCES dealerships(id) ON DELETE SET NULL, client_id INTEGER REFERENCES reimbursement_clients(id) ON DELETE SET NULL, price_list_import_id INTEGER REFERENCES price_list_imports(id) ON DELETE SET NULL, part_number TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', quantity INTEGER NOT NULL DEFAULT 0, cost_avg_unit_cents INTEGER NOT NULL DEFAULT 0, sale_net_unit_cents INTEGER NOT NULL DEFAULT 0, invoice_unit_cents INTEGER NOT NULL DEFAULT 0, client_name TEXT NOT NULL DEFAULT '', client_cnpj TEXT NOT NULL DEFAULT '', invoice_number TEXT NOT NULL DEFAULT '', state TEXT NOT NULL DEFAULT '', dealership_name TEXT NOT NULL DEFAULT '', margin_bps INTEGER NOT NULL DEFAULT 0, cost_total_cents INTEGER NOT NULL DEFAULT 0, liquid_total_cents INTEGER NOT NULL DEFAULT 0, net_price_used_cents INTEGER, calculation_base_cents INTEGER NOT NULL DEFAULT 0, reimbursement_cents INTEGER NOT NULL DEFAULT 0, reimbursement_program TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'N2 Não Elegível', negotiation_cents INTEGER NOT NULL DEFAULT 0, expected_n3_cents INTEGER, price_difference_cents INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+  `CREATE INDEX IF NOT EXISTS reimbursement_sales_import_idx ON reimbursement_sales(import_id)`,
+  `CREATE INDEX IF NOT EXISTS reimbursement_sales_dealership_idx ON reimbursement_sales(dealership_id)`,
+  `CREATE INDEX IF NOT EXISTS reimbursement_sales_pn_idx ON reimbursement_sales(part_number)`,
+  `CREATE INDEX IF NOT EXISTS reimbursement_sales_status_idx ON reimbursement_sales(status)`,
+  `CREATE INDEX IF NOT EXISTS reimbursement_sales_invoice_idx ON reimbursement_sales(invoice_number)`,
+  `CREATE TABLE IF NOT EXISTS reimbursement_approvals (id INTEGER PRIMARY KEY AUTOINCREMENT, import_id INTEGER NOT NULL REFERENCES reimbursement_imports(id) ON DELETE CASCADE, action TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', actor_email TEXT NOT NULL, actor_name TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+  `CREATE INDEX IF NOT EXISTS reimbursement_approvals_import_idx ON reimbursement_approvals(import_id)`,
+  `CREATE INDEX IF NOT EXISTS reimbursement_approvals_created_at_idx ON reimbursement_approvals(created_at)`,
+] as const;
+
+export async function ensureReimbursementStorage() {
+  const { env } = await import("cloudflare:workers");
+  if (!env.DB) throw new Error("Cloudflare D1 binding `DB` indisponível.");
+  await env.DB.batch(TABLE_STATEMENTS.map((statement) => env.DB.prepare(statement)));
+  return getDb();
+}
+

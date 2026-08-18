@@ -18,13 +18,14 @@ export const PROPOSAL_RESPONSIBLE_ROLES = [
 ] as const;
 export type UserRole = (typeof ROLES)[number];
 
-export const MODULE_KEYS = ["proposals", "quotes", "price_list", "leads"] as const;
+export const MODULE_KEYS = ["proposals", "quotes", "price_list", "leads", "reimbursements"] as const;
 export type ModuleKey = (typeof MODULE_KEYS)[number];
 export const MODULE_LABELS: Record<ModuleKey, string> = {
   proposals: "Propostas",
   quotes: "Cotações",
   price_list: "Lista de preços",
   leads: "Horsch Leads",
+  reimbursements: "Reembolsos N2/N3",
 };
 
 export const LOWER_MANAGED_ROLES: Record<UserRole, readonly UserRole[]> = {
@@ -107,6 +108,10 @@ export function rolePermissions(role: UserRole) {
     createLead: ["dealer_manager", "concession"].includes(role),
     editLead: ["dealer_manager", "concession"].includes(role),
     viewLeadMetrics: ["general_admin", "global_management", "factory_manager", "dealer_manager", "concession"].includes(role),
+    viewReimbursements: true,
+    manageReimbursements: ["general_admin", "global_management", "factory_manager"].includes(role),
+    manageReimbursementClients: ["general_admin", "global_management"].includes(role),
+    approveReimbursements: ["general_admin", "global_management", "factory_manager"].includes(role),
   };
 }
 

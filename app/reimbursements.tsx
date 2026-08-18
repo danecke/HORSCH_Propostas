@@ -1,0 +1,208 @@
+"use client";
+
+import type { FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+
+export type ReimbursementAccess = {
+  role: string;
+  name: string;
+  dealershipId?: number | null;
+  permissions?: Record<string, boolean>;
+};
+
+type Dealer = { id: number; name: string; state?: string };
+type Batch = { id: number; fileName: string; status: string; rowCount: number; totalQuantity: number; totalSalesCents: number; totalReimbursementN2Cents: number; totalReimbursementN3Cents: number; totalNegotiationCents: number; createdAt: string; decisionNote: string };
+type Sale = { id: number; partNumber: string; description: string; clientName: string; clientCnpj: string; invoiceNumber: string; state: string; dealershipName: string; quantity: number; costTotalCents: number; liquidTotalCents: number; marginBps: number; marginPercent: number; netPriceUsedCents: number | null; calculationBaseCents: number; reimbursementCents: number; status: string; negotiationCents: number };
+type Summary = { salesCents: number; costCents: number; marginBps: number; reimbursementN2Cents: number; reimbursementN3Cents: number; negotiationCents: number; processedRows: number; totalQuantity: number };
+type Client = { id: number; legalName: string; cnpj: string; state: string; clientType: string; n2: boolean; n3: boolean; status: string };
+type ClientForm = { legalName: string; cnpj: string; state: string; clientType: string; n2: boolean; n3: boolean; status: string };
+type DashboardData = { imports: Batch[]; sales: Sale[]; summary: Summary; byDealership: Array<{ label: string; rows: number; quantity: number; salesCents: number; reimbursementCents: number; marginBps: number }>; byPartNumber: Array<{ partNumber: string; description: string; rows: number; quantity: number; salesCents: number; reimbursementCents: number; marginBps: number }>; alerts: Array<{ status: string; count: number }>; approvals: Array<{ action: string; note: string; actorName: string; createdAt: string }>; dealerships: Dealer[]; activeImportId: number; canReview: boolean; canManageClients: boolean; statuses: string[] };
+
+const EMPTY_CLIENT: ClientForm = { legalName: "", cnpj: "", state: "", clientType: "", n2: true, n3: false, status: "active" };
+
+function formatBRL(cents: number | null | undefined) {
+  return (Number(cents ?? 0) / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+function formatDate(value: string) {
+  return value ? new Date(value).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "—";
+}
+
+function parseCents(value: string) {
+  const clean = value.replace(/R\$\s?/g, "").replace(/\./g, "").replace(",", ".").replace(/[^\d.-]/g, "");
+  return Math.max(0, Math.round((Number(clean) || 0) * 100));
+}
+
+function statusClass(status: string) {
+  if (status.includes("Negociação") || status.includes("Divergência") || status.includes("Duplicada")) return "danger";
+  if (status.includes("Elegível")) return "success";
+  if (status.includes("Encontrado") || status.includes("Cadastro")) return "warning";
+  return "neutral";
+}
+
+function statusLabel(status: string) {
+  const labels: Record<string, string> = { processed: "Processado", submitted: "Enviado para aprovação", under_review: "Em análise", approved: "Aprovado", rejected: "Rejeitado", paid: "Pago" };
+  return labels[status] ?? status;
+}
+
+export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAccess; dealerships: Dealer[] }) {
+  const [tab, setTab] = useState<"overview" | "sales" | "import" | "clients">("overview");
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [activeBatchId, setActiveBatchId] = useState(0);
+  const [pnFilter, setPnFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [dealerFilter, setDealerFilter] = useState("");
+  const [uploadDealerId, setUploadDealerId] = useState("");
+  const [tolerance, setTolerance] = useState("0,01");
+  const [editingClient, setEditingClient] = useState<number | null>(null);
+  const [clientForm, setClientForm] = useState<ClientForm>(EMPTY_CLIENT);
+  const [busy, setBusy] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  const canReview = Boolean(data?.canReview) || ["general_admin", "global_management", "factory_manager"].includes(me.role);
+  const canManageClients = Boolean(data?.canManageClients) || ["general_admin", "global_management"].includes(me.role);
+  const visibleDealerships = dealerships.length ? dealerships : data?.dealerships ?? [];
+  const activeBatch = useMemo(() => data?.imports.find((item) => item.id === activeBatchId) ?? data?.imports[0], [activeBatchId, data?.imports]);
+
+  const load = useCallback(async () => {
+    setError("");
+    try {
+      const params = new URLSearchParams();
+      if (activeBatchId) params.set("batchId", String(activeBatchId));
+      if (pnFilter.trim()) params.set("pn", pnFilter.trim());
+      if (statusFilter !== "all") params.set("status", statusFilter);
+      if (dealerFilter) params.set("dealershipId", dealerFilter);
+      const response = await fetch(`/api/reimbursements?${params.toString()}`, { cache: "no-store" });
+      const payload = await response.json() as DashboardData & { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Não foi possível carregar os reembolsos.");
+      setData(payload);
+      if (!activeBatchId && payload.activeImportId) setActiveBatchId(payload.activeImportId);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Não foi possível carregar os reembolsos.");
+    }
+  }, [activeBatchId, dealerFilter, pnFilter, statusFilter]);
+
+  useEffect(() => { const timer = window.setTimeout(() => { void load(); }, 0); return () => window.clearTimeout(timer); }, [load]);
+
+  const loadClients = useCallback(async () => {
+    if (!canManageClients) return;
+    const response = await fetch("/api/reimbursement-clients", { cache: "no-store" });
+    const payload = await response.json() as { clients?: Client[]; error?: string };
+    if (!response.ok) throw new Error(payload.error || "Não foi possível carregar os clientes.");
+    setClients(payload.clients ?? []);
+  }, [canManageClients]);
+
+  useEffect(() => { if (tab !== "clients") return; const timer = window.setTimeout(() => { void loadClients().catch((loadError) => setError(loadError instanceof Error ? loadError.message : "Não foi possível carregar os clientes.")); }, 0); return () => window.clearTimeout(timer); }, [loadClients, tab]);
+
+  async function uploadSales(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const file = form.get("file");
+    if (!(file instanceof File) || !file.size) { setError("Selecione a planilha de vendas."); return; }
+    setBusy(true); setError(""); setMessage(""); setUploadProgress(1);
+    try {
+      const initResponse = await fetch("/api/reimbursements?upload=init", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileName: file.name, fileSize: file.size }) });
+      const init = await initResponse.json() as { uploadId?: string; chunkSize?: number; totalChunks?: number; error?: string };
+      if (!initResponse.ok || !init.uploadId || !init.chunkSize || !init.totalChunks) throw new Error(init.error || "Não foi possível iniciar o upload.");
+      for (let part = 0; part < init.totalChunks; part += 1) {
+        const chunk = file.slice(part * init.chunkSize, Math.min(file.size, (part + 1) * init.chunkSize));
+        const chunkResponse = await fetch(`/api/reimbursements?upload=chunk&uploadId=${init.uploadId}&part=${part}&totalChunks=${init.totalChunks}`, { method: "POST", body: chunk });
+        if (!chunkResponse.ok) throw new Error("Falha ao enviar uma parte da planilha.");
+        setUploadProgress(Math.round(((part + 1) / (init.totalChunks + 1)) * 92));
+      }
+      const completeResponse = await fetch("/api/reimbursements?upload=complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ uploadId: init.uploadId, fileName: file.name, contentType: file.type, totalChunks: init.totalChunks, dealershipId: uploadDealerId ? Number(uploadDealerId) : undefined, toleranceCents: parseCents(tolerance) }) });
+      const complete = await completeResponse.json() as { import?: { id: number }; error?: string };
+      if (!completeResponse.ok) throw new Error(complete.error || "Não foi possível processar a planilha.");
+      setUploadProgress(100); setMessage("Planilha processada. Os valores foram congelados com o snapshot da lista de preços ativa."); setTab("overview");
+      if (complete.import?.id) setActiveBatchId(complete.import.id);
+      await load();
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "Não foi possível processar a planilha.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runWorkflow(action: string) {
+    if (!activeBatch) return;
+    const note = action === "reject" ? window.prompt("Informe o motivo da rejeição:") ?? "" : window.prompt("Observação da decisão (opcional):") ?? "";
+    if (action === "reject" && note.trim().length < 5) { setError("A rejeição precisa de uma justificativa."); return; }
+    setBusy(true); setError("");
+    try {
+      const response = await fetch("/api/reimbursements", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: activeBatch.id, action, note }) });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Não foi possível atualizar o workflow.");
+      setMessage("Workflow atualizado com sucesso."); await load();
+    } catch (workflowError) {
+      setError(workflowError instanceof Error ? workflowError.message : "Não foi possível atualizar o workflow.");
+    } finally { setBusy(false); }
+  }
+
+  async function saveClient(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setBusy(true); setError("");
+    try {
+      const response = await fetch("/api/reimbursement-clients", { method: editingClient ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: editingClient ?? undefined, ...clientForm }) });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Não foi possível salvar o cliente.");
+      setMessage(editingClient ? "Cliente atualizado." : "Cliente cadastrado."); setEditingClient(null); setClientForm(EMPTY_CLIENT); await loadClients();
+    } catch (clientError) { setError(clientError instanceof Error ? clientError.message : "Não foi possível salvar o cliente."); } finally { setBusy(false); }
+  }
+
+  async function deactivateClient(id: number) {
+    if (!window.confirm("Inativar este cliente? O histórico de reembolsos será preservado.")) return;
+    setBusy(true); setError("");
+    try {
+      const response = await fetch("/api/reimbursement-clients", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Não foi possível inativar o cliente.");
+      setMessage("Cliente inativado."); await loadClients();
+    } catch (clientError) { setError(clientError instanceof Error ? clientError.message : "Não foi possível inativar o cliente."); } finally { setBusy(false); }
+  }
+
+  function exportReport() {
+    const params = new URLSearchParams({ export: "xlsx" });
+    if (activeBatchId) params.set("batchId", String(activeBatchId));
+    if (pnFilter) params.set("pn", pnFilter);
+    if (statusFilter !== "all") params.set("status", statusFilter);
+    if (dealerFilter) params.set("dealershipId", dealerFilter);
+    window.location.assign(`/api/reimbursements?${params.toString()}`);
+  }
+
+  const workflowButtons = activeBatch && (activeBatch.status === "processed" || activeBatch.status === "rejected") ? <button className="primary-button compact" disabled={busy} onClick={() => void runWorkflow("submit")}>Enviar para aprovação</button> : activeBatch?.status === "submitted" && canReview ? <><button className="outline-button compact" disabled={busy} onClick={() => void runWorkflow("start_review")}>Iniciar análise</button><button className="primary-button compact" disabled={busy} onClick={() => void runWorkflow("approve")}>Aprovar</button><button className="danger-button compact" disabled={busy} onClick={() => void runWorkflow("reject")}>Rejeitar</button></> : activeBatch?.status === "under_review" && canReview ? <><button className="primary-button compact" disabled={busy} onClick={() => void runWorkflow("approve")}>Aprovar reembolso</button><button className="danger-button compact" disabled={busy} onClick={() => void runWorkflow("reject")}>Rejeitar</button></> : activeBatch?.status === "approved" && canReview ? <button className="primary-button compact" disabled={busy} onClick={() => void runWorkflow("mark_paid")}>Marcar como pago</button> : null;
+
+  return <div className="content-frame reimbursement-shell">
+    <header className="page-heading reimbursement-heading"><div><span className="eyebrow">Controle financeiro</span><h1>Reembolsos N2/N3</h1><p>Importe vendas, confira a elegibilidade e conduza a aprovação com rastreabilidade.</p></div><div className="reimbursement-heading-actions"><button className="outline-button compact" onClick={() => window.print()}>Exportar PDF</button><button className="primary-button compact" onClick={exportReport}>Exportar Excel</button></div></header>
+    <nav className="reimbursement-tabs" aria-label="Seções de reembolsos"><button className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>Visão geral</button><button className={tab === "sales" ? "active" : ""} onClick={() => setTab("sales")}>Detalhamento</button><button className={tab === "import" ? "active" : ""} onClick={() => setTab("import")}>Importar vendas</button>{canManageClients && <button className={tab === "clients" ? "active" : ""} onClick={() => setTab("clients")}>Clientes N2/N3</button>}</nav>
+    {message && <div className="form-success reimbursement-notice">{message}</div>}{error && <div className="form-error reimbursement-notice">{error}</div>}
+    {data?.imports.length ? <div className="reimbursement-toolbar"><label>Lote processado<select value={activeBatchId || data.activeImportId} onChange={(event) => setActiveBatchId(Number(event.target.value))}>{data.imports.map((item) => <option key={item.id} value={item.id}>{item.fileName} · {formatDate(item.createdAt)} · {statusLabel(item.status)}</option>)}</select></label><div className="reimbursement-workflow"><span className={`reimbursement-status ${statusClass(activeBatch?.status ?? "")}`}>{statusLabel(activeBatch?.status ?? "")}</span>{workflowButtons}</div></div> : <div className="empty-state reimbursement-empty"><strong>Nenhuma venda processada ainda.</strong><span>Comece pelo upload da planilha de vendas para gerar o primeiro lote.</span><button className="primary-button" onClick={() => setTab("import")}>Importar planilha</button></div>}
+    {tab === "import" && <section className="reimbursement-import-layout"><form className="panel reimbursement-upload-card" onSubmit={(event) => void uploadSales(event)}><div className="panel-heading"><div><span className="eyebrow">Entrada de dados</span><h2>Upload de vendas</h2><p>Formato aceito: Excel .xlsx, CSV ou TSV. O cabeçalho precisa conter os campos de venda.</p></div></div><div className="form-grid"><label className="field full"><span>Planilha de vendas *</span><input name="file" type="file" accept=".xlsx,.csv,.tsv" required /></label><label className="field"><span>Concessionária</span><select value={uploadDealerId} onChange={(event) => setUploadDealerId(event.target.value)}><option value="">Usar concessionária da planilha</option>{visibleDealerships.map((dealer) => <option value={dealer.id} key={dealer.id}>{dealer.name}</option>)}</select></label><label className="field"><span>Tolerância N3 para arredondamento</span><input value={tolerance} onChange={(event) => setTolerance(event.target.value)} inputMode="decimal" placeholder="0,01" /><small>Diferença em reais entre NF unitário e N3 da tabela.</small></label></div><div className="reimbursement-template"><strong>Modelo de cabeçalho</strong><span>PN · Descrição · Quantidade · Custo Médio Líquido Unitário · Valor Venda Líquido Unitário · Valor Venda NF Unitário · Cliente · CNPJ · NF · Estado · Concessionário</span><a href="/modelos/reembolsos-vendas-exemplo.csv" download>Baixar exemplo CSV</a></div>{uploadProgress > 0 && <div className="upload-progress"><span style={{ width: `${uploadProgress}%` }} /><small>{uploadProgress}%</small></div>}<button className="primary-button" disabled={busy}>{busy ? "Processando..." : "Processar planilha"}</button></form><aside className="panel reimbursement-rules"><span className="eyebrow">Regras ativas</span><h2>Conferência automática</h2><ul><li>N2: margem menor ou igual a 20% e cliente habilitado.</li><li>N3: Valor Venda NF Unitário igual ao N3 do PN/UF, com tolerância configurável.</li><li>Base: Net Price × quantidade; sem Net Price, custo médio × quantidade.</li><li>Margem negativa em N3 gera negociação com a fábrica.</li><li>NF duplicada, UF ou cliente sem cadastro ficam em alerta.</li></ul></aside></section>}
+    {tab === "overview" && data && <><section className="reimbursement-kpi-grid"><article className="reimbursement-kpi"><span>Valor líquido vendido</span><strong>{formatBRL(data.summary.salesCents)}</strong><small>{data.summary.processedRows} registros processados</small></article><article className="reimbursement-kpi"><span>Reembolso N2</span><strong>{formatBRL(data.summary.reimbursementN2Cents)}</strong><small>4% da base de cálculo</small></article><article className="reimbursement-kpi"><span>Reembolso N3</span><strong>{formatBRL(data.summary.reimbursementN3Cents)}</strong><small>7% da base de cálculo</small></article><article className="reimbursement-kpi danger"><span>Negociação fábrica</span><strong>{formatBRL(data.summary.negotiationCents)}</strong><small>margem negativa em N3</small></article><article className="reimbursement-kpi"><span>Quantidade vendida</span><strong>{data.summary.totalQuantity.toLocaleString("pt-BR")}</strong><small>unidades no lote atual</small></article><article className="reimbursement-kpi"><span>Margem consolidada</span><strong>{(data.summary.marginBps / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%</strong><small>venda líquida versus custo</small></article></section><section className="reimbursement-dashboard-grid"><article className="panel"><div className="panel-heading"><div><span className="eyebrow">Visão de rede</span><h2>Por concessionário</h2></div></div><div className="reimbursement-table-wrap"><table className="reimbursement-table"><thead><tr><th>Concessionário</th><th>Linhas</th><th>Qtd.</th><th>Faturamento</th><th>Reembolso</th><th>Margem</th></tr></thead><tbody>{data.byDealership.map((row) => <tr key={row.label}><td><strong>{row.label}</strong></td><td>{row.rows}</td><td>{row.quantity}</td><td>{formatBRL(row.salesCents)}</td><td>{formatBRL(row.reimbursementCents)}</td><td>{(row.marginBps / 100).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%</td></tr>)}</tbody></table>{!data.byDealership.length && <div className="empty-mini">Sem dados de concessionárias neste lote.</div>}</div></article><article className="panel"><div className="panel-heading"><div><span className="eyebrow">Itens críticos</span><h2>Ranking por PN</h2></div></div><div className="reimbursement-table-wrap"><table className="reimbursement-table"><thead><tr><th>PN</th><th>Qtd.</th><th>Reembolso</th><th>Margem</th></tr></thead><tbody>{data.byPartNumber.map((row) => <tr key={row.partNumber}><td><strong>{row.partNumber}</strong><small>{row.description}</small></td><td>{row.quantity}</td><td>{formatBRL(row.reimbursementCents)}</td><td>{(row.marginBps / 100).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%</td></tr>)}</tbody></table>{!data.byPartNumber.length && <div className="empty-mini">Sem itens no lote atual.</div>}</div></article></section><section className="reimbursement-dashboard-grid"><article className="panel reimbursement-alerts"><div className="panel-heading"><div><span className="eyebrow">Qualidade financeira</span><h2>Alertas automáticos</h2></div></div>{data.alerts.length ? <div className="alert-list">{data.alerts.map((alert) => <div className={`alert-row ${statusClass(alert.status)}`} key={alert.status}><span>{alert.status}</span><strong>{alert.count}</strong></div>)}</div> : <div className="empty-mini">Nenhum alerta no lote atual.</div>}</article><article className="panel"><div className="panel-heading"><div><span className="eyebrow">Auditoria do lote</span><h2>Histórico de aprovação</h2></div></div>{data.approvals.length ? <div className="approval-timeline">{data.approvals.map((approval, index) => <div key={`${approval.createdAt}-${index}`}><strong>{statusLabel(approval.action)}</strong><span>{approval.actorName} · {formatDate(approval.createdAt)}</span>{approval.note && <small>{approval.note}</small>}</div>)}</div> : <div className="empty-mini">Nenhuma decisão registrada.</div>}</article></section></>}
+    {tab === "sales" && data && <section className="panel reimbursement-detail-panel"><div className="panel-heading reimbursement-detail-heading"><div><span className="eyebrow">Conferência linha a linha</span><h2>Detalhamento das vendas</h2><p>Filtros por PN, status e concessionária. O cálculo usa o snapshot da lista de preços no momento do upload.</p></div><div className="reimbursement-heading-actions"><button className="outline-button compact" onClick={() => window.print()}>PDF / imprimir</button><button className="primary-button compact" onClick={exportReport}>Excel</button></div></div><div className="reimbursement-filter-grid"><label>PN ou descrição<input value={pnFilter} onChange={(event) => setPnFilter(event.target.value)} placeholder="Buscar PN..." /></label><label>Status<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">Todos</option>{data.statuses.map((status) => <option value={status} key={status}>{status}</option>)}</select></label><label>Concessionária<select value={dealerFilter} onChange={(event) => setDealerFilter(event.target.value)}><option value="">Todas</option>{visibleDealerships.map((dealer) => <option value={dealer.id} key={dealer.id}>{dealer.name}</option>)}</select></label></div><div className="reimbursement-table-wrap wide"><table className="reimbursement-table reimbursement-detail-table"><thead><tr><th>PN</th><th>Descrição</th><th>Cliente / CNPJ</th><th>NF / UF</th><th>Concessionário</th><th>Qtd.</th><th>Custo total</th><th>Valor líquido</th><th>Margem</th><th>Net Price</th><th>Base</th><th>Reembolso</th><th>Status</th><th>Negociação</th></tr></thead><tbody>{data.sales.map((sale) => <tr key={sale.id}><td><strong>{sale.partNumber}</strong></td><td>{sale.description || "—"}</td><td>{sale.clientName || "—"}<small>{sale.clientCnpj || "CNPJ não informado"}</small></td><td>{sale.invoiceNumber || "—"}<small>{sale.state || "UF não informada"}</small></td><td>{sale.dealershipName || "—"}</td><td>{sale.quantity}</td><td>{formatBRL(sale.costTotalCents)}</td><td>{formatBRL(sale.liquidTotalCents)}</td><td>{(sale.marginBps / 100).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%</td><td>{sale.netPriceUsedCents === null ? "—" : formatBRL(sale.netPriceUsedCents)}</td><td>{formatBRL(sale.calculationBaseCents)}</td><td><strong>{formatBRL(sale.reimbursementCents)}</strong></td><td><span className={`reimbursement-status ${statusClass(sale.status)}`}>{sale.status}</span></td><td>{formatBRL(sale.negotiationCents)}</td></tr>)}</tbody></table>{!data.sales.length && <div className="empty-mini">Nenhuma venda encontrada para os filtros.</div>}</div></section>}
+    {tab === "clients" && canManageClients && <section className="reimbursement-client-layout"><form className="panel reimbursement-client-form" onSubmit={(event) => void saveClient(event)}><div className="panel-heading"><div><span className="eyebrow">Cadastro controlado</span><h2>{editingClient ? "Editar cliente" : "Novo cliente"}</h2><p>A classificação define qual regra de reembolso será avaliada no processamento.</p></div></div><div className="form-grid"><label className="field full"><span>Razão Social *</span><input value={clientForm.legalName} onChange={(event) => setClientForm({ ...clientForm, legalName: event.target.value })} required /></label><label className="field"><span>CNPJ *</span><input value={clientForm.cnpj} onChange={(event) => setClientForm({ ...clientForm, cnpj: event.target.value })} placeholder="Somente números" required /></label><label className="field"><span>Estado *</span><select value={clientForm.state} onChange={(event) => setClientForm({ ...clientForm, state: event.target.value })} required><option value="">Selecione</option>{["AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO", "PY"].map((state) => <option key={state}>{state}</option>)}</select></label><label className="field"><span>Tipo de cliente</span><input value={clientForm.clientType} onChange={(event) => setClientForm({ ...clientForm, clientType: event.target.value })} placeholder="Ex.: cooperativa" /></label><label className="field"><span>Status</span><select value={clientForm.status} onChange={(event) => setClientForm({ ...clientForm, status: event.target.value })}><option value="active">Ativo</option><option value="inactive">Inativo</option></select></label></div><div className="reimbursement-checks"><label><input type="checkbox" checked={clientForm.n2} onChange={(event) => setClientForm({ ...clientForm, n2: event.target.checked })} />Cliente N2</label><label><input type="checkbox" checked={clientForm.n3} onChange={(event) => setClientForm({ ...clientForm, n3: event.target.checked })} />Cliente N3</label></div><div className="modal-actions"><button type="button" className="outline-button compact" onClick={() => { setEditingClient(null); setClientForm(EMPTY_CLIENT); }}>Limpar</button><button className="primary-button compact" disabled={busy}>{editingClient ? "Salvar alterações" : "Cadastrar cliente"}</button></div></form><section className="panel"><div className="panel-heading"><div><span className="eyebrow">Base de referência</span><h2>Clientes cadastrados</h2></div><span className="section-count">{clients.length}</span></div><div className="reimbursement-table-wrap"><table className="reimbursement-table"><thead><tr><th>Razão Social</th><th>CNPJ</th><th>UF</th><th>Tipo</th><th>Programas</th><th>Status</th><th /></tr></thead><tbody>{clients.map((client) => <tr key={client.id}><td><strong>{client.legalName}</strong></td><td>{client.cnpj}</td><td>{client.state}</td><td>{client.clientType}</td><td>{[client.n2 && "N2", client.n3 && "N3"].filter(Boolean).join(" · ") || "—"}</td><td><span className={`reimbursement-status ${client.status === "active" ? "success" : "neutral"}`}>{client.status === "active" ? "Ativo" : "Inativo"}</span></td><td><div className="inline-actions"><button className="text-button" onClick={() => { setEditingClient(client.id); setClientForm({ legalName: client.legalName, cnpj: client.cnpj, state: client.state, clientType: client.clientType, n2: client.n2, n3: client.n3, status: client.status }); }}>Editar</button>{client.status === "active" && <button className="text-button danger-text" onClick={() => void deactivateClient(client.id)}>Inativar</button>}</div></td></tr>)}</tbody></table>{!clients.length && <div className="empty-mini">Cadastre os clientes habilitados para N2 e N3.</div>}</div></section></section>}
+    {tab === "overview" && data && <ReimbursementVariationPanel sales={data.sales} />}
+  </div>;
+}
+
+function ReimbursementVariationPanel({ sales }: { sales: Sale[] }) {
+  const grouped = new Map<string, { partNumber: string; description: string; quantity: number; prices: number[]; costs: number[]; netPrices: number[] }>();
+  for (const sale of sales) {
+    const source = sale as Sale & { saleNetUnitCents: number; costAvgUnitCents: number };
+    const entry = grouped.get(sale.partNumber) ?? { partNumber: sale.partNumber, description: sale.description, quantity: 0, prices: [], costs: [], netPrices: [] };
+    entry.quantity += sale.quantity;
+    entry.prices.push(source.saleNetUnitCents);
+    entry.costs.push(source.costAvgUnitCents);
+    if (sale.netPriceUsedCents !== null) entry.netPrices.push(sale.netPriceUsedCents);
+    grouped.set(sale.partNumber, entry);
+  }
+  const rows = [...grouped.values()].map((entry) => {
+    const average = (values: number[]) => values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : null;
+    const price = average(entry.prices);
+    const netPrice = average(entry.netPrices);
+    return { ...entry, priceDeltaCents: price !== null && netPrice !== null ? price - netPrice : null, costRangeCents: entry.costs.length ? Math.max(...entry.costs) - Math.min(...entry.costs) : 0 };
+  }).sort((left, right) => Math.abs(right.priceDeltaCents ?? 0) + right.costRangeCents - (Math.abs(left.priceDeltaCents ?? 0) + left.costRangeCents)).slice(0, 12);
+  const signedBRL = (cents: number | null) => cents === null ? "—" : `${cents > 0 ? "+" : ""}${formatBRL(cents)}`;
+  return <section className="panel reimbursement-variation-panel"><div className="panel-heading"><div><span className="eyebrow">Análise comparativa</span><h2>Variação de preços e custos</h2><p>Preço médio líquido versus Net Price da tabela e amplitude do custo médio unitário dentro do lote.</p></div></div><div className="reimbursement-table-wrap"><table className="reimbursement-table"><thead><tr><th>PN</th><th>Qtd.</th><th>Preço venda × Net Price</th><th>Variação de custo unitário</th></tr></thead><tbody>{rows.map((row) => <tr key={row.partNumber}><td><strong>{row.partNumber}</strong><small>{row.description}</small></td><td>{row.quantity}</td><td className={row.priceDeltaCents !== null && row.priceDeltaCents !== 0 ? "variation-value" : ""}>{signedBRL(row.priceDeltaCents)}</td><td>{formatBRL(row.costRangeCents)}</td></tr>)}</tbody></table>{!rows.length && <div className="empty-mini">Sem dados comparáveis no lote atual.</div>}</div></section>;
+}
