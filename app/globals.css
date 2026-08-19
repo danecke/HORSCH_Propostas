@@ -564,6 +564,34 @@ button { cursor: pointer; }
 .document-footer { margin-top: 7mm; padding-top: 3mm; display: flex; justify-content: space-between; border-top: 1px solid #d0d2d4; color: #777b80; font-size: 6.1pt; line-height: 1.5; break-inside: avoid; }
 .document-footer span:last-child { text-align: right; }
 .decision-panel { margin: 18px auto 0; padding: 22px; display: grid; gap: 18px; color: var(--ink); background: white; box-shadow: 0 12px 35px rgb(0 0 0 / 22%); }
+.workflow-panel { width: min(100%, 980px); margin: 18px auto 0; padding: 22px; display: grid; gap: 16px; color: var(--ink); background: #fff; border: 1px solid #dfe3e7; box-shadow: 0 12px 35px rgb(0 0 0 / 14%); }
+.workflow-panel-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+.workflow-panel-heading h2 { margin: 4px 0 0; font-size: 20px; }
+.workflow-panel-heading p, .workflow-form-card > div:first-child p { margin: 6px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.workflow-summary { min-width: 190px; padding: 12px 14px; background: #f5f6f7; border-left: 3px solid var(--red); }
+.workflow-summary span, .workflow-summary strong, .workflow-summary small { display: block; }
+.workflow-summary span { color: var(--muted); font-size: 9px; font-weight: 800; text-transform: uppercase; }
+.workflow-summary strong { margin-top: 4px; font-size: 12px; }
+.workflow-summary small { margin-top: 3px; color: var(--muted); font-size: 10px; }
+.workflow-action-card, .workflow-form-card { display: grid; gap: 15px; padding: 17px; background: #f8fafb; border: 1px solid #e2e6ea; }
+.workflow-action-card { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.workflow-action-card strong, .workflow-form-card > div:first-child strong { font-size: 13px; }
+.workflow-action-card p { margin: 5px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.workflow-lock, .workflow-hint { color: var(--muted); font-size: 10px; }
+.workflow-form-card .form-grid { margin-top: 3px; }
+.workflow-form-card .field input, .workflow-form-card .field textarea { width: 100%; }
+.workflow-form-footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.workflow-form-footer > span { color: var(--muted); font-size: 10px; }
+.workflow-button-row { display: flex; align-items: center; justify-content: flex-end; gap: 9px; flex-wrap: wrap; }
+.dealer-acceptance-card { grid-template-columns: 1fr; }
+.workflow-rejection-form { display: grid; gap: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.workflow-inline-form { display: flex; align-items: center; gap: 8px; }
+.workflow-inline-form input { min-width: 190px; height: 40px; padding: 0 11px; border: 1px solid #ccd1d6; }
+.workflow-success-card, .workflow-rejected-card { display: flex; align-items: flex-start; gap: 11px; padding: 16px; border: 1px solid; }
+.workflow-success-card { color: #276c49; border-color: #b7ddc8; background: #f2fbf5; }
+.workflow-rejected-card { color: #942333; border-color: #e7b3ba; background: #fff6f7; }
+.workflow-success-card strong, .workflow-rejected-card strong { display: block; font-size: 13px; }
+.workflow-success-card p, .workflow-rejected-card p { margin: 5px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .decision-panel h2 { margin: 0; font-size: 18px; }
 .decision-panel > div:first-child p { margin: 7px 0 0; color: var(--muted); font-size: 10px; }
 .counteroffer-form-heading { display: flex; align-items: center; justify-content: space-between; gap: 22px; }
@@ -742,6 +770,12 @@ button { cursor: pointer; }
   .preview-shell { min-width: 780px; }
   .preview-toolbar { top: 0; }
   .decision-panel { width: 780px; margin-top: 0; }
+  .workflow-panel { width: 780px; margin-top: 0; }
+  .workflow-panel-heading, .workflow-form-footer { align-items: stretch; flex-direction: column; }
+  .workflow-summary { min-width: 0; }
+  .workflow-action-card { grid-template-columns: 1fr; align-items: stretch; }
+  .workflow-inline-form { align-items: stretch; flex-direction: column; }
+  .workflow-inline-form input { min-width: 0; }
   .counteroffer-form-heading { align-items: stretch; flex-direction: column; }
   .counteroffer-live-total { width: 100%; text-align: left; }
   .counteroffer-conditions { grid-template-columns: 1fr; }

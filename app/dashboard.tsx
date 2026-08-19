@@ -17,7 +17,13 @@ type ProposalStatus =
   | "counteroffer"
   | "approved"
   | "rejected"
-  | "expired";
+  | "expired"
+  | "awaiting_global"
+  | "in_analysis"
+  | "awaiting_dealer_acceptance"
+  | "awaiting_order"
+  | "order_generated"
+  | "reproved";
 
 type ProposalItem = {
   id: number;
@@ -62,6 +68,21 @@ type Proposal = {
   totalCents: number;
   customerName: string;
   customerSaleValueCents: number | null;
+  requestedNetPriceCents: number | null;
+  claimedByEmail: string;
+  claimedAt: string | null;
+  pdfVisualized: boolean;
+  rejectionReason: string;
+  erpOrderNumber: string;
+  officialPdfPath: string;
+  factoryDescription: string;
+  factoryVt: string;
+  factoryOrigin: string;
+  factoryNcm: string;
+  offerNetPriceCents: number | null;
+  offerInvoiceUnitPriceCents: number | null;
+  offerValidUntil: string | null;
+  statusLabel?: string;
   commercialOwnerEmail: string;
   isActionOwner: boolean;
   counterofferCents: number | null;
@@ -209,6 +230,12 @@ const STATUS_LABELS: Record<ProposalStatus, string> = {
   approved: "Aceita",
   rejected: "Recusada",
   expired: "Expirada",
+  awaiting_global: "Aguardando Retorno Global",
+  in_analysis: "Em Análise",
+  awaiting_dealer_acceptance: "Aguardando Aceite do Concessionário",
+  awaiting_order: "Aguardando Pedido",
+  order_generated: "Pedido Gerado",
+  reproved: "Reprovada",
 };
 
 const STATUS_ORDER: ProposalStatus[] = [
@@ -218,6 +245,12 @@ const STATUS_ORDER: ProposalStatus[] = [
   "approved",
   "rejected",
   "expired",
+  "awaiting_global",
+  "in_analysis",
+  "awaiting_dealer_acceptance",
+  "awaiting_order",
+  "order_generated",
+  "reproved",
 ];
 
 type IconName =
@@ -357,7 +390,7 @@ export function Dashboard({ user }: { user: AppUser }) {
   const databaseEnabled = data.me.permissions.editPriceList && ["general_admin", "global_management"].includes(data.me.role);
   const leadsEnabled = moduleEnabled("leads") && leadData?.moduleEnabled !== false && leadData !== null;
   const reimbursementsEnabled = moduleEnabled("reimbursements");
-  const canCreate = data.me.permissions.createProposal && proposalsEnabled;
+  const canCreate = data.me.permissions.createProposal && proposalsEnabled && data.me.role !== "dealer_manager";
   const canRequestProposal = data.me.role === "dealer_manager" && proposalsEnabled;
   const concessionOnly = data.me.role === "concession";
   const proposalResponsibles = data.proposalResponsibles.filter((item) => item.active);
@@ -399,7 +432,7 @@ export function Dashboard({ user }: { user: AppUser }) {
         ) : view === "reimbursements" && reimbursementsEnabled ? <ReimbursementsView me={data.me as ReimbursementAccess} dealerships={data.dealerships} /> : view === "database" && databaseEnabled ? <DatabaseView me={data.me} /> : view === "price-list" && priceListEnabled ? <PriceListView me={data.me} mode="consult" /> : concessionOnly && priceListEnabled && view !== "quotes" ? <PriceListView me={data.me} mode="consult" /> : view === "overview" ? (
           <Overview data={data} onNew={() => setShowNewProposal(true)} onOpen={setPreview} onHistory={openHistory} onAll={() => setView("proposals")} />
         ) : view === "proposals" && proposalsEnabled ? (
-          <ProposalsView proposals={filteredProposals} proposalRequests={data.proposalRequests} me={data.me} allCount={data.proposals.length} search={search} onSearch={setSearch} status={statusFilter} onStatus={setStatusFilter} canCreate={canCreate} canRequestProposal={canRequestProposal} onNew={() => setShowNewProposal(true)} onNewRequest={() => setShowNewProposalRequest(true)} onOpen={setPreview} canViewHistory={data.me.role === "general_admin"} onHistory={openHistory} onChanged={() => refreshed("Solicitação de proposta atualizada.")} />
+          <ProposalsView proposals={filteredProposals} me={data.me} allCount={data.proposals.length} search={search} onSearch={setSearch} status={statusFilter} onStatus={setStatusFilter} canCreate={canCreate} canRequestProposal={canRequestProposal} onNew={() => setShowNewProposal(true)} onNewRequest={() => setShowNewProposalRequest(true)} onOpen={setPreview} canViewHistory={data.me.role === "general_admin"} onHistory={openHistory} onChanged={() => refreshed("Solicitação de proposta atualizada.")} />
         ) : view === "quotes" && quotesEnabled ? (
           <QuotesView quotes={data.quotes} me={data.me} onChanged={() => refreshed("Cotação atualizada com sucesso.")} />
         ) : view === "dealerships" ? (
@@ -417,7 +450,7 @@ export function Dashboard({ user }: { user: AppUser }) {
       </section>
 
       {showNewProposal && <NewProposalModal userEmail={data.me.email} role={data.me.role} dealerships={data.dealerships.filter((dealer) => dealer.modules.find((module) => module.key === "proposals")?.enabled ?? true)} proposalResponsibles={proposalResponsibles} onClose={() => setShowNewProposal(false)} onSaved={async (message) => { setShowNewProposal(false); await refreshed(message); }} />}
-      {showNewProposalRequest && <NewProposalRequestModal onClose={() => setShowNewProposalRequest(false)} onSaved={async (message) => { setShowNewProposalRequest(false); await refreshed(message); }} />}
+      {showNewProposalRequest && <NewProposalRequestModal dealerships={data.dealerships.filter((dealer) => data.me.dealershipIds.includes(dealer.id) || dealer.id === data.me.dealershipId)} onClose={() => setShowNewProposalRequest(false)} onSaved={async (message) => { setShowNewProposalRequest(false); await refreshed(message); }} />}
       {showNewAccess && <NewAccessModal me={data.me} dealerships={data.dealerships} onClose={() => setShowNewAccess(false)} onSaved={async () => { setShowNewAccess(false); await refreshed("Novo acesso criado com sucesso."); }} />}
       {showDealershipForm && <DealershipRegistrationModal me={data.me} dealerships={data.dealerships} managers={proposalResponsibles.filter((item) => item.role === "factory_manager")} onClose={() => setShowDealershipForm(false)} onSaved={async (message) => { setShowDealershipForm(false); await refreshed(message); }} />}
       {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} onSaved={() => { setShowChangePassword(false); setNotice("Senha alterada com sucesso."); }} />}
@@ -849,8 +882,8 @@ function Pipeline({ proposals }: { proposals: Proposal[] }) {
   return <div className="pipeline-list">{stages.map((stage) => { const matches = proposals.filter((proposal) => proposal.status === stage.status); const count = matches.length; const value = matches.reduce((sum, proposal) => sum + proposal.totalCents, 0); return <div className="pipeline-row" key={stage.status}><div className="pipeline-label"><span>{stage.label}</span><strong>{count}</strong></div><div className="pipeline-track"><span className={`pipeline-fill ${stage.status}`} style={{ width: `${Math.max(count ? 10 : 0, (count / max) * 100)}%` }} /></div><small>{formatBRL(value)}</small></div>; })}</div>;
 }
 
-function ProposalsView({ proposals, proposalRequests, me, allCount, search, onSearch, status, onStatus, canCreate, canRequestProposal, onNew, onNewRequest, onOpen, canViewHistory, onHistory, onChanged }: { proposals: Proposal[]; proposalRequests: ProposalRequest[]; me: CurrentAccess; allCount: number; search: string; onSearch: (value: string) => void; status: "all" | ProposalStatus; onStatus: (value: "all" | ProposalStatus) => void; canCreate: boolean; canRequestProposal: boolean; onNew: () => void; onNewRequest: () => void; onOpen: (proposal: Proposal) => void; canViewHistory: boolean; onHistory: (proposalId: string) => void; onChanged: () => Promise<void> }) {
-  return <div className="content-frame"><header className="page-heading"><div><span className="eyebrow">Operação comercial</span><h1>Propostas</h1><p>{allCount} propostas comerciais no seu nível de acesso.</p></div><div className="heading-actions">{canRequestProposal && <button className="outline-button" onClick={onNewRequest}><Icon name="plus" size={18} />Solicitar proposta</button>}{canCreate && <button className="primary-button" onClick={onNew}><Icon name="plus" size={18} />Nova proposta</button>}</div></header><ProposalRequestsSection requests={proposalRequests} me={me} canRequest={canRequestProposal} onNew={onNewRequest} onChanged={onChanged} /><article className="panel full-list-panel"><div className="list-toolbar"><label className="search-field"><Icon name="search" size={18} /><input value={search} onChange={(event) => onSearch(event.target.value)} placeholder="Buscar proposta, concessionária ou responsável" /></label><select value={status} onChange={(event) => onStatus(event.target.value as "all" | ProposalStatus)} aria-label="Filtrar por status"><option value="all">Todos os status</option>{STATUS_ORDER.map((item) => <option key={item} value={item}>{STATUS_LABELS[item]}</option>)}</select></div><ProposalTable proposals={proposals} onOpen={onOpen} canViewHistory={canViewHistory} onHistory={onHistory} /></article></div>;
+function ProposalsView({ proposals, me, allCount, search, onSearch, status, onStatus, canCreate, canRequestProposal, onNew, onNewRequest, onOpen, canViewHistory, onHistory }: { proposals: Proposal[]; me: CurrentAccess; allCount: number; search: string; onSearch: (value: string) => void; status: "all" | ProposalStatus; onStatus: (value: "all" | ProposalStatus) => void; canCreate: boolean; canRequestProposal: boolean; onNew: () => void; onNewRequest: () => void; onOpen: (proposal: Proposal) => void; canViewHistory: boolean; onHistory: (proposalId: string) => void }) {
+  return <div className="content-frame"><header className="page-heading"><div><span className="eyebrow">Operação comercial</span><h1>Propostas</h1><p>{allCount} propostas comerciais no seu nível de acesso.</p></div><div className="heading-actions">{canRequestProposal && <button className="outline-button" onClick={onNewRequest}><Icon name="plus" size={18} />Solicitar proposta</button>}{canCreate && <button className="primary-button" onClick={onNew}><Icon name="plus" size={18} />Nova proposta</button>}</div></header><article className="panel full-list-panel"><div className="list-toolbar"><label className="search-field"><Icon name="search" size={18} /><input value={search} onChange={(event) => onSearch(event.target.value)} placeholder="Buscar proposta, concessionária ou responsável" /></label><select value={status} onChange={(event) => onStatus(event.target.value as "all" | ProposalStatus)} aria-label="Filtrar por status"><option value="all">Todos os status</option>{STATUS_ORDER.map((item) => <option key={item} value={item}>{STATUS_LABELS[item]}</option>)}</select></div><ProposalTable proposals={proposals} onOpen={onOpen} canViewHistory={canViewHistory} onHistory={onHistory} /></article></div>;
 }
 
 function ProposalRequestsSection({ requests, me, canRequest, onNew, onChanged }: { requests: ProposalRequest[]; me: CurrentAccess; canRequest: boolean; onNew: () => void; onChanged: () => Promise<void> }) {
@@ -876,7 +909,7 @@ function ProposalRequestCard({ request, me, onChanged }: { request: ProposalRequ
 
 function ProposalTable({ proposals, onOpen, canViewHistory, onHistory }: { proposals: Proposal[]; onOpen: (proposal: Proposal) => void; canViewHistory: boolean; onHistory: (proposalId: string) => void }) {
   if (!proposals.length) return <EmptyState title="Nenhuma proposta encontrada" text="Não há propostas neste escopo ou com os filtros selecionados." />;
-  return <div className="table-scroll"><table className="data-table"><thead><tr><th>Proposta</th><th>Concessionária</th><th>Emissão</th><th>Vigência</th><th>Responsável</th><th>Status</th><th className="align-right">Valor</th><th aria-label="Abrir" /></tr></thead><tbody>{proposals.map((proposal) => <tr key={proposal.id} onClick={() => onOpen(proposal)}><td><div className="proposal-id-line"><strong className="proposal-id">{proposal.id}</strong>{canViewHistory && <button type="button" className="history-row-action" onClick={(event) => { event.stopPropagation(); onHistory(proposal.id); }} aria-label={`Ver histórico de ${proposal.id}`} title="Ver histórico"><Icon name="eye" size={14} /></button>}</div><small>{proposal.items.length} {proposal.items.length === 1 ? "item" : "itens"}</small></td><td><strong>{proposal.dealership}</strong><small>{proposal.city}{proposal.state ? ` · ${proposal.state}` : ""}</small></td><td>{formatDate(proposal.issueDate)}</td><td><strong>{formatDate(proposal.validUntil)}</strong>{proposal.status === "expired" && <small>Expirada automaticamente</small>}</td><td>{proposal.commercialOwner}</td><td><StatusBadge status={proposal.status} /></td><td className="align-right value-cell"><strong>{formatBRL(proposal.totalCents)}</strong>{proposal.status === "counteroffer" && proposal.counterofferCents && <small>Proposto: {formatBRL(proposal.counterofferCents)}</small>}</td><td><button className="row-action" onClick={(event) => { event.stopPropagation(); onOpen(proposal); }} aria-label={`Abrir ${proposal.id}`}><Icon name="arrow" size={16} /></button></td></tr>)}</tbody></table></div>;
+  return <div className="table-scroll"><table className="data-table"><thead><tr><th>Proposta</th><th>Concessionária</th><th>Emissão</th><th>Vigência</th><th>Responsável</th><th>Status</th><th className="align-right">Valor</th><th aria-label="Abrir" /></tr></thead><tbody>{proposals.map((proposal) => <tr key={proposal.id} onClick={() => onOpen(proposal)}><td><div className="proposal-id-line"><strong className="proposal-id">{proposal.id}</strong>{canViewHistory && <button type="button" className="history-row-action" onClick={(event) => { event.stopPropagation(); onHistory(proposal.id); }} aria-label={`Ver histórico de ${proposal.id}`} title="Ver histórico"><Icon name="eye" size={14} /></button>}</div><small>{proposal.items.length} {proposal.items.length === 1 ? "item" : "itens"}</small></td><td><strong>{proposal.dealership}</strong><small>{proposal.city}{proposal.state ? ` · ${proposal.state}` : ""}</small></td><td>{formatDate(proposal.issueDate)}</td><td><strong>{formatDate(proposal.validUntil)}</strong>{proposal.status === "expired" && <small>Vigência encerrada</small>}</td><td>{proposal.commercialOwner}</td><td><StatusBadge status={proposal.status} /></td><td className="align-right value-cell"><strong>{formatBRL(proposal.totalCents)}</strong>{proposal.status === "counteroffer" && proposal.counterofferCents && <small>Proposto: {formatBRL(proposal.counterofferCents)}</small>}</td><td><button className="row-action" onClick={(event) => { event.stopPropagation(); onOpen(proposal); }} aria-label={`Abrir ${proposal.id}`}><Icon name="arrow" size={16} /></button></td></tr>)}</tbody></table></div>;
 }
 
 function DealershipsView({ dealerships, me, onNew, onEdit, onModules }: { dealerships: Dealership[]; me: CurrentAccess; onNew: () => void; onEdit: (dealer: Dealership) => void; onModules: (dealer: Dealership) => void }) {
@@ -1135,21 +1168,35 @@ async function prepareDocumentForUpload(file: File) {
   }
 }
 
-function NewProposalRequestModal({ onClose, onSaved }: { onClose: () => void; onSaved: (message: string) => Promise<void> }) {
+function NewProposalRequestModal({ dealerships, onClose, onSaved }: { dealerships: Dealership[]; onClose: () => void; onSaved: (message: string) => Promise<void> }) {
+  const [dealershipId, setDealershipId] = useState(dealerships.length === 1 ? String(dealerships[0].id) : "");
   const [partNumber, setPartNumber] = useState("");
   const [description, setDescription] = useState("");
+  const [quantity, setQuantity] = useState(1);
   const [targetNetPrice, setTargetNetPrice] = useState("");
-  const [observation, setObservation] = useState("");
+  const [customerName, setCustomerName] = useState("");
+  const [customerSaleValue, setCustomerSaleValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   async function submit(event: FormEvent) {
     event.preventDefault(); setSaving(true); setError("");
-    const response = await fetch("/api/proposal-requests", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ partNumber, description, targetNetPriceCents: parseMoneyToCents(targetNetPrice), observation }) });
+    const response = await fetch("/api/proposals", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        requestOnly: true,
+        dealershipId: Number(dealershipId),
+        requestedNetPriceCents: targetNetPrice ? parseMoneyToCents(targetNetPrice) : null,
+        customerName,
+        customerSaleValueCents: customerSaleValue ? parseMoneyToCents(customerSaleValue) : null,
+        items: [{ partNumber, description, quantity }],
+      }),
+    });
     const payload = (await response.json()) as { error?: string };
     if (!response.ok) { setError(payload.error || "Não foi possível enviar a solicitação."); setSaving(false); return; }
-    await onSaved("Solicitação de proposta enviada à Gestão Global.");
+    await onSaved("Solicitação criada e enviada para a Gestão Global.");
   }
-  return <div className="modal-backdrop" role="dialog" aria-modal="true"><form className="proposal-request-modal" onSubmit={(event) => void submit(event)}><header className="modal-header"><div><span className="eyebrow">Propostas comerciais</span><h2>Solicitar proposta</h2><p>Envie somente a necessidade comercial para a Gestão Global analisar.</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Fechar"><Icon name="close" /></button></header><div className="form-scroll"><div className="request-form-grid"><label className="field"><span>PN necessário</span><input value={partNumber} onChange={(event) => setPartNumber(event.target.value)} placeholder="Ex.: 34061200" required /></label><label className="field"><span>Net price objetivo</span><input inputMode="decimal" value={targetNetPrice} onChange={(event) => setTargetNetPrice(event.target.value)} onBlur={(event) => setTargetNetPrice(formatMoneyInput(event.target.value))} placeholder="R$ 0,00" required /></label><label className="field request-description-field"><span>Descrição do item</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ex.: Tampa transparente do conjunto" required /></label><label className="field request-observation-field"><span>Observações</span><textarea value={observation} onChange={(event) => setObservation(event.target.value)} placeholder="Cliente, situação da negociação e contexto comercial" rows={5} /></label></div>{error && <p className="form-error">{error}</p>}</div><footer className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button type="submit" className="primary-button" disabled={saving}>{saving ? "Enviando..." : "Enviar para Gestão Global"}</button></footer></form></div>;
+  return <div className="modal-backdrop" role="dialog" aria-modal="true"><form className="proposal-request-modal" onSubmit={(event) => void submit(event)}><header className="modal-header"><div><span className="eyebrow">Etapa 1 · Solicitação</span><h2>Solicitar proposta comercial</h2><p>A solicitação ficará aguardando uma ação manual da Gestão Global.</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Fechar"><Icon name="close" /></button></header><div className="form-scroll"><div className="request-form-grid"><label className="field"><span>Concessionária</span><select value={dealershipId} onChange={(event) => setDealershipId(event.target.value)} required><option value="">Selecione a loja</option>{dealerships.map((dealer) => <option key={dealer.id} value={dealer.id}>{dealer.name}</option>)}</select></label><label className="field"><span>PN</span><input value={partNumber} onChange={(event) => setPartNumber(event.target.value)} placeholder="Ex.: 34061200" required /></label><label className="field request-description-field"><span>Descrição</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Descrição solicitada pelo cliente" required /></label><label className="field"><span>Quantidade</span><input type="number" min={1} value={quantity} onChange={(event) => setQuantity(Math.max(1, Number(event.target.value) || 1))} required /></label><label className="field"><span>Net price objetivo (opcional)</span><input inputMode="decimal" value={targetNetPrice} onChange={(event) => setTargetNetPrice(event.target.value)} onBlur={(event) => setTargetNetPrice(formatMoneyInput(event.target.value))} placeholder="R$ 0,00" /></label><label className="field"><span>Cliente final</span><input value={customerName} onChange={(event) => setCustomerName(event.target.value)} placeholder="Nome do cliente final" /></label><label className="field"><span>Valor de venda ao cliente</span><input inputMode="decimal" value={customerSaleValue} onChange={(event) => setCustomerSaleValue(event.target.value)} onBlur={(event) => setCustomerSaleValue(formatMoneyInput(event.target.value))} placeholder="R$ 0,00" /></label></div>{error && <p className="form-error">{error}</p>}</div><footer className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button type="submit" className="primary-button" disabled={saving || !dealershipId}>{saving ? "Enviando..." : "Enviar para Gestão Global"}</button></footer></form></div>;
 }
 
 function NewProposalModal({
@@ -1588,6 +1635,17 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailStatus, setEmailStatus] = useState(proposal.emailStatus);
   const [error, setError] = useState("");
+  const [pdfViewed, setPdfViewed] = useState(proposal.pdfVisualized);
+  const [rejectionReason, setRejectionReason] = useState("");
+  const [showRejectionForm, setShowRejectionForm] = useState(false);
+  const [factoryDescription, setFactoryDescription] = useState(proposal.factoryDescription || proposal.items[0]?.description || "");
+  const [factoryVt, setFactoryVt] = useState(proposal.factoryVt || proposal.items[0]?.vt || "");
+  const [factoryOrigin, setFactoryOrigin] = useState(proposal.factoryOrigin || proposal.items[0]?.origin || "");
+  const [factoryNcm, setFactoryNcm] = useState(proposal.factoryNcm || proposal.items[0]?.ncm || "");
+  const [offerNetPrice, setOfferNetPrice] = useState(proposal.offerNetPriceCents ? formatMoneyInput(String(proposal.offerNetPriceCents / 100).replace(".", ",")) : formatMoneyInput(String(proposal.items[0]?.unitPriceCents ? proposal.items[0].unitPriceCents / 100 : 0).replace(".", ",")));
+  const [offerInvoicePrice, setOfferInvoicePrice] = useState(proposal.offerInvoiceUnitPriceCents ? formatMoneyInput(String(proposal.offerInvoiceUnitPriceCents / 100).replace(".", ",")) : "");
+  const [offerValidUntil, setOfferValidUntil] = useState(proposal.offerValidUntil || proposal.validUntil || "");
+  const [erpOrderNumber, setErpOrderNumber] = useState(proposal.erpOrderNumber || "");
 
   const decisionOpen =
     proposal.isActionOwner && me.role === "dealer_manager" && ["sent", "counteroffer"].includes(status);
@@ -1616,6 +1674,11 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
   const canManageStatus = me.permissions.manageAnyProposalStatus || (proposal.isActionOwner && (me.role === "dealer_manager" || ["general_admin", "global_management", "factory_manager"].includes(me.role)));
   const hasInvoiceTotals = proposal.items.some((item) => item.invoiceUnitPriceCents !== null && item.invoiceUnitPriceCents !== undefined);
   const invoiceTotalCents = proposal.items.reduce((sum, item) => sum + (item.invoiceUnitPriceCents ?? 0) * item.quantity, 0);
+  const isWorkflow = ["awaiting_global", "in_analysis", "awaiting_dealer_acceptance", "awaiting_order", "order_generated", "reproved"].includes(status);
+  const canClaimWorkflow = ["general_admin", "global_management"].includes(me.role) && status === "awaiting_global";
+  const canOfferWorkflow = ["general_admin", "global_management"].includes(me.role) && status === "in_analysis" && (me.role === "general_admin" || proposal.claimedByEmail === me.email);
+  const canAcceptWorkflow = me.role === "dealer_manager" && proposal.isActionOwner && status === "awaiting_dealer_acceptance";
+  const canRecordOrder = me.role === "general_admin" || (me.role === "factory_manager" && status === "awaiting_order" && proposal.isActionOwner);
 
   function updateCounterItem(
     id: number,
@@ -1624,6 +1687,42 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
     setCounterItems((current) =>
       current.map((item) => (item.id === id ? { ...item, ...patch } : item)),
     );
+  }
+
+  async function runWorkflowAction(
+    action: "claim" | "offer" | "view_pdf" | "accept_request" | "reject_request" | "record_order",
+    fields: Record<string, string | number | null | undefined> = {},
+  ) {
+    setUpdating(true);
+    setError("");
+    const response = await fetch("/api/proposals", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: proposal.id, action, ...fields }),
+    });
+    const payload = (await response.json()) as { error?: string; status?: ProposalStatus };
+    if (!response.ok || !payload.status) {
+      setError(payload.error || "Não foi possível concluir esta etapa.");
+      setUpdating(false);
+      return false;
+    }
+    setStatus(payload.status);
+    if (action === "view_pdf") setPdfViewed(true);
+    await onUpdated(payload.status);
+    setUpdating(false);
+    return true;
+  }
+
+  async function openOfficialPdf() {
+    const pdfWindow = window.open("about:blank", "_blank");
+    const viewed = await runWorkflowAction("view_pdf");
+    if (viewed) {
+      const url = proposal.officialPdfPath || `/api/proposals/pdf?proposalId=${encodeURIComponent(proposal.id)}`;
+      if (pdfWindow) pdfWindow.location.href = url;
+      else window.open(url, "_blank");
+    } else {
+      pdfWindow?.close();
+    }
   }
 
   async function sendByEmail() {
@@ -1753,7 +1852,7 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
             </span>
           </div>
           <div className="preview-actions">
-            {!decisionOpen && canManageStatus && (
+            {!isWorkflow && !decisionOpen && canManageStatus && (
               <label>
                 Status
                 <select
@@ -1769,7 +1868,7 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
                 </select>
               </label>
             )}
-            {canDelete && (
+            {!isWorkflow && canDelete && (
               <button
                 type="button"
                 className="outline-button danger-dark"
@@ -1779,8 +1878,8 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
                 Excluir
               </button>
             )}
-            {canEdit && <button type="button" className="outline-button dark" onClick={onEdit}>Editar proposta</button>}
-            {!decisionOpen && proposal.isActionOwner && status !== "expired" && emailStatus !== "sent" && (
+            {!isWorkflow && canEdit && <button type="button" className="outline-button dark" onClick={onEdit}>Editar proposta</button>}
+            {!isWorkflow && !decisionOpen && proposal.isActionOwner && status !== "expired" && emailStatus !== "sent" && (
               <button
                 type="button"
                 className="outline-button dark"
@@ -1841,13 +1940,38 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
           <section className="expiry-notice no-print" role="status">
             <Icon name="clock" size={21} />
             <div>
-              <strong>Proposta expirada automaticamente</strong>
+              <strong>Proposta com vigência encerrada</strong>
               <span>A vigência terminou em {formatDate(proposal.validUntil)}. O envio e as decisões comerciais estão bloqueados até uma reedição pela Gestão Global ou níveis superiores.</span>
             </div>
           </section>
         )}
 
-        {decisionOpen && (
+        {isWorkflow && (
+          <section className="workflow-panel no-print">
+            <div className="workflow-panel-heading">
+              <div>
+                <span className="eyebrow">Fluxo manual · {proposal.id}</span>
+                <h2>{STATUS_LABELS[status]}</h2>
+                <p>As etapas avançam somente quando o responsável autorizado confirma a ação.</p>
+              </div>
+              <div className="workflow-summary"><span>Solicitado por</span><strong>{proposal.contactName || proposal.createdByEmail}</strong><small>{proposal.dealership}</small></div>
+            </div>
+
+            {status === "awaiting_global" && <div className="workflow-action-card"><div><strong>Solicitação aguardando a Gestão Global</strong><p>Assuma esta proposta para bloquear a análise para os demais gestores globais.</p></div>{canClaimWorkflow ? <button type="button" className="primary-button" disabled={updating} onClick={() => void runWorkflowAction("claim")}>{updating ? "Assumindo..." : "Assumir proposta"}</button> : <span className="workflow-lock">Aguardando um Gestor Global ou ADM</span>}</div>}
+
+            {status === "in_analysis" && <div className="workflow-form-card"><div><strong>Oferta oficial da fábrica</strong><p>Preencha os dados que serão apresentados ao concessionário. A proposta fica reservada para {proposal.claimedByEmail || "Gestão Global"}.</p></div><div className="form-grid two-columns"><label className="field"><span>Descrição fábrica</span><input value={factoryDescription} onChange={(event) => setFactoryDescription(event.target.value)} disabled={!canOfferWorkflow || updating} /></label><label className="field"><span>VT</span><input value={factoryVt} onChange={(event) => setFactoryVt(event.target.value)} disabled={!canOfferWorkflow || updating} /></label><label className="field"><span>Origem</span><input value={factoryOrigin} onChange={(event) => setFactoryOrigin(event.target.value)} disabled={!canOfferWorkflow || updating} /></label><label className="field"><span>NCM</span><input value={factoryNcm} onChange={(event) => setFactoryNcm(event.target.value)} disabled={!canOfferWorkflow || updating} /></label><label className="field"><span>Netprice unitário</span><input inputMode="decimal" value={offerNetPrice} onChange={(event) => setOfferNetPrice(event.target.value)} onBlur={(event) => setOfferNetPrice(formatMoneyInput(event.target.value))} disabled={!canOfferWorkflow || updating} placeholder="0,00" /></label><label className="field"><span>Valor unitário NF <small>(opcional)</small></span><input inputMode="decimal" value={offerInvoicePrice} onChange={(event) => setOfferInvoicePrice(event.target.value)} onBlur={(event) => setOfferInvoicePrice(formatMoneyInput(event.target.value))} disabled={!canOfferWorkflow || updating} placeholder="0,00" /></label><label className="field"><span>Data de validade</span><input type="date" value={offerValidUntil} onChange={(event) => setOfferValidUntil(event.target.value)} disabled={!canOfferWorkflow || updating} /></label></div><div className="workflow-form-footer"><span>{canOfferWorkflow ? "Revise os dados antes de gerar a oferta." : `Proposta reservada para ${proposal.claimedByEmail || "outro gestor"}.`}</span><button type="button" className="primary-button" disabled={!canOfferWorkflow || updating || !factoryDescription.trim() || !factoryVt.trim() || !factoryOrigin.trim() || !factoryNcm.trim() || parseMoneyToCents(offerNetPrice) <= 0 || !offerValidUntil} onClick={() => void runWorkflowAction("offer", { factoryDescription, factoryVt, factoryOrigin, factoryNcm, offerNetPriceCents: parseMoneyToCents(offerNetPrice), offerInvoiceUnitPriceCents: offerInvoicePrice.trim() ? parseMoneyToCents(offerInvoicePrice) : null, offerValidUntil })}>{updating ? "Gerando..." : "Gerar oferta e disponibilizar"}</button></div></div>}
+
+            {status === "awaiting_dealer_acceptance" && <div className="workflow-action-card dealer-acceptance-card"><div><strong>Visualização obrigatória antes da decisão</strong><p>Abra o PDF oficial para registrar a ciência. Depois disso, os botões de aceite e reprovação serão liberados.</p></div><div className="workflow-button-row"><button type="button" className="outline-button" disabled={updating} onClick={() => void openOfficialPdf()}><Icon name="file" size={16} />{pdfViewed ? "Abrir PDF oficial novamente" : "Visualizar PDF oficial"}</button><button type="button" className="primary-button" disabled={!canAcceptWorkflow || updating || !pdfViewed} onClick={() => void runWorkflowAction("accept_request")}>Aceitar proposta</button><button type="button" className="outline-button danger-button" disabled={!canAcceptWorkflow || updating || !pdfViewed} onClick={() => setShowRejectionForm(true)}>Rejeitar</button></div>{!pdfViewed && <span className="workflow-hint">Visualize o PDF para habilitar as decisões.</span>}{showRejectionForm && <div className="workflow-rejection-form"><label className="field"><span>Motivo da rejeição</span><textarea value={rejectionReason} onChange={(event) => setRejectionReason(event.target.value)} placeholder="Informe por que a proposta foi reprovada." rows={3} /></label><div className="workflow-button-row"><button type="button" className="ghost-button" onClick={() => setShowRejectionForm(false)}>Cancelar</button><button type="button" className="danger-button" disabled={updating || !rejectionReason.trim()} onClick={() => void runWorkflowAction("reject_request", { rejectionReason: rejectionReason.trim() })}>{updating ? "Registrando..." : "Confirmar rejeição"}</button></div></div>}</div>}
+
+            {status === "awaiting_order" && <div className="workflow-action-card"><div><strong>Pedido aceito pelo concessionário</strong><p>Registre o número do pedido no ERP HORSCH para encerrar o fluxo.</p></div><div className="workflow-inline-form"><input value={erpOrderNumber} onChange={(event) => setErpOrderNumber(event.target.value)} placeholder="Número do pedido ERP" disabled={!canRecordOrder || updating} /><button type="button" className="primary-button" disabled={!canRecordOrder || updating || !erpOrderNumber.trim()} onClick={() => void runWorkflowAction("record_order", { erpOrderNumber: erpOrderNumber.trim() })}>{updating ? "Salvando..." : "Registrar pedido"}</button></div>{!canRecordOrder && <span className="workflow-lock">Aguardando o Gestor Fábrica responsável pela concessionária.</span>}</div>}
+
+            {status === "order_generated" && <div className="workflow-success-card"><Icon name="check" size={20} /><div><strong>Pedido registrado com sucesso</strong><p>Número do pedido ERP HORSCH: <b>{proposal.erpOrderNumber || erpOrderNumber || "não informado"}</b></p></div></div>}
+            {status === "reproved" && <div className="workflow-rejected-card"><Icon name="close" size={20} /><div><strong>Solicitação reprovada</strong><p>{proposal.rejectionReason || "O concessionário não aceitou a oferta."}</p></div></div>}
+            {error && <p className="form-error">{error}</p>}
+          </section>
+        )}
+
+        {!isWorkflow && decisionOpen && (
           <section className="decision-panel no-print">
             <header className="counteroffer-form-heading">
               <div>
@@ -1899,7 +2023,7 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
           </section>
         )}
 
-        {canReviewCounteroffer && (
+        {!isWorkflow && canReviewCounteroffer && (
           <section className="counteroffer-review-panel no-print">
             <div>
               <span className="eyebrow">Análise da fábrica</span>

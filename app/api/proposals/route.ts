@@ -29,9 +29,32 @@ const VALID_STATUSES = new Set([
   "approved",
   "rejected",
   "expired",
+  "awaiting_global",
+  "in_analysis",
+  "awaiting_dealer_acceptance",
+  "awaiting_order",
+  "order_generated",
+  "reproved",
 ]);
 
 const EXPIRABLE_STATUSES = ["draft", "sent", "counteroffer"];
+const REQUEST_WORKFLOW_STATUSES = new Set([
+  "awaiting_global",
+  "in_analysis",
+  "awaiting_dealer_acceptance",
+  "awaiting_order",
+  "order_generated",
+  "reproved",
+]);
+
+const REQUEST_STATUS_LABELS: Record<string, string> = {
+  awaiting_global: "Aguardando Retorno Global",
+  in_analysis: "Em Análise",
+  awaiting_dealer_acceptance: "Aguardando Aceite do Concessionário",
+  awaiting_order: "Aguardando Pedido",
+  order_generated: "Pedido Gerado",
+  reproved: "Reprovada",
+};
 
 type ItemInput = {
   partNumber?: string;
@@ -45,6 +68,7 @@ type ItemInput = {
 };
 
 type ProposalInput = {
+  requestOnly?: boolean;
   dealershipId?: number | null;
   dealership?: string;
   city?: string;
@@ -57,6 +81,7 @@ type ProposalInput = {
   validUntil?: string;
   customerName?: string;
   customerSaleValueCents?: number | null;
+  requestedNetPriceCents?: number | null;
   status?: string;
   items?: ItemInput[];
 };
@@ -112,13 +137,20 @@ function activeUserWithRole(
 }
 
 function proposalActionOwnerEmail(
-  proposal: { status: string; commercialOwnerEmail: string; createdByEmail: string; dealershipId: number },
-  dealer: { id: number; contactEmail: string },
+  proposal: { status: string; commercialOwnerEmail: string; createdByEmail: string; dealershipId: number; claimedByEmail?: string },
+  dealer: { id: number; contactEmail: string; factoryManagerEmail?: string },
   allUsers: UserRecord[],
 ) {
+  if (proposal.status === "awaiting_global") return "";
+  if (proposal.status === "in_analysis") return (proposal.claimedByEmail || "").trim().toLowerCase();
+  if (proposal.status === "awaiting_order") return (dealer.factoryManagerEmail || "").trim().toLowerCase();
   if (proposal.status === "sent") {
     const dealerManager = activeUserWithRole(allUsers, "dealer_manager", (record) => record.dealershipId === dealer.id);
     return (dealerManager?.email || dealer.contactEmail || "").trim().toLowerCase();
+  }
+  if (proposal.status === "awaiting_dealer_acceptance") {
+    const dealerManager = activeUserWithRole(allUsers, "dealer_manager", (record) => record.dealershipId === dealer.id);
+    return (dealerManager?.email || dealer.contactEmail || proposal.createdByEmail || "").trim().toLowerCase();
   }
   return (proposal.commercialOwnerEmail || proposal.createdByEmail || "").trim().toLowerCase();
 }
@@ -168,6 +200,19 @@ function invoiceTotalValidationError(items: ReturnType<typeof normalizeItems>) {
   return hasInvoiceUnitPrices && items.some((item) => item.invoiceUnitPriceCents === null)
     ? "Preencha o valor unitário da NF em todos os itens ou remova a coluna opcional."
     : "";
+}
+
+function normalizeRequestItem(item: ItemInput, requestedNetPriceCents: number | null) {
+  return {
+    partNumber: item.partNumber?.trim() ?? "",
+    description: item.description?.trim() ?? "",
+    vt: "",
+    origin: "",
+    ncm: "",
+    quantity: Math.max(1, Math.trunc(Number(item.quantity) || 0)),
+    unitPriceCents: requestedNetPriceCents ?? 0,
+    invoiceUnitPriceCents: null,
+  };
 }
 
 function deliveryDatabasePatch(delivery: ProposalEmailResult) {
@@ -222,7 +267,6 @@ export async function GET() {
 
   try {
     const db = await getDb();
-    await expireOverdueProposals(db);
     const [allDealers, allUsers, moduleRows, assignmentRows] = await Promise.all([
       db.select().from(dealerships).orderBy(dealerships.name),
       db.select().from(users).orderBy(users.name, users.email),
@@ -257,6 +301,20 @@ export async function GET() {
         totalCents: proposals.totalCents,
         customerName: proposals.customerName,
         customerSaleValueCents: proposals.customerSaleValueCents,
+        requestedNetPriceCents: proposals.requestedNetPriceCents,
+        claimedByEmail: proposals.claimedByEmail,
+        claimedAt: proposals.claimedAt,
+        pdfVisualized: proposals.pdfVisualized,
+        rejectionReason: proposals.rejectionReason,
+        erpOrderNumber: proposals.erpOrderNumber,
+        officialPdfPath: proposals.officialPdfPath,
+        factoryDescription: proposals.factoryDescription,
+        factoryVt: proposals.factoryVt,
+        factoryOrigin: proposals.factoryOrigin,
+        factoryNcm: proposals.factoryNcm,
+        offerNetPriceCents: proposals.offerNetPriceCents,
+        offerInvoiceUnitPriceCents: proposals.offerInvoiceUnitPriceCents,
+        offerValidUntil: proposals.offerValidUntil,
         counterofferCents: proposals.counterofferCents,
         decisionNote: proposals.decisionNote,
         decidedByEmail: proposals.decidedByEmail,
@@ -320,6 +378,7 @@ export async function GET() {
       const actionOwnerEmail = proposalActionOwnerEmail(row, dealerById.get(row.dealershipId) || { id: row.dealershipId, contactEmail: dealershipContactEmail }, allUsers);
       return {
         ...row,
+        statusLabel: REQUEST_STATUS_LABELS[row.status] || row.status,
         contactEmail: row.contactEmail || dealershipContactEmail,
         parentDealershipName: row.parentDealershipId ? dealerById.get(row.parentDealershipId)?.name || "" : "",
         isActionOwner: actionOwnerEmail === profile.email.trim().toLowerCase(),
@@ -433,6 +492,71 @@ export async function POST(request: Request) {
 
   try {
     const payload = (await request.json()) as ProposalInput;
+    if (payload.requestOnly) {
+      if (profile.role !== "dealer_manager") {
+        return Response.json({ error: "Somente o Gestor do Concessionário pode abrir uma solicitação." }, { status: 403 });
+      }
+      const itemInput = payload.items?.[0];
+      const requestedNetPriceCents = normalizeOptionalCents(payload.requestedNetPriceCents);
+      const requestItem = normalizeRequestItem(itemInput ?? {}, requestedNetPriceCents);
+      if (!requestItem.partNumber || !requestItem.description || requestItem.quantity < 1) {
+        return Response.json({ error: "Informe PN, descrição e quantidade maior que zero." }, { status: 400 });
+      }
+      const db = await getDb();
+      const selectedDealershipId = Math.trunc(Number(payload.dealershipId) || 0);
+      const [dealer] = selectedDealershipId
+        ? await db.select().from(dealerships).where(eq(dealerships.id, selectedDealershipId)).limit(1)
+        : [];
+      if (!dealer || !dealerIsVisible(profile, dealer)) return forbidden();
+      if (!(await isModuleEnabled(db, dealer.id, "proposals"))) return forbidden("O módulo Propostas não está habilitado para esta concessionária.");
+      const id = await proposalNumber(db);
+      const now = new Date().toISOString();
+      const issueDate = currentBusinessDate(new Date());
+      await db.insert(proposals).values({
+        id,
+        dealershipId: dealer.id,
+        contactName: profile.name,
+        contactEmail: profile.email,
+        commercialOwner: "Aguardando Gestão Global",
+        commercialOwnerEmail: "",
+        status: "awaiting_global",
+        issueDate,
+        validUntil: "",
+        totalCents: 0,
+        customerName: payload.customerName?.trim() ?? "",
+        customerSaleValueCents: normalizeOptionalCents(payload.customerSaleValueCents),
+        requestedNetPriceCents,
+        claimedByEmail: "",
+        claimedAt: null,
+        pdfVisualized: false,
+        rejectionReason: "",
+        erpOrderNumber: "",
+        officialPdfPath: "",
+        factoryDescription: "",
+        factoryVt: "",
+        factoryOrigin: "",
+        factoryNcm: "",
+        offerNetPriceCents: null,
+        offerInvoiceUnitPriceCents: null,
+        offerValidUntil: null,
+        emailStatus: "not_requested",
+        createdByEmail: profile.email,
+        createdByName: profile.name,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await db.insert(proposalItems).values({ proposalId: id, ...requestItem });
+      await recordAudit(db, {
+        proposalId: id,
+        actorEmail: profile.email,
+        actorName: profile.name,
+        action: "created",
+        entity: "proposal",
+        details: "Solicitação criada pelo Gestor do Concessionário e enviada para a Gestão Global.",
+        after: { id, dealershipId: dealer.id, status: "awaiting_global", requestedNetPriceCents, customerName: payload.customerName?.trim() ?? "", customerSaleValueCents: normalizeOptionalCents(payload.customerSaleValueCents), item: requestItem },
+      });
+      return Response.json({ id, status: "awaiting_global" }, { status: 201 });
+    }
     const requestedStatus = payload.status === "sent" ? "sent" : "draft";
     const validItems = normalizeItems(payload.items ?? []);
     const validationError = itemValidationError(validItems);
@@ -644,7 +768,7 @@ export async function PATCH(request: Request) {
   try {
     const payload = (await request.json()) as {
       id?: string;
-      action?: "send" | "edit" | "accept_counteroffer" | "return_counteroffer";
+      action?: "send" | "edit" | "accept_counteroffer" | "return_counteroffer" | "claim" | "offer" | "view_pdf" | "accept_request" | "reject_request" | "record_order";
       status?: string;
       dealershipId?: number | null;
       contactName?: string;
@@ -653,6 +777,16 @@ export async function PATCH(request: Request) {
       validUntil?: string;
       customerName?: string;
       customerSaleValueCents?: number | null;
+      requestedNetPriceCents?: number | null;
+      factoryDescription?: string;
+      factoryVt?: string;
+      factoryOrigin?: string;
+      factoryNcm?: string;
+      offerNetPriceCents?: number | null;
+      offerInvoiceUnitPriceCents?: number | null;
+      offerValidUntil?: string;
+      rejectionReason?: string;
+      erpOrderNumber?: string;
       items?: ItemInput[];
       counterofferCents?: number;
       decisionNote?: string;
@@ -666,7 +800,6 @@ export async function PATCH(request: Request) {
       return Response.json({ error: "Informe a proposta." }, { status: 400 });
     }
     const db = await getDb();
-    await expireOverdueProposals(db);
     const [record] = await db
       .select({ proposal: proposals, dealer: dealerships })
       .from(proposals)
@@ -678,6 +811,173 @@ export async function PATCH(request: Request) {
     }
     if (!dealerIsVisible(profile, record.dealer)) return forbidden();
     if (!(await isModuleEnabled(db, record.dealer.id, "proposals"))) return forbidden("O módulo Propostas não está habilitado para esta concessionária.");
+    const workflowNow = new Date().toISOString();
+
+    if (payload.action === "claim") {
+      if (!["general_admin", "global_management"].includes(profile.role)) {
+        return Response.json({ error: "Somente a Gestão Global pode assumir uma solicitação." }, { status: 403 });
+      }
+      if (record.proposal.status !== "awaiting_global") {
+        return Response.json({ error: "Esta solicitação já foi assumida ou não está disponível para análise." }, { status: 409 });
+      }
+      await db.update(proposals).set({
+        status: "in_analysis",
+        claimedByEmail: profile.email,
+        claimedAt: workflowNow,
+        commercialOwner: profile.name,
+        commercialOwnerEmail: profile.email,
+        updatedAt: workflowNow,
+      }).where(eq(proposals.id, payload.id));
+      await recordAudit(db, {
+        proposalId: payload.id,
+        actorEmail: profile.email,
+        actorName: profile.name,
+        action: "proposal_claimed",
+        entity: "proposal",
+        details: "Solicitação assumida manualmente pela Gestão Global.",
+        before: { status: record.proposal.status, claimedByEmail: record.proposal.claimedByEmail },
+        after: { status: "in_analysis", claimedByEmail: profile.email },
+      });
+      return Response.json({ ok: true, status: "in_analysis" });
+    }
+
+    if (payload.action === "offer") {
+      if (!["general_admin", "global_management"].includes(profile.role)) {
+        return Response.json({ error: "Somente a Gestão Global pode preencher a oferta oficial." }, { status: 403 });
+      }
+      if (record.proposal.status !== "in_analysis") {
+        return Response.json({ error: "Assuma a proposta antes de preencher a oferta oficial." }, { status: 409 });
+      }
+      if (profile.role !== "general_admin" && record.proposal.claimedByEmail.toLowerCase() !== profile.email) {
+        return Response.json({ error: "Esta proposta está bloqueada para outro Gestor Global." }, { status: 409 });
+      }
+      const factoryDescription = payload.factoryDescription?.trim() ?? "";
+      const factoryVt = payload.factoryVt?.trim() ?? "";
+      const factoryOrigin = payload.factoryOrigin?.trim() ?? "";
+      const factoryNcm = payload.factoryNcm?.trim() ?? "";
+      const offerNetPriceCents = normalizeOptionalCents(payload.offerNetPriceCents);
+      const offerInvoiceUnitPriceCents = normalizeOptionalCents(payload.offerInvoiceUnitPriceCents);
+      const offerValidUntil = payload.offerValidUntil?.trim() ?? "";
+      if (!factoryDescription || !factoryVt || !factoryOrigin || !factoryNcm || !offerNetPriceCents || !offerValidUntil) {
+        return Response.json({ error: "Preencha descrição de fábrica, VT, origem, NCM, net price e validade." }, { status: 400 });
+      }
+      if (offerValidUntil < currentBusinessDate()) {
+        return Response.json({ error: "A validade da oferta não pode estar vencida." }, { status: 400 });
+      }
+      const [requestItem] = await db.select().from(proposalItems).where(eq(proposalItems.proposalId, payload.id)).orderBy(proposalItems.id).limit(1);
+      if (!requestItem) return Response.json({ error: "Item da solicitação não encontrado." }, { status: 409 });
+      const totalCents = requestItem.quantity * offerNetPriceCents;
+      const officialPdfPath = "/api/proposals/pdf?proposalId=" + encodeURIComponent(payload.id);
+      await db.batch([
+        db.update(proposalItems).set({
+          description: factoryDescription,
+          vt: factoryVt,
+          origin: factoryOrigin,
+          ncm: factoryNcm,
+          unitPriceCents: offerNetPriceCents,
+          invoiceUnitPriceCents: offerInvoiceUnitPriceCents,
+        }).where(eq(proposalItems.id, requestItem.id)),
+        db.update(proposals).set({
+          status: "awaiting_dealer_acceptance",
+          validUntil: offerValidUntil,
+          totalCents,
+          pdfVisualized: false,
+          officialPdfPath,
+          factoryDescription,
+          factoryVt,
+          factoryOrigin,
+          factoryNcm,
+          offerNetPriceCents,
+          offerInvoiceUnitPriceCents,
+          offerValidUntil,
+          updatedAt: workflowNow,
+        }).where(eq(proposals.id, payload.id)),
+      ]);
+      await recordAudit(db, {
+        proposalId: payload.id,
+        actorEmail: profile.email,
+        actorName: profile.name,
+        action: "official_offer_created",
+        entity: "proposal",
+        details: "Oferta oficial preenchida manualmente e disponibilizada para aceite do concessionário.",
+        before: { status: record.proposal.status },
+        after: { status: "awaiting_dealer_acceptance", totalCents, offerValidUntil, officialPdfPath, factoryDescription, factoryVt, factoryOrigin, factoryNcm, offerNetPriceCents, offerInvoiceUnitPriceCents },
+      });
+      return Response.json({ ok: true, status: "awaiting_dealer_acceptance", officialPdfPath, totalCents });
+    }
+
+    if (payload.action === "view_pdf") {
+      if (profile.role !== "dealer_manager" || record.proposal.status !== "awaiting_dealer_acceptance") {
+        return Response.json({ error: "O PDF só pode ser visualizado pelo Gestor do Concessionário na etapa de aceite." }, { status: 403 });
+      }
+      await db.update(proposals).set({ pdfVisualized: true, updatedAt: workflowNow }).where(eq(proposals.id, payload.id));
+      await recordAudit(db, {
+        proposalId: payload.id,
+        actorEmail: profile.email,
+        actorName: profile.name,
+        action: "pdf_visualized",
+        entity: "proposal",
+        details: "PDF oficial visualizado pelo Gestor do Concessionário.",
+        after: { pdfVisualized: true },
+      });
+      return Response.json({ ok: true, pdfVisualized: true, status: "awaiting_dealer_acceptance" });
+    }
+
+    if (payload.action === "accept_request" || payload.action === "reject_request") {
+      if (profile.role !== "dealer_manager" || record.proposal.status !== "awaiting_dealer_acceptance") {
+        return Response.json({ error: "A decisão está disponível somente para o Gestor do Concessionário na etapa de aceite." }, { status: 403 });
+      }
+      if (!record.proposal.pdfVisualized) {
+        return Response.json({ error: "Visualize o PDF oficial antes de aceitar ou rejeitar a proposta." }, { status: 409 });
+      }
+      const rejectionReason = payload.rejectionReason?.trim() ?? "";
+      if (payload.action === "reject_request" && !rejectionReason) {
+        return Response.json({ error: "Informe o motivo da rejeição." }, { status: 400 });
+      }
+      const nextStatus = payload.action === "accept_request" ? "awaiting_order" : "reproved";
+      await db.update(proposals).set({
+        status: nextStatus,
+        rejectionReason: payload.action === "reject_request" ? rejectionReason : "",
+        decisionNote: payload.action === "reject_request" ? rejectionReason : "Oferta oficial aceita pelo concessionário.",
+        decidedByEmail: profile.email,
+        updatedAt: workflowNow,
+      }).where(eq(proposals.id, payload.id));
+      await recordAudit(db, {
+        proposalId: payload.id,
+        actorEmail: profile.email,
+        actorName: profile.name,
+        action: payload.action === "accept_request" ? "request_accepted" : "request_rejected",
+        entity: "proposal",
+        details: payload.action === "accept_request" ? "Oferta oficial aceita; aguardando colocação do pedido." : "Oferta oficial rejeitada. Motivo: " + rejectionReason,
+        before: { status: record.proposal.status, pdfVisualized: record.proposal.pdfVisualized },
+        after: { status: nextStatus, rejectionReason },
+      });
+      return Response.json({ ok: true, status: nextStatus });
+    }
+
+    if (payload.action === "record_order") {
+      if (!["general_admin", "factory_manager"].includes(profile.role)) {
+        return Response.json({ error: "Somente o Gestor Fábrica pode registrar o pedido ERP." }, { status: 403 });
+      }
+      if (record.proposal.status !== "awaiting_order") {
+        return Response.json({ error: "Esta proposta ainda não está aguardando pedido." }, { status: 409 });
+      }
+      const erpOrderNumber = payload.erpOrderNumber?.trim() ?? "";
+      if (!erpOrderNumber) return Response.json({ error: "Informe o número do pedido ERP." }, { status: 400 });
+      await db.update(proposals).set({ status: "order_generated", erpOrderNumber, updatedAt: workflowNow }).where(eq(proposals.id, payload.id));
+      await recordAudit(db, {
+        proposalId: payload.id,
+        actorEmail: profile.email,
+        actorName: profile.name,
+        action: "order_recorded",
+        entity: "proposal",
+        details: "Pedido ERP " + erpOrderNumber + " registrado manualmente pelo Gestor Fábrica.",
+        before: { status: record.proposal.status, erpOrderNumber: record.proposal.erpOrderNumber },
+        after: { status: "order_generated", erpOrderNumber },
+      });
+      return Response.json({ ok: true, status: "order_generated", erpOrderNumber });
+    }
+
     const canManageAnyProposalStatus = rolePermissions(profile.role).manageAnyProposalStatus;
     const isStatusOverride = Boolean(payload.status) && canManageAnyProposalStatus;
     const expiredEdit = record.proposal.status === "expired" && payload.action === "edit" && ["general_admin", "global_management"].includes(profile.role);
@@ -951,7 +1251,6 @@ export async function DELETE(request: Request) {
     }
 
     const db = await getDb();
-    await expireOverdueProposals(db);
     const [record] = await db
       .select({ proposal: proposals, dealer: dealerships })
       .from(proposals)

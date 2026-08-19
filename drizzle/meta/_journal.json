@@ -183,6 +183,13 @@
       "when": 1787136861907,
       "tag": "0025_green_bloodstorm",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1787139729891,
+      "tag": "0026_dry_gorgon",
+      "breakpoints": true
     }
   ]
 }
