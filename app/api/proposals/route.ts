@@ -1009,9 +1009,6 @@ export async function PATCH(request: Request) {
       if (profile.role !== "dealer_manager" || record.proposal.status !== "awaiting_dealer_acceptance") {
         return Response.json({ error: "A decisão está disponível somente para o Gestor do Concessionário na etapa de aceite." }, { status: 403 });
       }
-      if (!record.proposal.pdfVisualized) {
-        return Response.json({ error: "Visualize o PDF oficial antes de aceitar ou rejeitar a proposta." }, { status: 409 });
-      }
       const rejectionReason = payload.rejectionReason?.trim() ?? "";
       if (payload.action === "reject_request" && !rejectionReason) {
         return Response.json({ error: "Informe o motivo da rejeição." }, { status: 400 });
@@ -1217,12 +1214,6 @@ export async function PATCH(request: Request) {
     const workflowDealerDecision =
       profile.role === "dealer_manager" &&
       record.proposal.status === "awaiting_dealer_acceptance";
-    if (workflowDealerDecision && !record.proposal.pdfVisualized) {
-      return Response.json(
-        { error: "Visualize o PDF oficial antes de decidir sobre a proposta." },
-        { status: 409 },
-      );
-    }
     if (nextStatus === "expired") {
       return Response.json(
         { error: "O status Expirada é definido automaticamente pela data de vigência." },
