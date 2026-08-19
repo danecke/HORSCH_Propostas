@@ -109,6 +109,26 @@ export const users = sqliteTable(
   ],
 );
 
+export const userDealerships = sqliteTable(
+  "user_dealerships",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userEmail: text("user_email")
+      .notNull()
+      .references(() => users.email, { onDelete: "cascade" }),
+    dealershipId: integer("dealership_id")
+      .notNull()
+      .references(() => dealerships.id, { onDelete: "cascade" }),
+    createdByEmail: text("created_by_email").notNull().default(""),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("user_dealerships_unique").on(table.userEmail, table.dealershipId),
+    index("user_dealerships_user_idx").on(table.userEmail),
+    index("user_dealerships_dealership_idx").on(table.dealershipId),
+  ],
+);
+
 export const sessions = sqliteTable(
   "sessions",
   {

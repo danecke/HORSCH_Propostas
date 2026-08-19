@@ -2,7 +2,7 @@ import { desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { unzipSync, zipSync } from "fflate";
 import { getDb } from "../../../db";
 import { dealerships, priceListImports, priceListItems, reimbursementApprovals, reimbursementClients, reimbursementImports, reimbursementSales } from "../../../db/schema";
-import { getAccessProfile, type AccessProfile } from "../../../lib/access";
+import { getAccessProfile, profileHasDealership, type AccessProfile } from "../../../lib/access";
 import { recordAudit } from "../../../lib/audit";
 import { ensureReimbursementStorage } from "../../../lib/reimbursement-db";
 
@@ -154,10 +154,8 @@ function priceForState(item: typeof priceListItems.$inferSelect, state: string) 
 }
 function isAllowedDealer(profile: AccessProfile, dealer: typeof dealerships.$inferSelect) {
   if (["general_admin", "global_management"].includes(profile.role)) return true;
-  if (profile.role === "factory_manager") return dealer.factoryManagerEmail.toLowerCase() === profile.email.toLowerCase();
-  return isDealerScoped(profile) && profile.dealershipId !== null && (
-    dealer.id === profile.dealershipId || dealer.parentDealershipId === profile.dealershipId
-  );
+  if (profile.role === "factory_manager") return profileHasDealership(profile, dealer.id) || dealer.factoryManagerEmail.toLowerCase() === profile.email.toLowerCase();
+  return isDealerScoped(profile) && (profileHasDealership(profile, dealer.id) || profile.dealershipIds.includes(dealer.parentDealershipId ?? -1));
 }
 function moneyLabel(value: number) { return (value / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function excelColumn(index: number) { let value = ""; let current = index + 1; while (current > 0) { const remainder = (current - 1) % 26; value = String.fromCharCode(65 + remainder) + value; current = Math.floor((current - 1) / 26); } return value; }

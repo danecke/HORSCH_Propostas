@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { getDb } from "../db";
-import { dealershipModuleAccess, users } from "../db/schema";
+import { dealershipModuleAccess, userDealerships, users } from "../db/schema";
 import { getAuthenticatedUser } from "./auth";
 
 export const MASTER_ADMIN_EMAIL = "mateus.mazieiro@horsch.com";
@@ -41,6 +41,7 @@ export type AccessProfile = {
   name: string;
   role: UserRole;
   dealershipId: number | null;
+  dealershipIds: number[];
   active: boolean;
 };
 
@@ -57,13 +58,27 @@ export async function getAccessProfile(): Promise<AccessProfile | null> {
     return null;
   }
 
+  const assignments = await db
+    .select({ dealershipId: userDealerships.dealershipId })
+    .from(userDealerships)
+    .where(eq(userDealerships.userEmail, email));
+  const dealershipIds = [...new Set([
+    ...assignments.map((assignment) => assignment.dealershipId),
+    ...(record.dealershipId === null ? [] : [record.dealershipId]),
+  ])];
+
   return {
     email: record.email,
     name: record.name || identity.displayName,
     role,
-    dealershipId: record.dealershipId ?? null,
+    dealershipId: dealershipIds[0] ?? record.dealershipId ?? null,
+    dealershipIds,
     active: record.active,
   };
+}
+
+export function profileHasDealership(profile: Pick<AccessProfile, "dealershipId" | "dealershipIds">, dealershipId: number) {
+  return profile.dealershipId === dealershipId || profile.dealershipIds.includes(dealershipId);
 }
 
 export function canCreateProposal(profile: AccessProfile) {

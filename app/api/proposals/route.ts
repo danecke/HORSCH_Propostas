@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, lt } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { dealershipModuleAccess, dealerships, proposalDocuments, proposalItems, proposals, users } from "../../../db/schema";
+import { dealershipModuleAccess, dealerships, proposalDocuments, proposalItems, proposals, userDealerships, users } from "../../../db/schema";
 import { recordAudit } from "../../../lib/audit";
 import {
   canCreateProposal,
@@ -12,6 +12,7 @@ import {
   normalizeUserRole,
   rolePermissions,
   roleLabel,
+  profileHasDealership,
   type AccessProfile,
 } from "../../../lib/access";
 import {
@@ -89,10 +90,10 @@ function dealerIsVisible(
 ) {
   if (["general_admin", "global_management"].includes(profile.role)) return true;
   if (profile.role === "factory_manager") {
-    return dealer.factoryManagerEmail.toLowerCase() === profile.email;
+    return profileHasDealership(profile, dealer.id) || dealer.factoryManagerEmail.toLowerCase() === profile.email;
   }
   if (["dealer_manager", "concession"].includes(profile.role)) {
-    return profile.role === "dealer_manager" && dealer.id === profile.dealershipId;
+    return profile.role === "dealer_manager" && profileHasDealership(profile, dealer.id);
   }
   return false;
 }
@@ -222,11 +223,14 @@ export async function GET() {
   try {
     const db = await getDb();
     await expireOverdueProposals(db);
-    const [allDealers, allUsers, moduleRows] = await Promise.all([
+    const [allDealers, allUsers, moduleRows, assignmentRows] = await Promise.all([
       db.select().from(dealerships).orderBy(dealerships.name),
       db.select().from(users).orderBy(users.name, users.email),
       db.select().from(dealershipModuleAccess),
+      db.select().from(userDealerships),
     ]);
+    const assignmentsByEmail = new Map<string, number[]>();
+    for (const assignment of assignmentRows) assignmentsByEmail.set(assignment.userEmail, [...(assignmentsByEmail.get(assignment.userEmail) ?? []), assignment.dealershipId]);
     const visibleDealers = allDealers.filter((dealer) => dealerIsVisible(profile, dealer));
     const proposalDealerIds = new Set((await Promise.all(visibleDealers.map(async (dealer) =>
       (await isModuleEnabled(db, dealer.id, "proposals")) ? dealer.id : null,
@@ -365,13 +369,12 @@ export async function GET() {
       if (profile.role === "dealer_manager") {
         return (
           ["concession", "dealer_manager"].includes(recordRole) &&
-          record.dealershipId === profile.dealershipId
+          (assignmentsByEmail.get(record.email) ?? [record.dealershipId].filter((id): id is number => id !== null)).some((id) => profileHasDealership(profile, id))
         );
       }
       return (
         ["concession", "dealer_manager"].includes(recordRole) &&
-        record.dealershipId !== null &&
-        visibleDealerIds.has(record.dealershipId)
+        (assignmentsByEmail.get(record.email) ?? [record.dealershipId].filter((id): id is number => id !== null)).some((id) => visibleDealerIds.has(id))
       );
     });
 
@@ -386,6 +389,7 @@ export async function GET() {
           role,
           roleLabel: roleLabel(role),
           dealershipId: record.dealershipId,
+          dealershipIds: assignmentsByEmail.get(record.email) ?? (record.dealershipId === null ? [] : [record.dealershipId]),
           active: record.active,
           credentialReady: Boolean(record.passwordHash),
           createdAt: record.createdAt,

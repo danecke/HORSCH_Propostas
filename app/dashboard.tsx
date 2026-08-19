@@ -147,6 +147,7 @@ type AccessUser = {
   role: UserRole;
   roleLabel: string;
   dealershipId: number | null;
+  dealershipIds: number[];
   active: boolean;
   credentialReady: boolean;
   createdAt: string;
@@ -158,6 +159,7 @@ type CurrentAccess = {
   role: UserRole;
   roleLabel: string;
   dealershipId: number | null;
+  dealershipIds: number[];
   active: boolean;
   permissions: {
     viewAll: boolean;
@@ -310,8 +312,8 @@ export function Dashboard({ user }: { user: AppUser }) {
       const response = await fetch("/api/proposals", { cache: "no-store" });
       const payload = (await response.json()) as DashboardData & { error?: string };
       if (!response.ok) throw new Error(payload.error || "Não foi possível carregar os dados.");
-      const currentDealer = payload.dealerships.find((dealer) => dealer.id === payload.me.dealershipId);
-      const moduleEnabled = (moduleKey: ModuleKey) => ["general_admin", "global_management", "factory_manager"].includes(payload.me.role) || Boolean(currentDealer?.modules.find((module) => module.key === moduleKey)?.enabled ?? false);
+      const currentDealers = payload.dealerships.filter((dealer) => payload.me.dealershipIds.includes(dealer.id) || dealer.id === payload.me.dealershipId);
+      const moduleEnabled = (moduleKey: ModuleKey) => ["general_admin", "global_management", "factory_manager"].includes(payload.me.role) || currentDealers.some((dealer) => dealer.modules.find((module) => module.key === moduleKey)?.enabled ?? false);
       const quoteResponse = !moduleEnabled("quotes") ? null : await fetch("/api/quotes", { cache: "no-store" });
       const quotePayload = quoteResponse ? ((await quoteResponse.json()) as { quotes?: Quote[]; error?: string }) : { quotes: [] };
       const safeQuotePayload = quoteResponse?.ok ? quotePayload : { quotes: [] };
@@ -348,7 +350,7 @@ export function Dashboard({ user }: { user: AppUser }) {
 
   if (loading) return <LoadingState />;
   if (error || !data) return <ErrorState message={error || "Acesso não disponível."} retry={loadData} />;
-  const moduleEnabled = (moduleKey: ModuleKey) => ["general_admin", "global_management", "factory_manager"].includes(data.me.role) || Boolean(data.dealerships.find((dealer) => dealer.id === data.me.dealershipId)?.modules.find((module) => module.key === moduleKey)?.enabled ?? false);
+  const moduleEnabled = (moduleKey: ModuleKey) => ["general_admin", "global_management", "factory_manager"].includes(data.me.role) || data.dealerships.filter((dealer) => data.me.dealershipIds.includes(dealer.id) || dealer.id === data.me.dealershipId).some((dealer) => dealer.modules.find((module) => module.key === moduleKey)?.enabled ?? false);
   const proposalsEnabled = moduleEnabled("proposals");
   const quotesEnabled = moduleEnabled("quotes");
   const priceListEnabled = moduleEnabled("price_list");
@@ -944,7 +946,7 @@ function AccessView({ data, onNew, onChanged }: { data: DashboardData; onNew: ()
   const [passwordTarget, setPasswordTarget] = useState<AccessUser | null>(null);
   const canAssignRoles = data.me.permissions.assignLowerPermission;
 
-  async function updateAccess(record: AccessUser, patch: Partial<Pick<AccessUser, "role" | "dealershipId" | "active">>) {
+  async function updateAccess(record: AccessUser, patch: Partial<Pick<AccessUser, "role" | "dealershipId" | "dealershipIds" | "active">>) {
     setBusy(record.email);
     const response = await fetch("/api/access", {
       method: "PATCH",
@@ -1000,15 +1002,16 @@ function AccessView({ data, onNew, onChanged }: { data: DashboardData; onNew: ()
                     <td>
                       {canEditPosition ? (
                         <select
-                          value={record.dealershipId ?? ""}
+                          multiple
+                          size={Math.min(4, Math.max(2, data.dealerships.length))}
+                          value={(record.dealershipIds?.length ? record.dealershipIds : record.dealershipId ? [record.dealershipId] : []).map(String)}
                           disabled={busy === record.email}
-                          onChange={(event) => void updateAccess(record, { dealershipId: Number(event.target.value) || null })}
-                          aria-label={`Concessionária de ${record.name}`}
+                          onChange={(event) => void updateAccess(record, { dealershipIds: Array.from(event.target.selectedOptions, (option) => Number(option.value)) })}
+                          aria-label={`Concessionárias de ${record.name}`}
                         >
-                          <option value="">Sem vínculo</option>
                           {data.dealerships.map((dealer) => <option key={dealer.id} value={dealer.id}>{dealer.name}</option>)}
                         </select>
-                      ) : data.dealerships.find((item) => item.id === record.dealershipId)?.name || "—"}
+                      ) : (record.dealershipIds?.length ? record.dealershipIds : record.dealershipId ? [record.dealershipId] : []).map((id) => data.dealerships.find((item) => item.id === id)?.name).filter(Boolean).join(", ") || "—"}
                     </td>
                     <td><span className={`access-status ${record.active ? "active" : "inactive"}`}>{record.active ? "Ativo" : "Inativo"}</span></td>
                     <td className="align-right">
@@ -1462,11 +1465,11 @@ function NewProposalModal({
 }
 
 function NewAccessModal({ me, dealerships, onClose, onSaved }: { me: CurrentAccess; dealerships: Dealership[]; onClose: () => void; onSaved: () => Promise<void> }) {
-  const [name, setName] = useState(""); const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [role, setRole] = useState<UserRole>(me.role === "general_admin" ? "global_management" : me.role === "global_management" ? "factory_manager" : me.role === "factory_manager" ? "dealer_manager" : "concession"); const [dealershipId, setDealershipId] = useState<number | null>(me.role === "dealer_manager" || me.role === "concession" ? me.dealershipId : null); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
-  async function submit(event: FormEvent) { event.preventDefault(); setSaving(true); setError(""); const response = await fetch("/api/access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, email, password, role, dealershipId }) }); const payload = (await response.json()) as { error?: string }; if (!response.ok) { setError(payload.error || "Não foi possível criar o acesso."); setSaving(false); return; } await onSaved(); }
+  const [name, setName] = useState(""); const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [role, setRole] = useState<UserRole>(me.role === "general_admin" ? "global_management" : me.role === "global_management" ? "factory_manager" : me.role === "factory_manager" ? "dealer_manager" : "concession"); const [dealershipIds, setDealershipIds] = useState<number[]>(me.role === "dealer_manager" || me.role === "concession" ? (me.dealershipIds?.length ? me.dealershipIds : me.dealershipId ? [me.dealershipId] : []) : []); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
+  async function submit(event: FormEvent) { event.preventDefault(); setSaving(true); setError(""); const response = await fetch("/api/access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, email, password, role, dealershipIds }) }); const payload = (await response.json()) as { error?: string }; if (!response.ok) { setError(payload.error || "Não foi possível criar o acesso."); setSaving(false); return; } await onSaved(); }
   const canChooseRole = ["general_admin", "global_management", "factory_manager"].includes(me.role);
-  const dealershipRequired = ["dealer_manager", "concession"].includes(role);
-  return <div className="modal-backdrop" role="dialog" aria-modal="true"><form className="access-modal" onSubmit={(event) => void submit(event)}><header className="modal-header"><div><span className="eyebrow">Novo acesso</span><h2>Criar acesso por nível</h2><p>Defina o nível e o escopo operacional deste usuário.</p></div><button type="button" className="icon-button" onClick={onClose}><Icon name="close" /></button></header><div className="form-scroll"><div className="access-form-grid"><label className="field"><span>Nome completo</span><input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} required /></label><label className="field"><span>E-mail corporativo</span><input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label><label className="field"><span>Senha inicial</span><input type="password" minLength={10} maxLength={128} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>{canChooseRole && <label className="field"><span>Nível de permissão</span><select value={role} onChange={(event) => setRole(event.target.value as UserRole)}>{me.role === "general_admin" && <option value="global_management">Gestão Global</option>}{(me.role === "general_admin" || me.role === "global_management") && <option value="factory_manager">Gestor Fábrica</option>}{(me.role === "general_admin" || me.role === "global_management" || me.role === "factory_manager") && <option value="dealer_manager">Gestor Concessionária</option>}<option value="concession">Concessão</option></select></label>}{me.role !== "dealer_manager" && <label className="field"><span>Concessionária inicial {dealershipRequired ? "(obrigatória)" : "(opcional)"}</span><select required={dealershipRequired} value={dealershipId ?? ""} onChange={(event) => setDealershipId(Number(event.target.value) || null)}><option value="">Sem vínculo</option>{dealerships.map((dealer) => <option key={dealer.id} value={dealer.id}>{dealer.name}</option>)}</select></label>}</div><div className="access-note"><strong>{canChooseRole ? "Nível selecionado" : "Concessão"}</strong><p>{canChooseRole ? "O nível define a visão, as ações e o escopo dos dados no portal." : "O acesso ficará restrito à concessionária vinculada."}</p></div>{error && <p className="form-error">{error}</p>}</div><footer className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button type="submit" className="primary-button" disabled={saving}>{saving ? "Criando..." : "Criar acesso"}</button></footer></form></div>;
+  const dealershipRequired = ["factory_manager", "dealer_manager", "concession"].includes(role);
+  return <div className="modal-backdrop" role="dialog" aria-modal="true"><form className="access-modal" onSubmit={(event) => void submit(event)}><header className="modal-header"><div><span className="eyebrow">Novo acesso</span><h2>Criar acesso por nível</h2><p>Defina o nível e o escopo operacional deste usuário.</p></div><button type="button" className="icon-button" onClick={onClose}><Icon name="close" /></button></header><div className="form-scroll"><div className="access-form-grid"><label className="field"><span>Nome completo</span><input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} required /></label><label className="field"><span>E-mail corporativo</span><input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label><label className="field"><span>Senha inicial</span><input type="password" minLength={10} maxLength={128} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>{canChooseRole && <label className="field"><span>Nível de permissão</span><select value={role} onChange={(event) => setRole(event.target.value as UserRole)}>{me.role === "general_admin" && <option value="global_management">Gestão Global</option>}{(me.role === "general_admin" || me.role === "global_management") && <option value="factory_manager">Gestor Fábrica</option>}{(me.role === "general_admin" || me.role === "global_management" || me.role === "factory_manager") && <option value="dealer_manager">Gestor Concessionária</option>}<option value="concession">Concessão</option></select></label>}{me.role !== "dealer_manager" && <label className="field"><span>Concessionárias sob responsabilidade {dealershipRequired ? "(obrigatórias)" : "(opcionais)"}</span><select multiple size={Math.min(5, Math.max(3, dealerships.length))} value={dealershipIds.map(String)} onChange={(event) => setDealershipIds(Array.from(event.target.selectedOptions, (option) => Number(option.value)))} aria-label="Concessionárias sob responsabilidade">{dealerships.map((dealer) => <option key={dealer.id} value={dealer.id}>{dealer.name}</option>)}</select><small className="field-hint">Selecione uma ou mais lojas. Use Ctrl ou Command para selecionar várias.</small></label>}</div><div className="access-note"><strong>{canChooseRole ? "Nível selecionado" : "Concessão"}</strong><p>{canChooseRole ? "O nível define a visão, as ações e o escopo dos dados no portal." : "O acesso ficará restrito às concessionárias vinculadas."}</p></div>{error && <p className="form-error">{error}</p>}</div><footer className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button type="submit" className="primary-button" disabled={saving}>{saving ? "Criando..." : "Criar acesso"}</button></footer></form></div>;
 }
 
 function AdminPasswordModal({ target, onClose }: { target: AccessUser; onClose: () => void }) {

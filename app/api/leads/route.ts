@@ -2,7 +2,7 @@ import { desc, eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { dealerships, leads, users } from "../../../db/schema";
 import { recordAudit } from "../../../lib/audit";
-import { getAccessProfile, isModuleEnabled, normalizeUserRole } from "../../../lib/access";
+import { getAccessProfile, isModuleEnabled, normalizeUserRole, profileHasDealership } from "../../../lib/access";
 
 export const dynamic = "force-dynamic";
 
@@ -21,8 +21,8 @@ function isFactoryRole(role: string) {
 
 function canSeeDealer(profile: NonNullable<Awaited<ReturnType<typeof getAccessProfile>>>, dealer: { id: number; factoryManagerEmail: string }) {
   if (["general_admin", "global_management"].includes(profile.role)) return true;
-  if (profile.role === "factory_manager") return dealer.factoryManagerEmail.trim().toLowerCase() === profile.email.trim().toLowerCase();
-  return ["dealer_manager", "concession"].includes(profile.role) && dealer.id === profile.dealershipId;
+  if (profile.role === "factory_manager") return profileHasDealership(profile, dealer.id) || dealer.factoryManagerEmail.trim().toLowerCase() === profile.email.trim().toLowerCase();
+  return ["dealer_manager", "concession"].includes(profile.role) && profileHasDealership(profile, dealer.id);
 }
 
 function normalizeCents(value: unknown) {
@@ -118,11 +118,11 @@ export async function GET() {
     const db = await getDb();
     const allDealers = await db.select().from(dealerships).orderBy(dealerships.name);
     const visibleDealers = allDealers.filter((dealer) => canSeeDealer(profile, dealer));
-    const enabledDealers = isFactoryRole(profile)
+    const enabledDealers = isFactoryRole(profile.role)
       ? visibleDealers
       : (await Promise.all(visibleDealers.map(async (dealer) => ({ dealer, enabled: await isModuleEnabled(db, dealer.id, "leads") })))).filter((item) => item.enabled).map((item) => item.dealer);
-    if (!enabledDealers.length && !isFactoryRole(profile)) {
-      return Response.json({ leads: [], leadDetails: [], ownerLeads: [], ...insights([]), metrics: metrics([]), byDealership: [], bySeller: [], sellers: [], canEdit: false, metricsOnly: false, moduleEnabled: false });
+    if (!enabledDealers.length && !isFactoryRole(profile.role)) {
+      return Response.json({ leads: [], leadDetails: [], ownerLeads: [], ...insights([]), metrics: metrics([]), byDealership: [], bySeller: [], sellers: [], dealerships: [], canEdit: false, metricsOnly: false, moduleEnabled: false });
     }
     const enabledIds = new Set(enabledDealers.map((dealer) => dealer.id));
     const rows = await db.select({ lead: leads, dealership: dealerships }).from(leads).innerJoin(dealerships, eq(leads.dealershipId, dealerships.id)).orderBy(desc(leads.updatedAt), desc(leads.createdAt));
@@ -135,7 +135,7 @@ export async function GET() {
     const bySellerMap = new Map<string, typeof scoped>();
     for (const row of scoped) bySellerMap.set(row.lead.sellerName || "Sem vendedor", [...(bySellerMap.get(row.lead.sellerName || "Sem vendedor") ?? []), row]);
     const bySeller = [...bySellerMap.entries()].map(([label, groupRows]) => ({ label, ...metrics(groupRows) })).sort((a, b) => b.total - a.total);
-    const sellers = allUsers.filter((user) => user.active && ["dealer_manager", "concession"].includes(normalizeUserRole(user.email, user.role) || "") && enabledIds.has(user.dealershipId || -1)).map((user) => ({ email: user.email, name: user.name || user.email, dealershipId: user.dealershipId }));
+    const sellers = allUsers.filter((user) => user.active && ["dealer_manager", "concession"].includes(normalizeUserRole(user.email, user.role) || "") && (user.dealershipId === null || enabledIds.has(user.dealershipId))).map((user) => ({ email: user.email, name: user.name || user.email, dealershipId: user.dealershipId }));
     const canEdit = ["dealer_manager", "concession"].includes(profile.role);
     const serialized = serialize(scoped);
     const ownerEmail = profile.email.trim().toLowerCase();
@@ -149,8 +149,9 @@ export async function GET() {
       byDealership,
       bySeller,
       sellers,
+      dealerships: enabledDealers.map((dealer) => ({ id: dealer.id, name: dealer.name })),
       canEdit,
-      metricsOnly: isFactoryRole(profile),
+      metricsOnly: isFactoryRole(profile.role),
       moduleEnabled: true,
     });
   } catch (error) {
@@ -183,14 +184,18 @@ function validateLead(values: ReturnType<typeof payloadValues>) {
 export async function POST(request: Request) {
   const profile = await getAccessProfile();
   if (!profile || !["dealer_manager", "concession"].includes(profile.role)) return forbidden("Somente cargos da concessionária podem cadastrar leads.");
-  if (!profile.dealershipId) return Response.json({ error: "Usuário sem concessionária vinculada." }, { status: 400 });
   try {
     const payload = await request.json() as Record<string, unknown>;
     const values = payloadValues(payload);
     const error = validateLead(values);
     if (error) return Response.json({ error }, { status: 400 });
     const db = await getDb();
-    const [dealer] = await db.select().from(dealerships).where(eq(dealerships.id, profile.dealershipId)).limit(1);
+    const requestedDealershipId = Math.trunc(Number(payload.dealershipId) || 0);
+    const selectedDealershipId = requestedDealershipId || profile.dealershipId || 0;
+    if (!selectedDealershipId || !profileHasDealership(profile, selectedDealershipId)) {
+      return Response.json({ error: "Selecione uma loja vinculada ao seu acesso." }, { status: 400 });
+    }
+    const [dealer] = await db.select().from(dealerships).where(eq(dealerships.id, selectedDealershipId)).limit(1);
     if (!dealer || !(await isModuleEnabled(db, dealer.id, "leads"))) return forbidden("O módulo Horsch Leads não está habilitado para sua concessionária.");
     const now = new Date().toISOString();
     const id = "LEAD-" + Date.now().toString(36).toUpperCase();
@@ -211,7 +216,7 @@ export async function PATCH(request: Request) {
     if (!id) return Response.json({ error: "Lead não informado." }, { status: 400 });
     const db = await getDb();
     const [row] = await db.select({ lead: leads, dealership: dealerships }).from(leads).innerJoin(dealerships, eq(leads.dealershipId, dealerships.id)).where(eq(leads.id, id)).limit(1);
-    if (!row || row.lead.dealershipId !== profile.dealershipId) return forbidden("Este lead está fora do escopo da sua concessionária.");
+    if (!row || !profileHasDealership(profile, row.lead.dealershipId)) return forbidden("Este lead está fora do escopo da sua concessionária.");
     if (!(await isModuleEnabled(db, row.lead.dealershipId, "leads"))) return forbidden("O módulo Horsch Leads não está habilitado para sua concessionária.");
     const values = payloadValues(payload, row.lead);
     const error = validateLead(values);

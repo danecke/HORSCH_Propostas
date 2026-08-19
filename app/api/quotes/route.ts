@@ -2,7 +2,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { dealerships, priceListImports, priceListItems, quoteCatalog, quotePriceListControl, quoteRequests, users } from "../../../db/schema";
 import { recordAudit } from "../../../lib/audit";
-import { getAccessProfile, isModuleEnabled, normalizeUserRole } from "../../../lib/access";
+import { getAccessProfile, isModuleEnabled, normalizeUserRole, profileHasDealership } from "../../../lib/access";
 export const dynamic = "force-dynamic";
 const DAY = 86400000;
 function forbidden() { return Response.json({ error: "Seu perfil não possui acesso às cotações." }, { status: 403 }); }
@@ -13,8 +13,8 @@ function canManagePriceList(profile: NonNullable<Awaited<ReturnType<typeof getAc
 function isApprovedForOrder(status: string) { return ["approved", "order_pending", "order_input"].includes(status); }
 function canSee(profile: NonNullable<Awaited<ReturnType<typeof getAccessProfile>>>, dealer: { id: number; factoryManagerEmail: string }) {
   if (["general_admin", "global_management"].includes(profile.role)) return true;
-  if (profile.role === "factory_manager") return dealer.factoryManagerEmail.toLowerCase() === profile.email.toLowerCase();
-  return ["dealer_manager", "concession"].includes(profile.role) && dealer.id === profile.dealershipId;
+  if (profile.role === "factory_manager") return profileHasDealership(profile, dealer.id) || dealer.factoryManagerEmail.toLowerCase() === profile.email.toLowerCase();
+  return ["dealer_manager", "concession"].includes(profile.role) && profileHasDealership(profile, dealer.id);
 }
 function canAct(profile: NonNullable<Awaited<ReturnType<typeof getAccessProfile>>>, status: string, action: string, actionOwnerEmail: string) {
   const isAssigned = Boolean(actionOwnerEmail && actionOwnerEmail.trim().toLowerCase() === profile.email.trim().toLowerCase());

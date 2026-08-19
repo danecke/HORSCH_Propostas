@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { dealerships, users } from "../../../db/schema";
 import { recordAudit } from "../../../lib/audit";
-import { ensureDealershipModules, getAccessProfile, normalizeUserRole } from "../../../lib/access";
+import { ensureDealershipModules, getAccessProfile, normalizeUserRole, profileHasDealership } from "../../../lib/access";
 
 export const dynamic = "force-dynamic";
 
@@ -30,9 +30,9 @@ function normalizeState(value: unknown) {
   return String(value ?? "").trim().toUpperCase().slice(0, 2);
 }
 
-function canManage(profile: NonNullable<Awaited<ReturnType<typeof getAccessProfile>>>, dealer: { factoryManagerEmail: string }) {
+function canManage(profile: NonNullable<Awaited<ReturnType<typeof getAccessProfile>>>, dealer: { id: number; factoryManagerEmail: string }) {
   return ["general_admin", "global_management"].includes(profile.role) ||
-    (profile.role === "factory_manager" && dealer.factoryManagerEmail.trim().toLowerCase() === profile.email);
+    (profile.role === "factory_manager" && (profileHasDealership(profile, dealer.id) || dealer.factoryManagerEmail.trim().toLowerCase() === profile.email));
 }
 
 async function validateManager(db: Awaited<ReturnType<typeof getDb>>, email: string) {

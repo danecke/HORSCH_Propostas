@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { getDb } from "../../../../db";
 import { dealerships, proposalDocuments, proposals } from "../../../../db/schema";
-import { getAccessProfile, type AccessProfile } from "../../../../lib/access";
+import { getAccessProfile, profileHasDealership, type AccessProfile } from "../../../../lib/access";
 import { recordAudit } from "../../../../lib/audit";
 
 export const dynamic = "force-dynamic";
@@ -30,9 +30,9 @@ function canManageDocuments(profile: AccessProfile) {
 
 function proposalIsVisible(profile: AccessProfile, dealer: { id: number; factoryManagerEmail: string }) {
   if (["general_admin", "global_management"].includes(profile.role)) return true;
-  if (profile.role === "factory_manager") return dealer.factoryManagerEmail.toLowerCase() === profile.email;
+  if (profile.role === "factory_manager") return profileHasDealership(profile, dealer.id) || dealer.factoryManagerEmail.toLowerCase() === profile.email;
   if (profile.role === "concession") return false;
-  return dealer.id === profile.dealershipId;
+  return profileHasDealership(profile, dealer.id);
 }
 
 function safeFileName(value: string) {

@@ -2,7 +2,7 @@ import { desc, eq, ne } from "drizzle-orm";
 import { unzipSync, zipSync } from "fflate";
 import { getDb } from "../../../db";
 import { auditLogs, dealerships, priceListImports, priceListItems } from "../../../db/schema";
-import { getAccessProfile, isModuleEnabled, type AccessProfile } from "../../../lib/access";
+import { getAccessProfile, isModuleEnabled, profileHasDealership, type AccessProfile } from "../../../lib/access";
 import { recordAudit } from "../../../lib/audit";
 import { createPriceListNotification } from "../../../lib/price-list-notifications";
 
@@ -241,12 +241,11 @@ function parseWorkbook(bytes: Uint8Array) {
 async function visibleStates(db: Awaited<ReturnType<typeof getDb>>, profile: AccessProfile, available: string[]) {
   if (["general_admin", "global_management"].includes(profile.role)) return available;
   if (profile.role === "factory_manager") {
-    const dealers = await db.select({ state: dealerships.state }).from(dealerships).where(eq(dealerships.factoryManagerEmail, profile.email));
+    const dealers = (await db.select().from(dealerships)).filter((dealer) => profileHasDealership(profile, dealer.id) || dealer.factoryManagerEmail === profile.email);
     return [...new Set(dealers.map((dealer) => dealer.state.toUpperCase()).filter((state) => available.includes(state)))];
   }
-  if (!profile.dealershipId) return [];
-  const [dealer] = await db.select({ state: dealerships.state }).from(dealerships).where(eq(dealerships.id, profile.dealershipId)).limit(1);
-  return dealer && available.includes(dealer.state.toUpperCase()) ? [dealer.state.toUpperCase()] : [];
+  const dealers = (await db.select().from(dealerships)).filter((dealer) => profileHasDealership(profile, dealer.id));
+  return [...new Set(dealers.map((dealer) => dealer.state.toUpperCase()).filter((state) => available.includes(state)))];
 }
 
 async function activeImport(db: Awaited<ReturnType<typeof getDb>>) {
@@ -332,7 +331,7 @@ export async function GET(request: Request) {
     if (!record) return Response.json({ import: null, rows: [], catalog: [], total: 0, states: [], selectedState: "", canManage: canManage(profile) });
     const available = JSON.parse(record.statesJson) as string[];
     const states = await visibleStates(db, profile, available);
-    if (profile.dealershipId && !(await isModuleEnabled(db, profile.dealershipId, "price_list")) && !canManage(profile)) return errorResponse("O módulo Lista de preços não está habilitado para esta concessionária.", 403);
+    if (profile.dealershipIds.length && !(await Promise.all(profile.dealershipIds.map((dealershipId) => isModuleEnabled(db, dealershipId, "price_list")))).some(Boolean) && !canManage(profile)) return errorResponse("O módulo Lista de preços não está habilitado para esta concessionária.", 403);
     const requestedState = new URL(request.url).searchParams.get("state")?.trim().toUpperCase() ?? "";
     const selectedState = states.includes(requestedState) ? requestedState : states[0] ?? "";
     const search = new URL(request.url).searchParams.get("q")?.trim().toLocaleLowerCase("pt-BR") ?? "";

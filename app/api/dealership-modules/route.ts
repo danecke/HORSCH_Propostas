@@ -6,6 +6,7 @@ import {
   getAccessProfile,
   MODULE_KEYS,
   MODULE_LABELS,
+  profileHasDealership,
   type ModuleKey,
 } from "../../../lib/access";
 
@@ -15,9 +16,9 @@ function forbidden(message = "Você não tem permissão para configurar módulos
   return Response.json({ error: message }, { status: 403 });
 }
 
-function canManage(profile: NonNullable<Awaited<ReturnType<typeof getAccessProfile>>>, dealership: { factoryManagerEmail: string }) {
+function canManage(profile: NonNullable<Awaited<ReturnType<typeof getAccessProfile>>>, dealership: { id: number; factoryManagerEmail: string }) {
   return ["general_admin", "global_management"].includes(profile.role) ||
-    (profile.role === "factory_manager" && dealership.factoryManagerEmail.trim().toLowerCase() === profile.email.toLowerCase());
+    (profile.role === "factory_manager" && (profileHasDealership(profile, dealership.id) || dealership.factoryManagerEmail.trim().toLowerCase() === profile.email.toLowerCase()));
 }
 
 export async function GET() {
@@ -28,8 +29,8 @@ export async function GET() {
   const rows = await db.select().from(dealershipModuleAccess);
   const visible = dealers.filter((dealer) =>
     ["general_admin", "global_management"].includes(profile.role) ||
-    (profile.role === "factory_manager" && dealer.factoryManagerEmail.toLowerCase() === profile.email.toLowerCase()) ||
-    dealer.id === profile.dealershipId,
+    (profile.role === "factory_manager" && (profileHasDealership(profile, dealer.id) || dealer.factoryManagerEmail.toLowerCase() === profile.email.toLowerCase())) ||
+    profileHasDealership(profile, dealer.id),
   );
   return Response.json({ modules: visible.map((dealer) => ({
     dealershipId: dealer.id,

@@ -4,7 +4,7 @@ import {
   priceListNotificationRecipients,
   priceListNotifications,
 } from "../../../db/schema";
-import { getAccessProfile, isModuleEnabled } from "../../../lib/access";
+import { getAccessProfile, isModuleEnabled, profileHasDealership } from "../../../lib/access";
 import { recordAudit } from "../../../lib/audit";
 import {
   createPriceListNotification,
@@ -33,7 +33,7 @@ async function canViewPriceListNotifications(
   profile: NonNullable<Awaited<ReturnType<typeof getAccessProfile>>>,
 ) {
   if (["general_admin", "global_management", "factory_manager"].includes(profile.role)) return true;
-  return profile.dealershipId !== null && await isModuleEnabled(db, profile.dealershipId, "price_list");
+  return profile.dealershipIds.some((dealershipId) => profileHasDealership(profile, dealershipId)) && (await Promise.all(profile.dealershipIds.map((dealershipId) => isModuleEnabled(db, dealershipId, "price_list")))).some(Boolean);
 }
 
 export async function GET(request: Request) {

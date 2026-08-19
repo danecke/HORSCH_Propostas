@@ -2,7 +2,7 @@ import { desc, eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { dealerships, proposalRequests, users } from "../../../db/schema";
 import { recordAudit } from "../../../lib/audit";
-import { getAccessProfile, isModuleEnabled, normalizeUserRole } from "../../../lib/access";
+import { getAccessProfile, isModuleEnabled, normalizeUserRole, profileHasDealership } from "../../../lib/access";
 
 export const dynamic = "force-dynamic";
 
@@ -20,8 +20,8 @@ function statusLabel(status: string) {
 
 function canSee(profile: NonNullable<Awaited<ReturnType<typeof getAccessProfile>>>, dealer: { id: number; factoryManagerEmail: string }) {
   if (["general_admin", "global_management"].includes(profile.role)) return true;
-  if (profile.role === "factory_manager") return dealer.factoryManagerEmail.toLowerCase() === profile.email.toLowerCase();
-  return profile.role === "dealer_manager" && dealer.id === profile.dealershipId;
+  if (profile.role === "factory_manager") return profileHasDealership(profile, dealer.id) || dealer.factoryManagerEmail.toLowerCase() === profile.email.toLowerCase();
+  return profile.role === "dealer_manager" && profileHasDealership(profile, dealer.id);
 }
 
 function errorMessage(error: unknown) {
