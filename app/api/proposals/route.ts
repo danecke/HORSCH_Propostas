@@ -148,8 +148,7 @@ function proposalActionOwnerEmail(
   if (proposal.status === "in_analysis") return (proposal.claimedByEmail || "").trim().toLowerCase();
   if (proposal.status === "awaiting_order") return (dealer.factoryManagerEmail || "").trim().toLowerCase();
   if (proposal.status === "awaiting_order_number") {
-    const dealerManager = activeUserWithRole(allUsers, "dealer_manager", (record) => record.dealershipId === dealer.id);
-    return (dealerManager?.email || dealer.contactEmail || proposal.createdByEmail || "").trim().toLowerCase();
+    return (dealer.factoryManagerEmail || proposal.createdByEmail || "").trim().toLowerCase();
   }
   if (proposal.status === "sent") {
     const dealerManager = activeUserWithRole(allUsers, "dealer_manager", (record) => record.dealershipId === dealer.id);
@@ -193,7 +192,7 @@ function proposalActionOwnerEmails(
   assignmentsByEmail: Map<string, number[]>,
 ) {
   const primary = proposalActionOwnerEmail(proposal, dealer, allUsers);
-  if (!["sent", "awaiting_dealer_acceptance", "awaiting_order_number"].includes(proposal.status)) {
+  if (!["sent", "awaiting_dealer_acceptance"].includes(proposal.status)) {
     return primary ? [primary] : [];
   }
   return [...new Set([
@@ -432,10 +431,10 @@ export async function GET() {
         assignmentsByEmail,
       );
       const normalizedProfileEmail = profile.email.trim().toLowerCase();
-      const linkedDealerDecisionOwner =
-        profile.role === "dealer_manager" &&
-        ["sent", "counteroffer", "awaiting_dealer_acceptance", "awaiting_order_number"].includes(row.status) &&
-        profileHasDealership(profile, row.dealershipId);
+    const linkedDealerDecisionOwner =
+      profile.role === "dealer_manager" &&
+      ["sent", "counteroffer", "awaiting_dealer_acceptance"].includes(row.status) &&
+      profileHasDealership(profile, row.dealershipId);
       return {
         ...row,
         statusLabel: REQUEST_STATUS_LABELS[row.status] || row.status,
@@ -1041,23 +1040,25 @@ export async function PATCH(request: Request) {
       if (record.proposal.status !== "awaiting_order") {
         return Response.json({ error: "Esta proposta ainda não está aguardando pedido." }, { status: 409 });
       }
-      await db.update(proposals).set({ status: "awaiting_order_number", updatedAt: workflowNow }).where(eq(proposals.id, payload.id));
+      const erpOrderNumber = payload.erpOrderNumber?.trim() ?? "";
+      if (!erpOrderNumber) return Response.json({ error: "Informe o número do pedido HORSCH." }, { status: 400 });
+      await db.update(proposals).set({ status: "order_generated", erpOrderNumber, updatedAt: workflowNow }).where(eq(proposals.id, payload.id));
       await recordAudit(db, {
         proposalId: payload.id,
         actorEmail: profile.email,
         actorName: profile.name,
         action: "order_placed",
         entity: "proposal",
-        details: "Pedido colocado manualmente pelo Gestor Fábrica; aguardando o número do pedido informado pelo Gestor do Concessionário.",
-        before: { status: record.proposal.status },
-        after: { status: "awaiting_order_number" },
+        details: "Pedido colocado e número do pedido HORSCH informado pelo Gestor Fábrica.",
+        before: { status: record.proposal.status, erpOrderNumber: record.proposal.erpOrderNumber },
+        after: { status: "order_generated", erpOrderNumber },
       });
-      return Response.json({ ok: true, status: "awaiting_order_number" });
+      return Response.json({ ok: true, status: "order_generated", erpOrderNumber });
     }
 
     if (payload.action === "submit_order_number") {
-      if (!["general_admin", "dealer_manager"].includes(profile.role)) {
-        return Response.json({ error: "Somente o Gestor do Concessionário pode informar o número do pedido." }, { status: 403 });
+      if (!["general_admin", "factory_manager"].includes(profile.role)) {
+        return Response.json({ error: "Somente o Gestor Fábrica pode informar o número do pedido." }, { status: 403 });
       }
       if (record.proposal.status !== "awaiting_order_number") {
         return Response.json({ error: "O pedido ainda não foi marcado como colocado pela fábrica." }, { status: 409 });
@@ -1071,7 +1072,7 @@ export async function PATCH(request: Request) {
         actorName: profile.name,
         action: "order_number_returned",
         entity: "proposal",
-        details: "Número do pedido HORSCH " + erpOrderNumber + " informado pelo Gestor do Concessionário.",
+        details: "Número do pedido HORSCH " + erpOrderNumber + " informado pelo Gestor Fábrica.",
         before: { status: record.proposal.status, erpOrderNumber: record.proposal.erpOrderNumber },
         after: { status: "order_generated", erpOrderNumber },
       });
