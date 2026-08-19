@@ -33,6 +33,7 @@ const VALID_STATUSES = new Set([
   "in_analysis",
   "awaiting_dealer_acceptance",
   "awaiting_order",
+  "awaiting_order_number",
   "order_generated",
   "reproved",
 ]);
@@ -43,6 +44,7 @@ const REQUEST_WORKFLOW_STATUSES = new Set([
   "in_analysis",
   "awaiting_dealer_acceptance",
   "awaiting_order",
+  "awaiting_order_number",
   "order_generated",
   "reproved",
 ]);
@@ -52,6 +54,7 @@ const REQUEST_STATUS_LABELS: Record<string, string> = {
   in_analysis: "Em Análise",
   awaiting_dealer_acceptance: "Aguardando Aceite do Concessionário",
   awaiting_order: "Aguardando Pedido",
+  awaiting_order_number: "Aguardando Número do Pedido",
   order_generated: "Pedido Gerado",
   reproved: "Reprovada",
 };
@@ -144,6 +147,10 @@ function proposalActionOwnerEmail(
   if (proposal.status === "awaiting_global") return "";
   if (proposal.status === "in_analysis") return (proposal.claimedByEmail || "").trim().toLowerCase();
   if (proposal.status === "awaiting_order") return (dealer.factoryManagerEmail || "").trim().toLowerCase();
+  if (proposal.status === "awaiting_order_number") {
+    const dealerManager = activeUserWithRole(allUsers, "dealer_manager", (record) => record.dealershipId === dealer.id);
+    return (dealerManager?.email || dealer.contactEmail || proposal.createdByEmail || "").trim().toLowerCase();
+  }
   if (proposal.status === "sent") {
     const dealerManager = activeUserWithRole(allUsers, "dealer_manager", (record) => record.dealershipId === dealer.id);
     return (dealerManager?.email || dealer.contactEmail || "").trim().toLowerCase();
@@ -186,7 +193,7 @@ function proposalActionOwnerEmails(
   assignmentsByEmail: Map<string, number[]>,
 ) {
   const primary = proposalActionOwnerEmail(proposal, dealer, allUsers);
-  if (!["sent", "awaiting_dealer_acceptance"].includes(proposal.status)) {
+  if (!["sent", "awaiting_dealer_acceptance", "awaiting_order_number"].includes(proposal.status)) {
     return primary ? [primary] : [];
   }
   return [...new Set([
@@ -427,7 +434,7 @@ export async function GET() {
       const normalizedProfileEmail = profile.email.trim().toLowerCase();
       const linkedDealerDecisionOwner =
         profile.role === "dealer_manager" &&
-        ["sent", "counteroffer", "awaiting_dealer_acceptance"].includes(row.status) &&
+        ["sent", "counteroffer", "awaiting_dealer_acceptance", "awaiting_order_number"].includes(row.status) &&
         profileHasDealership(profile, row.dealershipId);
       return {
         ...row,
@@ -843,7 +850,7 @@ export async function PATCH(request: Request) {
   try {
     const payload = (await request.json()) as {
       id?: string;
-      action?: "send" | "edit" | "accept_counteroffer" | "return_counteroffer" | "claim" | "offer" | "view_pdf" | "accept_request" | "reject_request" | "record_order";
+      action?: "send" | "edit" | "accept_counteroffer" | "return_counteroffer" | "claim" | "offer" | "view_pdf" | "accept_request" | "reject_request" | "record_order" | "submit_order_number";
       status?: string;
       dealershipId?: number | null;
       contactName?: string;
@@ -1032,21 +1039,42 @@ export async function PATCH(request: Request) {
 
     if (payload.action === "record_order") {
       if (!["general_admin", "factory_manager"].includes(profile.role)) {
-        return Response.json({ error: "Somente o Gestor Fábrica pode registrar o pedido ERP." }, { status: 403 });
+        return Response.json({ error: "Somente o Gestor Fábrica pode marcar a colocação do pedido." }, { status: 403 });
       }
       if (record.proposal.status !== "awaiting_order") {
         return Response.json({ error: "Esta proposta ainda não está aguardando pedido." }, { status: 409 });
       }
+      await db.update(proposals).set({ status: "awaiting_order_number", updatedAt: workflowNow }).where(eq(proposals.id, payload.id));
+      await recordAudit(db, {
+        proposalId: payload.id,
+        actorEmail: profile.email,
+        actorName: profile.name,
+        action: "order_placed",
+        entity: "proposal",
+        details: "Pedido colocado manualmente pelo Gestor Fábrica; aguardando o número do pedido informado pelo Gestor do Concessionário.",
+        before: { status: record.proposal.status },
+        after: { status: "awaiting_order_number" },
+      });
+      return Response.json({ ok: true, status: "awaiting_order_number" });
+    }
+
+    if (payload.action === "submit_order_number") {
+      if (!["general_admin", "dealer_manager"].includes(profile.role)) {
+        return Response.json({ error: "Somente o Gestor do Concessionário pode informar o número do pedido." }, { status: 403 });
+      }
+      if (record.proposal.status !== "awaiting_order_number") {
+        return Response.json({ error: "O pedido ainda não foi marcado como colocado pela fábrica." }, { status: 409 });
+      }
       const erpOrderNumber = payload.erpOrderNumber?.trim() ?? "";
-      if (!erpOrderNumber) return Response.json({ error: "Informe o número do pedido ERP." }, { status: 400 });
+      if (!erpOrderNumber) return Response.json({ error: "Informe o número do pedido HORSCH." }, { status: 400 });
       await db.update(proposals).set({ status: "order_generated", erpOrderNumber, updatedAt: workflowNow }).where(eq(proposals.id, payload.id));
       await recordAudit(db, {
         proposalId: payload.id,
         actorEmail: profile.email,
         actorName: profile.name,
-        action: "order_recorded",
+        action: "order_number_returned",
         entity: "proposal",
-        details: "Pedido ERP " + erpOrderNumber + " registrado manualmente pelo Gestor Fábrica.",
+        details: "Número do pedido HORSCH " + erpOrderNumber + " informado pelo Gestor do Concessionário.",
         before: { status: record.proposal.status, erpOrderNumber: record.proposal.erpOrderNumber },
         after: { status: "order_generated", erpOrderNumber },
       });
@@ -1373,7 +1401,7 @@ export async function DELETE(request: Request) {
       return Response.json(
         {
           error:
-            "Somente o ADM pode excluir propostas enviadas. O Gestor Fábrica pode excluir apenas os próprios rascunhos.",
+            "Somente o ADM Geral ou a Gestão Global podem excluir propostas.",
         },
         { status: 403 },
       );

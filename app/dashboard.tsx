@@ -22,6 +22,7 @@ type ProposalStatus =
   | "in_analysis"
   | "awaiting_dealer_acceptance"
   | "awaiting_order"
+  | "awaiting_order_number"
   | "order_generated"
   | "reproved";
 
@@ -236,6 +237,7 @@ const STATUS_LABELS: Record<ProposalStatus, string> = {
   in_analysis: "Em Análise",
   awaiting_dealer_acceptance: "Aguardando Aceite do Concessionário",
   awaiting_order: "Aguardando Pedido",
+  awaiting_order_number: "Aguardando Número do Pedido",
   order_generated: "Pedido Gerado",
   reproved: "Reprovada",
 };
@@ -251,6 +253,7 @@ const STATUS_ORDER: ProposalStatus[] = [
   "in_analysis",
   "awaiting_dealer_acceptance",
   "awaiting_order",
+  "awaiting_order_number",
   "order_generated",
   "reproved",
 ];
@@ -1704,11 +1707,12 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
   const canManageStatus = me.permissions.manageAnyProposalStatus || (proposal.isActionOwner && (me.role === "dealer_manager" || ["general_admin", "global_management", "factory_manager"].includes(me.role)));
   const hasInvoiceTotals = proposal.items.some((item) => item.invoiceUnitPriceCents !== null && item.invoiceUnitPriceCents !== undefined);
   const invoiceTotalCents = proposal.items.reduce((sum, item) => sum + (item.invoiceUnitPriceCents ?? 0) * item.quantity, 0);
-  const isWorkflow = ["awaiting_global", "in_analysis", "awaiting_dealer_acceptance", "awaiting_order", "order_generated", "reproved"].includes(status);
+  const isWorkflow = ["awaiting_global", "in_analysis", "awaiting_dealer_acceptance", "awaiting_order", "awaiting_order_number", "order_generated", "reproved"].includes(status);
   const canClaimWorkflow = ["general_admin", "global_management"].includes(me.role) && status === "awaiting_global";
   const canOfferWorkflow = ["general_admin", "global_management"].includes(me.role) && status === "in_analysis" && (me.role === "general_admin" || proposal.claimedByEmail === me.email);
   const canAcceptWorkflow = me.role === "dealer_manager" && proposal.isActionOwner && status === "awaiting_dealer_acceptance";
   const canRecordOrder = me.role === "general_admin" || (me.role === "factory_manager" && status === "awaiting_order" && proposal.isActionOwner);
+  const canSubmitOrderNumber = me.role === "general_admin" || (me.role === "dealer_manager" && status === "awaiting_order_number" && proposal.isActionOwner);
 
   function updateCounterItem(
     id: number,
@@ -1720,7 +1724,7 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
   }
 
   async function runWorkflowAction(
-    action: "claim" | "offer" | "view_pdf" | "accept_request" | "reject_request" | "record_order",
+    action: "claim" | "offer" | "view_pdf" | "accept_request" | "reject_request" | "record_order" | "submit_order_number",
     fields: Record<string, string | number | null | undefined> = {},
   ) {
     setUpdating(true);
@@ -1903,7 +1907,7 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
                 </select>
               </label>
             )}
-            {!isWorkflow && canDelete && (
+            {canDelete && (
               <button
                 type="button"
                 className="outline-button danger-dark"
@@ -1981,7 +1985,7 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
           </section>
         )}
 
-        {isWorkflow && (
+        {isWorkflow && (proposal.isActionOwner || me.permissions.manageAnyProposalStatus || ["general_admin", "global_management"].includes(me.role)) && (
           <section className="workflow-panel no-print">
             <div className="workflow-panel-heading">
               <div>
@@ -1998,7 +2002,9 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
 
             {status === "awaiting_dealer_acceptance" && !showWorkflowCounteroffer && <div className="workflow-action-card dealer-acceptance-card"><div><strong>Visualização obrigatória antes da decisão</strong><p>Abra o PDF oficial para registrar a ciência. Depois disso, os botões de aceite, reprovação e contraproposta serão liberados.</p></div><div className="workflow-button-row"><button type="button" className="outline-button" disabled={updating} onClick={() => void openOfficialPdf()}><Icon name="file" size={16} />{pdfViewed ? "Abrir PDF oficial novamente" : "Visualizar PDF oficial"}</button><button type="button" className="primary-button" disabled={!canAcceptWorkflow || updating || !pdfViewed} onClick={() => void runWorkflowAction("accept_request")}>Aceitar proposta</button><button type="button" className="outline-button danger-button" disabled={!canAcceptWorkflow || updating || !pdfViewed} onClick={() => setShowRejectionForm(true)}>Rejeitar</button><button type="button" className="outline-button" disabled={!canAcceptWorkflow || updating || !pdfViewed} onClick={() => setShowWorkflowCounteroffer(true)}>Fazer contraproposta</button></div>{!pdfViewed && <span className="workflow-hint">Visualize o PDF para habilitar as decisões.</span>}{showRejectionForm && <div className="workflow-rejection-form"><label className="field"><span>Motivo da rejeição</span><textarea value={rejectionReason} onChange={(event) => setRejectionReason(event.target.value)} placeholder="Informe por que a proposta foi reprovada." rows={3} /></label><div className="workflow-button-row"><button type="button" className="ghost-button" onClick={() => setShowRejectionForm(false)}>Cancelar</button><button type="button" className="danger-button" disabled={updating || !rejectionReason.trim()} onClick={() => void runWorkflowAction("reject_request", { rejectionReason: rejectionReason.trim() })}>{updating ? "Registrando..." : "Confirmar rejeição"}</button></div></div>}</div>}
 
-            {status === "awaiting_order" && <div className="workflow-action-card"><div><strong>Pedido aceito pelo concessionário</strong><p>Registre o número do pedido no ERP HORSCH para encerrar o fluxo.</p></div><div className="workflow-inline-form"><input value={erpOrderNumber} onChange={(event) => setErpOrderNumber(event.target.value)} placeholder="Número do pedido ERP" disabled={!canRecordOrder || updating} /><button type="button" className="primary-button" disabled={!canRecordOrder || updating || !erpOrderNumber.trim()} onClick={() => void runWorkflowAction("record_order", { erpOrderNumber: erpOrderNumber.trim() })}>{updating ? "Salvando..." : "Registrar pedido"}</button></div>{!canRecordOrder && <span className="workflow-lock">Aguardando o Gestor Fábrica responsável pela concessionária.</span>}</div>}
+            {status === "awaiting_order" && <div className="workflow-action-card"><div><strong>Pedido aceito pelo concessionário</strong><p>O Gestor Fábrica deve colocar o pedido no ERP HORSCH. Depois disso, o número será informado pelo Gestor do Concessionário.</p></div><div className="workflow-inline-form"><button type="button" className="primary-button" disabled={!canRecordOrder || updating} onClick={() => void runWorkflowAction("record_order")}>{updating ? "Registrando..." : "Marcar pedido colocado"}</button></div>{!canRecordOrder && <span className="workflow-lock">Aguardando o Gestor Fábrica responsável pela concessionária.</span>}</div>}
+
+            {status === "awaiting_order_number" && <div className="workflow-action-card"><div><strong>Pedido colocado pela fábrica</strong><p>Informe o número do pedido HORSCH recebido da fábrica para concluir o fluxo.</p></div><div className="workflow-inline-form"><input value={erpOrderNumber} onChange={(event) => setErpOrderNumber(event.target.value)} placeholder="Número do pedido HORSCH" disabled={!canSubmitOrderNumber || updating} /><button type="button" className="primary-button" disabled={!canSubmitOrderNumber || updating || !erpOrderNumber.trim()} onClick={() => void runWorkflowAction("submit_order_number", { erpOrderNumber: erpOrderNumber.trim() })}>{updating ? "Salvando..." : "Informar número do pedido"}</button></div>{!canSubmitOrderNumber && <span className="workflow-lock">Aguardando um Gestor do Concessionário responsável pela proposta.</span>}</div>}
 
             {status === "order_generated" && <div className="workflow-success-card"><Icon name="check" size={20} /><div><strong>Pedido registrado com sucesso</strong><p>Número do pedido ERP HORSCH: <b>{proposal.erpOrderNumber || erpOrderNumber || "não informado"}</b></p></div></div>}
             {status === "reproved" && <div className="workflow-rejected-card"><Icon name="close" size={20} /><div><strong>Solicitação reprovada</strong><p>{proposal.rejectionReason || "O concessionário não aceitou a oferta."}</p></div></div>}
