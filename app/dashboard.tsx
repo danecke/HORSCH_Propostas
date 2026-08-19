@@ -1664,6 +1664,7 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
   const [pdfViewed, setPdfViewed] = useState(proposal.pdfVisualized);
   const [rejectionReason, setRejectionReason] = useState("");
   const [showRejectionForm, setShowRejectionForm] = useState(false);
+  const [showWorkflowCounteroffer, setShowWorkflowCounteroffer] = useState(false);
   const [factoryDescription, setFactoryDescription] = useState(proposal.factoryDescription || proposal.items[0]?.description || "");
   const [factoryVt, setFactoryVt] = useState(proposal.factoryVt || proposal.items[0]?.vt || "");
   const [factoryOrigin, setFactoryOrigin] = useState(proposal.factoryOrigin || proposal.items[0]?.origin || "");
@@ -1674,7 +1675,10 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
   const [erpOrderNumber, setErpOrderNumber] = useState(proposal.erpOrderNumber || "");
 
   const decisionOpen =
-    proposal.isActionOwner && me.role === "dealer_manager" && ["sent", "counteroffer"].includes(status);
+    proposal.isActionOwner &&
+    me.role === "dealer_manager" &&
+    (["sent", "counteroffer"].includes(status) ||
+      (showWorkflowCounteroffer && status === "awaiting_dealer_acceptance"));
   const canReviewCounteroffer =
     proposal.isActionOwner && ["general_admin", "global_management", "factory_manager"].includes(me.role) && status === "counteroffer";
   const counterofferTotal = counterItems.reduce(
@@ -1808,14 +1812,19 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
         counterofferDeliveryTerms: deliveryTerms,
       }),
     });
-    const payload = (await response.json()) as { error?: string };
+    const payload = (await response.json()) as {
+      error?: string;
+      status?: ProposalStatus;
+      counterofferCents?: number | null;
+    };
     if (!response.ok) {
       setError(payload.error || "Não foi possível atualizar a proposta.");
       setUpdating(false);
       return;
     }
-    setStatus(nextStatus);
-    await onUpdated(nextStatus, cents);
+    const resolvedStatus = payload.status ?? nextStatus;
+    setStatus(resolvedStatus);
+    await onUpdated(resolvedStatus, payload.counterofferCents ?? cents);
     setUpdating(false);
   }
 
@@ -1987,7 +1996,7 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
 
             {status === "in_analysis" && <div className="workflow-form-card"><div><strong>Oferta oficial da fábrica</strong><p>Preencha os dados que serão apresentados ao concessionário. A proposta fica reservada para {proposal.claimedByEmail || "Gestão Global"}.</p></div><div className="form-grid two-columns"><label className="field"><span>Descrição fábrica</span><input value={factoryDescription} onChange={(event) => setFactoryDescription(event.target.value)} disabled={!canOfferWorkflow || updating} /></label><label className="field"><span>VT</span><input value={factoryVt} onChange={(event) => setFactoryVt(event.target.value)} disabled={!canOfferWorkflow || updating} /></label><label className="field"><span>Origem</span><input value={factoryOrigin} onChange={(event) => setFactoryOrigin(event.target.value)} disabled={!canOfferWorkflow || updating} /></label><label className="field"><span>NCM</span><input value={factoryNcm} onChange={(event) => setFactoryNcm(event.target.value)} disabled={!canOfferWorkflow || updating} /></label><label className="field"><span>Netprice unitário</span><input inputMode="decimal" value={offerNetPrice} onChange={(event) => setOfferNetPrice(event.target.value)} onBlur={(event) => setOfferNetPrice(formatMoneyInput(event.target.value))} disabled={!canOfferWorkflow || updating} placeholder="0,00" /></label><label className="field"><span>Valor unitário NF <small>(opcional)</small></span><input inputMode="decimal" value={offerInvoicePrice} onChange={(event) => setOfferInvoicePrice(event.target.value)} onBlur={(event) => setOfferInvoicePrice(formatMoneyInput(event.target.value))} disabled={!canOfferWorkflow || updating} placeholder="0,00" /></label><label className="field"><span>Data de validade</span><input type="date" value={offerValidUntil} onChange={(event) => setOfferValidUntil(event.target.value)} disabled={!canOfferWorkflow || updating} /></label></div><div className="workflow-form-footer"><span>{canOfferWorkflow ? "Revise os dados antes de gerar a oferta." : `Proposta reservada para ${proposal.claimedByEmail || "outro gestor"}.`}</span><button type="button" className="primary-button" disabled={!canOfferWorkflow || updating || !factoryDescription.trim() || !factoryVt.trim() || !factoryOrigin.trim() || !factoryNcm.trim() || parseMoneyToCents(offerNetPrice) <= 0 || !offerValidUntil} onClick={() => void runWorkflowAction("offer", { factoryDescription, factoryVt, factoryOrigin, factoryNcm, offerNetPriceCents: parseMoneyToCents(offerNetPrice), offerInvoiceUnitPriceCents: offerInvoicePrice.trim() ? parseMoneyToCents(offerInvoicePrice) : null, offerValidUntil })}>{updating ? "Gerando..." : "Gerar oferta e disponibilizar"}</button></div></div>}
 
-            {status === "awaiting_dealer_acceptance" && <div className="workflow-action-card dealer-acceptance-card"><div><strong>Visualização obrigatória antes da decisão</strong><p>Abra o PDF oficial para registrar a ciência. Depois disso, os botões de aceite e reprovação serão liberados.</p></div><div className="workflow-button-row"><button type="button" className="outline-button" disabled={updating} onClick={() => void openOfficialPdf()}><Icon name="file" size={16} />{pdfViewed ? "Abrir PDF oficial novamente" : "Visualizar PDF oficial"}</button><button type="button" className="primary-button" disabled={!canAcceptWorkflow || updating || !pdfViewed} onClick={() => void runWorkflowAction("accept_request")}>Aceitar proposta</button><button type="button" className="outline-button danger-button" disabled={!canAcceptWorkflow || updating || !pdfViewed} onClick={() => setShowRejectionForm(true)}>Rejeitar</button></div>{!pdfViewed && <span className="workflow-hint">Visualize o PDF para habilitar as decisões.</span>}{showRejectionForm && <div className="workflow-rejection-form"><label className="field"><span>Motivo da rejeição</span><textarea value={rejectionReason} onChange={(event) => setRejectionReason(event.target.value)} placeholder="Informe por que a proposta foi reprovada." rows={3} /></label><div className="workflow-button-row"><button type="button" className="ghost-button" onClick={() => setShowRejectionForm(false)}>Cancelar</button><button type="button" className="danger-button" disabled={updating || !rejectionReason.trim()} onClick={() => void runWorkflowAction("reject_request", { rejectionReason: rejectionReason.trim() })}>{updating ? "Registrando..." : "Confirmar rejeição"}</button></div></div>}</div>}
+            {status === "awaiting_dealer_acceptance" && !showWorkflowCounteroffer && <div className="workflow-action-card dealer-acceptance-card"><div><strong>Visualização obrigatória antes da decisão</strong><p>Abra o PDF oficial para registrar a ciência. Depois disso, os botões de aceite, reprovação e contraproposta serão liberados.</p></div><div className="workflow-button-row"><button type="button" className="outline-button" disabled={updating} onClick={() => void openOfficialPdf()}><Icon name="file" size={16} />{pdfViewed ? "Abrir PDF oficial novamente" : "Visualizar PDF oficial"}</button><button type="button" className="primary-button" disabled={!canAcceptWorkflow || updating || !pdfViewed} onClick={() => void runWorkflowAction("accept_request")}>Aceitar proposta</button><button type="button" className="outline-button danger-button" disabled={!canAcceptWorkflow || updating || !pdfViewed} onClick={() => setShowRejectionForm(true)}>Rejeitar</button><button type="button" className="outline-button" disabled={!canAcceptWorkflow || updating || !pdfViewed} onClick={() => setShowWorkflowCounteroffer(true)}>Fazer contraproposta</button></div>{!pdfViewed && <span className="workflow-hint">Visualize o PDF para habilitar as decisões.</span>}{showRejectionForm && <div className="workflow-rejection-form"><label className="field"><span>Motivo da rejeição</span><textarea value={rejectionReason} onChange={(event) => setRejectionReason(event.target.value)} placeholder="Informe por que a proposta foi reprovada." rows={3} /></label><div className="workflow-button-row"><button type="button" className="ghost-button" onClick={() => setShowRejectionForm(false)}>Cancelar</button><button type="button" className="danger-button" disabled={updating || !rejectionReason.trim()} onClick={() => void runWorkflowAction("reject_request", { rejectionReason: rejectionReason.trim() })}>{updating ? "Registrando..." : "Confirmar rejeição"}</button></div></div>}</div>}
 
             {status === "awaiting_order" && <div className="workflow-action-card"><div><strong>Pedido aceito pelo concessionário</strong><p>Registre o número do pedido no ERP HORSCH para encerrar o fluxo.</p></div><div className="workflow-inline-form"><input value={erpOrderNumber} onChange={(event) => setErpOrderNumber(event.target.value)} placeholder="Número do pedido ERP" disabled={!canRecordOrder || updating} /><button type="button" className="primary-button" disabled={!canRecordOrder || updating || !erpOrderNumber.trim()} onClick={() => void runWorkflowAction("record_order", { erpOrderNumber: erpOrderNumber.trim() })}>{updating ? "Salvando..." : "Registrar pedido"}</button></div>{!canRecordOrder && <span className="workflow-lock">Aguardando o Gestor Fábrica responsável pela concessionária.</span>}</div>}
 
@@ -1997,7 +2006,7 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
           </section>
         )}
 
-        {!isWorkflow && decisionOpen && (
+        {decisionOpen && (!isWorkflow || showWorkflowCounteroffer) && (
           <section className="decision-panel no-print">
             <header className="counteroffer-form-heading">
               <div>

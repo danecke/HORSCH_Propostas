@@ -424,12 +424,17 @@ export async function GET() {
         allUsers,
         assignmentsByEmail,
       );
+      const normalizedProfileEmail = profile.email.trim().toLowerCase();
+      const linkedDealerDecisionOwner =
+        profile.role === "dealer_manager" &&
+        ["sent", "counteroffer", "awaiting_dealer_acceptance"].includes(row.status) &&
+        profileHasDealership(profile, row.dealershipId);
       return {
         ...row,
         statusLabel: REQUEST_STATUS_LABELS[row.status] || row.status,
         contactEmail: row.contactEmail || dealershipContactEmail,
         parentDealershipName: row.parentDealershipId ? dealerById.get(row.parentDealershipId)?.name || "" : "",
-        isActionOwner: actionOwnerEmails.includes(profile.email.trim().toLowerCase()),
+        isActionOwner: linkedDealerDecisionOwner || actionOwnerEmails.includes(normalizedProfileEmail),
         commercialOwnerEmail: row.commercialOwnerEmail || row.createdByEmail,
         items: itemsByProposal.get(row.id) ?? [],
         documents: documentsByProposal.get(row.id) ?? [],
@@ -1056,7 +1061,14 @@ export async function PATCH(request: Request) {
     }
 
     const allUsers = await db.select().from(users).orderBy(users.name, users.email);
-    const isActionOwner = proposalActionOwnerEmail(record.proposal, record.dealer, allUsers) === profile.email.trim().toLowerCase();
+    const normalizedProfileEmail = profile.email.trim().toLowerCase();
+    const linkedDealerDecisionOwner =
+      profile.role === "dealer_manager" &&
+      ["sent", "counteroffer", "awaiting_dealer_acceptance"].includes(record.proposal.status) &&
+      profileHasDealership(profile, record.dealer.id);
+    const isActionOwner =
+      linkedDealerDecisionOwner ||
+      proposalActionOwnerEmail(record.proposal, record.dealer, allUsers) === normalizedProfileEmail;
     const actionRequired = Boolean(payload.action || payload.status);
     const canEditAnyProposal = ["general_admin", "global_management"].includes(profile.role);
     const isGlobalEdit = payload.action === "edit" && canEditAnyProposal;
@@ -1174,6 +1186,15 @@ export async function PATCH(request: Request) {
       return Response.json({ error: "Status inválido." }, { status: 400 });
     }
     const nextStatus = payload.status!;
+    const workflowDealerDecision =
+      profile.role === "dealer_manager" &&
+      record.proposal.status === "awaiting_dealer_acceptance";
+    if (workflowDealerDecision && !record.proposal.pdfVisualized) {
+      return Response.json(
+        { error: "Visualize o PDF oficial antes de decidir sobre a proposta." },
+        { status: 409 },
+      );
+    }
     if (nextStatus === "expired") {
       return Response.json(
         { error: "O status Expirada é definido automaticamente pela data de vigência." },
@@ -1193,7 +1214,7 @@ export async function PATCH(request: Request) {
           { status: 403 },
         );
       }
-      if (!["sent", "counteroffer"].includes(record.proposal.status)) {
+      if (!workflowDealerDecision && !["sent", "counteroffer"].includes(record.proposal.status)) {
         return Response.json(
           { error: "Esta proposta não está aberta para decisão." },
           { status: 409 },
@@ -1290,21 +1311,31 @@ export async function PATCH(request: Request) {
       return Response.json({ ok: true, status: "counteroffer", counterofferCents });
     }
 
+    const resolvedStatus =
+      workflowDealerDecision && nextStatus === "approved"
+        ? "awaiting_order"
+        : workflowDealerDecision && nextStatus === "rejected"
+          ? "reproved"
+          : nextStatus;
     await db
       .update(proposals)
       .set({
-        status: nextStatus,
+        status: resolvedStatus,
         counterofferCents,
         decisionNote:
           profile.role === "dealer_manager"
             ? payload.decisionNote?.trim() ?? ""
             : record.proposal.decisionNote,
+        rejectionReason:
+          resolvedStatus === "reproved"
+            ? payload.decisionNote?.trim() ?? "Proposta rejeitada pelo concessionário."
+            : record.proposal.rejectionReason,
         decidedByEmail: profile.role === "dealer_manager" ? profile.email : "",
         updatedAt: new Date().toISOString(),
       })
       .where(eq(proposals.id, payload.id));
-    await recordAudit(db, { proposalId: payload.id, actorEmail: profile.email, actorName: profile.name, action: "status_changed", entity: "proposal", details: `${isStatusOverride ? "Status alterado administrativamente" : "Status alterado"} para ${nextStatus}.`, before: { status: record.proposal.status }, after: { status: nextStatus, decisionNote: payload.decisionNote?.trim() ?? record.proposal.decisionNote } });
-    return Response.json({ ok: true });
+    await recordAudit(db, { proposalId: payload.id, actorEmail: profile.email, actorName: profile.name, action: "status_changed", entity: "proposal", details: `${isStatusOverride ? "Status alterado administrativamente" : "Status alterado"} para ${resolvedStatus}.`, before: { status: record.proposal.status }, after: { status: resolvedStatus, decisionNote: payload.decisionNote?.trim() ?? record.proposal.decisionNote } });
+    return Response.json({ ok: true, status: resolvedStatus, counterofferCents });
   } catch (error) {
     return Response.json({ error: apiError(error) }, { status: 500 });
   }
