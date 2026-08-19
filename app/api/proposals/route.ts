@@ -146,7 +146,7 @@ function proposalActionOwnerEmail(
 ) {
   if (proposal.status === "awaiting_global") return "";
   if (proposal.status === "in_analysis") return (proposal.claimedByEmail || "").trim().toLowerCase();
-  if (proposal.status === "awaiting_order") return (dealer.factoryManagerEmail || "").trim().toLowerCase();
+  if (["awaiting_order", "approved"].includes(proposal.status)) return (dealer.factoryManagerEmail || "").trim().toLowerCase();
   if (proposal.status === "awaiting_order_number") {
     return (dealer.factoryManagerEmail || proposal.createdByEmail || "").trim().toLowerCase();
   }
@@ -206,7 +206,7 @@ function proposalActionOwnerEmails(
   assignmentsByEmail: Map<string, number[]>,
 ) {
   const primary = proposalActionOwnerEmail(proposal, dealer, allUsers);
-  if (["awaiting_order", "awaiting_order_number"].includes(proposal.status)) {
+  if (["awaiting_order", "awaiting_order_number", "approved"].includes(proposal.status)) {
     return [...new Set([
       primary,
       ...linkedFactoryManagerEmails(dealer.id, allUsers, assignmentsByEmail),
@@ -1060,8 +1060,8 @@ export async function PATCH(request: Request) {
       if (!dealerIsVisible(profile, record.dealer)) {
         return forbidden();
       }
-      if (record.proposal.status !== "awaiting_order") {
-        return Response.json({ error: "Esta proposta ainda não está aguardando pedido." }, { status: 409 });
+      if (!["awaiting_order", "approved"].includes(record.proposal.status)) {
+        return Response.json({ error: "Esta proposta não está aguardando a colocação do pedido." }, { status: 409 });
       }
       const erpOrderNumber = payload.erpOrderNumber?.trim() ?? "";
       if (!erpOrderNumber) return Response.json({ error: "Informe o número do pedido HORSCH." }, { status: 400 });
