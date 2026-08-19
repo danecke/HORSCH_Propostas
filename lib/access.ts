@@ -103,6 +103,7 @@ export function rolePermissions(role: UserRole) {
     viewPriceList: true,
     requestQuote: ["dealer_manager", "concession"].includes(role),
     respondQuote: ["general_admin", "global_management"].includes(role),
+    requestProposal: role === "dealer_manager",
     createProposal: ["general_admin", "global_management", "factory_manager"].includes(role),
     editPriceList: ["general_admin", "global_management"].includes(role),
     publishPriceList: ["general_admin", "global_management"].includes(role),

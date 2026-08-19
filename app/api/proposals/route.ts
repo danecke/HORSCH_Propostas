@@ -118,7 +118,7 @@ function dealerIsVisible(
     return profileHasDealership(profile, dealer.id) || dealer.factoryManagerEmail.toLowerCase() === profile.email;
   }
   if (["dealer_manager", "concession"].includes(profile.role)) {
-    return profile.role === "dealer_manager" && profileHasDealership(profile, dealer.id);
+    return profileHasDealership(profile, dealer.id);
   }
   return false;
 }
@@ -153,6 +153,46 @@ function proposalActionOwnerEmail(
     return (dealerManager?.email || dealer.contactEmail || proposal.createdByEmail || "").trim().toLowerCase();
   }
   return (proposal.commercialOwnerEmail || proposal.createdByEmail || "").trim().toLowerCase();
+}
+
+function assignmentIdsForUser(
+  record: UserRecord,
+  assignmentsByEmail: Map<string, number[]>,
+) {
+  return [...new Set([
+    ...(assignmentsByEmail.get(record.email.trim().toLowerCase()) ?? []),
+    ...(record.dealershipId === null ? [] : [record.dealershipId]),
+  ])];
+}
+
+function linkedDealerManagerEmails(
+  dealershipId: number,
+  allUsers: UserRecord[],
+  assignmentsByEmail: Map<string, number[]>,
+) {
+  return allUsers
+    .filter((record) => (
+      record.active &&
+      normalizeUserRole(record.email, record.role) === "dealer_manager" &&
+      assignmentIdsForUser(record, assignmentsByEmail).includes(dealershipId)
+    ))
+    .map((record) => record.email.trim().toLowerCase());
+}
+
+function proposalActionOwnerEmails(
+  proposal: { status: string; commercialOwnerEmail: string; createdByEmail: string; dealershipId: number; claimedByEmail?: string },
+  dealer: { id: number; contactEmail: string; factoryManagerEmail?: string },
+  allUsers: UserRecord[],
+  assignmentsByEmail: Map<string, number[]>,
+) {
+  const primary = proposalActionOwnerEmail(proposal, dealer, allUsers);
+  if (!["sent", "awaiting_dealer_acceptance"].includes(proposal.status)) {
+    return primary ? [primary] : [];
+  }
+  return [...new Set([
+    primary,
+    ...linkedDealerManagerEmails(dealer.id, allUsers, assignmentsByEmail),
+  ].filter(Boolean))];
 }
 
 function normalizeItems(items: ItemInput[]) {
@@ -274,7 +314,10 @@ export async function GET() {
       db.select().from(userDealerships),
     ]);
     const assignmentsByEmail = new Map<string, number[]>();
-    for (const assignment of assignmentRows) assignmentsByEmail.set(assignment.userEmail, [...(assignmentsByEmail.get(assignment.userEmail) ?? []), assignment.dealershipId]);
+    for (const assignment of assignmentRows) {
+      const email = assignment.userEmail.trim().toLowerCase();
+      assignmentsByEmail.set(email, [...(assignmentsByEmail.get(email) ?? []), assignment.dealershipId]);
+    }
     const visibleDealers = allDealers.filter((dealer) => dealerIsVisible(profile, dealer));
     const proposalDealerIds = new Set((await Promise.all(visibleDealers.map(async (dealer) =>
       (await isModuleEnabled(db, dealer.id, "proposals")) ? dealer.id : null,
@@ -375,13 +418,18 @@ export async function GET() {
 
     const dealerById = new Map(allDealers.map((dealer) => [dealer.id, dealer]));
     const proposalData = rows.map(({ dealershipContactEmail, ...row }) => {
-      const actionOwnerEmail = proposalActionOwnerEmail(row, dealerById.get(row.dealershipId) || { id: row.dealershipId, contactEmail: dealershipContactEmail }, allUsers);
+      const actionOwnerEmails = proposalActionOwnerEmails(
+        row,
+        dealerById.get(row.dealershipId) || { id: row.dealershipId, contactEmail: dealershipContactEmail },
+        allUsers,
+        assignmentsByEmail,
+      );
       return {
         ...row,
         statusLabel: REQUEST_STATUS_LABELS[row.status] || row.status,
         contactEmail: row.contactEmail || dealershipContactEmail,
         parentDealershipName: row.parentDealershipId ? dealerById.get(row.parentDealershipId)?.name || "" : "",
-        isActionOwner: actionOwnerEmail === profile.email.trim().toLowerCase(),
+        isActionOwner: actionOwnerEmails.includes(profile.email.trim().toLowerCase()),
         commercialOwnerEmail: row.commercialOwnerEmail || row.createdByEmail,
         items: itemsByProposal.get(row.id) ?? [],
         documents: documentsByProposal.get(row.id) ?? [],
@@ -399,14 +447,24 @@ export async function GET() {
         "dealer_manager",
         (record) => record.dealershipId === dealer.id,
       );
+      const dealerManagerOptions = allUsers
+        .filter((record) => (
+          record.active &&
+          normalizeUserRole(record.email, record.role) === "dealer_manager" &&
+          assignmentIdsForUser(record, assignmentsByEmail).includes(dealer.id)
+        ))
+        .map((record) => ({ name: record.name, email: record.email }));
+      const responsibleName = dealerManagerOptions.map((manager) => manager.name).filter(Boolean).join(" / ");
+      const responsibleEmail = dealerManagerOptions[0]?.email || dealerManager?.email || dealer.contactEmail;
       return {
         ...dealer,
         parentDealershipName: dealer.parentDealershipId ? dealerById.get(dealer.parentDealershipId)?.name || "" : "",
-        contactName: dealerManager?.name || dealer.contactName,
-        contactEmail: dealerManager?.email || dealer.contactEmail,
+        contactName: responsibleName || dealer.contactName,
+        contactEmail: responsibleEmail,
         factoryManagerName: factoryManager?.name || "",
-        dealerManagerName: dealerManager?.name || dealer.contactName,
-        dealerManagerEmail: dealerManager?.email || dealer.contactEmail,
+        dealerManagerName: responsibleName || dealer.contactName,
+        dealerManagerEmail: responsibleEmail,
+        dealerManagerOptions,
         proposals: dealerProposals.length,
         approved: dealerProposals.filter((row) => row.status === "approved").length,
         totalCents: dealerProposals.reduce((sum, row) => sum + row.totalCents, 0),
@@ -486,14 +544,11 @@ export async function GET() {
 export async function POST(request: Request) {
   const profile = await getAccessProfile();
   if (!profile) return forbidden();
-  if (!canCreateProposal(profile)) {
-    return Response.json({ error: "Seu perfil não pode criar propostas." }, { status: 403 });
-  }
 
   try {
     const payload = (await request.json()) as ProposalInput;
     if (payload.requestOnly) {
-      if (profile.role !== "dealer_manager") {
+      if (!rolePermissions(profile.role).requestProposal) {
         return Response.json({ error: "Somente o Gestor do Concessionário pode abrir uma solicitação." }, { status: 403 });
       }
       const itemInput = payload.items?.[0];
@@ -557,6 +612,11 @@ export async function POST(request: Request) {
       });
       return Response.json({ id, status: "awaiting_global" }, { status: 201 });
     }
+
+    if (!canCreateProposal(profile)) {
+      return Response.json({ error: "Seu perfil não pode criar propostas." }, { status: 403 });
+    }
+
     const requestedStatus = payload.status === "sent" ? "sent" : "draft";
     const validItems = normalizeItems(payload.items ?? []);
     const validationError = itemValidationError(validItems);
@@ -582,7 +642,15 @@ export async function POST(request: Request) {
     }
     if (existingDealer && !dealerIsVisible(profile, existingDealer)) return forbidden();
 
-    const allUsers = await db.select().from(users).orderBy(users.name, users.email);
+    const [allUsers, assignmentRows] = await Promise.all([
+      db.select().from(users).orderBy(users.name, users.email),
+      db.select().from(userDealerships),
+    ]);
+    const assignmentsByEmail = new Map<string, number[]>();
+    for (const assignment of assignmentRows) {
+      const email = assignment.userEmail.trim().toLowerCase();
+      assignmentsByEmail.set(email, [...(assignmentsByEmail.get(email) ?? []), assignment.dealershipId]);
+    }
     const requestedManagerEmail = payload.factoryManagerEmail?.trim().toLowerCase() ?? "";
     const assignedManagerEmail =
       requestedManagerEmail ||
@@ -651,11 +719,13 @@ export async function POST(request: Request) {
       dealer = updatedDealer;
     }
 
-    const dealerManager = activeUserWithRole(
-      allUsers,
-      "dealer_manager",
-      (record) => record.dealershipId === dealer.id,
-    );
+    const requestedDealerManagerEmail = payload.contactEmail?.trim().toLowerCase() ?? "";
+    const dealerManagers = allUsers.filter((record) => (
+      record.active &&
+      normalizeUserRole(record.email, record.role) === "dealer_manager" &&
+      assignmentIdsForUser(record, assignmentsByEmail).includes(dealer.id)
+    ));
+    const dealerManager = dealerManagers.find((record) => record.email.trim().toLowerCase() === requestedDealerManagerEmail) || dealerManagers[0];
     const contactName = dealerManager?.name || dealer.contactName || payload.contactName?.trim() || "";
     const contactEmail = (
       dealerManager?.email ||

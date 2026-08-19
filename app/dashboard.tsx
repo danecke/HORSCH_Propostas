@@ -155,6 +155,7 @@ type Dealership = {
   factoryManagerName: string;
   dealerManagerName: string;
   dealerManagerEmail: string;
+  dealerManagerOptions?: Array<{ name: string; email: string }>;
   proposals: number;
   approved: number;
   totalCents: number;
@@ -187,6 +188,7 @@ type CurrentAccess = {
     viewPriceList: boolean;
     requestQuote: boolean;
     respondQuote: boolean;
+    requestProposal: boolean;
     createProposal: boolean;
     editPriceList: boolean;
     publishPriceList: boolean;
@@ -391,7 +393,7 @@ export function Dashboard({ user }: { user: AppUser }) {
   const leadsEnabled = moduleEnabled("leads") && leadData?.moduleEnabled !== false && leadData !== null;
   const reimbursementsEnabled = moduleEnabled("reimbursements");
   const canCreate = data.me.permissions.createProposal && proposalsEnabled && data.me.role !== "dealer_manager";
-  const canRequestProposal = data.me.role === "dealer_manager" && proposalsEnabled;
+  const canRequestProposal = data.me.permissions.requestProposal && proposalsEnabled;
   const concessionOnly = data.me.role === "concession";
   const proposalResponsibles = data.proposalResponsibles.filter((item) => item.active);
   async function refreshed(message: string) { setNotice(message); await loadData(); }
@@ -412,6 +414,7 @@ export function Dashboard({ user }: { user: AppUser }) {
         <div className="role-card"><span>Perfil ativo</span><strong>{data.me.roleLabel}</strong><small>{scopeDescription(data.me)}</small></div>
         <nav className="sidebar-nav" aria-label="Navegação principal">
           <span className="nav-section-label">Navegação operacional</span>
+          {concessionOnly && proposalsEnabled && <NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton>}
           {concessionOnly ? <>{quotesEnabled && <NavButton active={view === "quotes"} icon="clock" onClick={() => setView("quotes")}>Cotações</NavButton>}{priceListEnabled && <NavButton active={view === "price-list"} icon="file" onClick={() => setView("price-list")}>Lista de preços</NavButton>}{leadsEnabled && <NavButton active={view === "leads"} icon="trend" onClick={() => setView("leads")}>Horsch Leads</NavButton>}{reimbursementsEnabled && <NavButton active={view === "reimbursements"} icon="money" onClick={() => setView("reimbursements")}>Reembolsos N2/N3</NavButton>}</> : <><NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão geral</NavButton>{proposalsEnabled && <NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton>}{quotesEnabled && <NavButton active={view === "quotes"} icon="clock" onClick={() => setView("quotes")}>Cotações</NavButton>}{priceListEnabled && <NavButton active={view === "price-list"} icon="money" onClick={() => setView("price-list")}>Lista de preços</NavButton>}{leadsEnabled && <NavButton active={view === "leads"} icon="trend" onClick={() => setView("leads")}>Horsch Leads</NavButton>}{reimbursementsEnabled && <NavButton active={view === "reimbursements"} icon="money" onClick={() => setView("reimbursements")}>Reembolsos N2/N3</NavButton>}<NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Concessionárias</NavButton>{data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}</>}
           {databaseEnabled && <NavButton active={view === "database"} icon="grid" onClick={() => setView("database")}>Base de dados</NavButton>}</nav>
         {(canCreate || canRequestProposal) && <button className="sidebar-new" onClick={() => canRequestProposal ? setShowNewProposalRequest(true) : setShowNewProposal(true)}><Icon name="plus" size={17} />{canRequestProposal ? "Solicitar proposta" : "Nova proposta"}</button>}
@@ -429,7 +432,7 @@ export function Dashboard({ user }: { user: AppUser }) {
         {view === "history" && <button type="button" className="outline-button compact back-button workspace-back-button" onClick={() => { setView(proposalsEnabled ? "proposals" : "overview"); setHistoryProposalId(null); }}>← Voltar</button>}
         {view === "leads" && leadsEnabled && leadData ? (
           <HorschLeadsView data={leadData} me={data.me} onChanged={async (message) => refreshed(message)} />
-        ) : view === "reimbursements" && reimbursementsEnabled ? <ReimbursementsView me={data.me as ReimbursementAccess} dealerships={data.dealerships} /> : view === "database" && databaseEnabled ? <DatabaseView me={data.me} /> : view === "price-list" && priceListEnabled ? <PriceListView me={data.me} mode="consult" /> : concessionOnly && priceListEnabled && view !== "quotes" ? <PriceListView me={data.me} mode="consult" /> : view === "overview" ? (
+        ) : view === "reimbursements" && reimbursementsEnabled ? <ReimbursementsView me={data.me as ReimbursementAccess} dealerships={data.dealerships} /> : view === "database" && databaseEnabled ? <DatabaseView me={data.me} /> : view === "price-list" && priceListEnabled ? <PriceListView me={data.me} mode="consult" /> : concessionOnly && priceListEnabled && view !== "quotes" && view !== "proposals" ? <PriceListView me={data.me} mode="consult" /> : view === "overview" ? (
           <Overview data={data} onNew={() => setShowNewProposal(true)} onOpen={setPreview} onHistory={openHistory} onAll={() => setView("proposals")} />
         ) : view === "proposals" && proposalsEnabled ? (
           <ProposalsView proposals={filteredProposals} me={data.me} allCount={data.proposals.length} search={search} onSearch={setSearch} status={statusFilter} onStatus={setStatusFilter} canCreate={canCreate} canRequestProposal={canRequestProposal} onNew={() => setShowNewProposal(true)} onNewRequest={() => setShowNewProposalRequest(true)} onOpen={setPreview} canViewHistory={data.me.role === "general_admin"} onHistory={openHistory} onChanged={() => refreshed("Solicitação de proposta atualizada.")} />
@@ -445,6 +448,7 @@ export function Dashboard({ user }: { user: AppUser }) {
           <Overview data={data} onNew={() => setShowNewProposal(true)} onOpen={setPreview} onHistory={openHistory} onAll={() => setView("proposals")} />
         )}
         <nav className="mobile-nav" aria-label="Navegação móvel">
+          {concessionOnly && proposalsEnabled && <NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton>}
           {!concessionOnly ? <><NavButton active={view === "overview"} icon="grid" onClick={() => setView("overview")}>Visão</NavButton>{proposalsEnabled && <NavButton active={view === "proposals"} icon="file" onClick={() => setView("proposals")}>Propostas</NavButton>}{quotesEnabled && <NavButton active={view === "quotes"} icon="clock" onClick={() => setView("quotes")}>Cotações</NavButton>}{priceListEnabled && <NavButton active={view === "price-list"} icon="money" onClick={() => setView("price-list")}>Preços</NavButton>}{reimbursementsEnabled && <NavButton active={view === "reimbursements"} icon="money" onClick={() => setView("reimbursements")}>Reembolsos</NavButton>}{databaseEnabled && <NavButton active={view === "database"} icon="grid" onClick={() => setView("database")}>Base</NavButton>}{leadsEnabled && <NavButton active={view === "leads"} icon="trend" onClick={() => setView("leads")}>Leads</NavButton>}<NavButton active={view === "dealerships"} icon="building" onClick={() => setView("dealerships")}>Rede</NavButton>{data.me.permissions.manageAccess && <NavButton active={view === "access"} icon="users" onClick={() => setView("access")}>Acessos</NavButton>}</> : <>{quotesEnabled && <NavButton active={view === "quotes"} icon="clock" onClick={() => setView("quotes")}>Cotações</NavButton>}{priceListEnabled && <NavButton active={view === "price-list"} icon="money" onClick={() => setView("price-list")}>Preços</NavButton>}{reimbursementsEnabled && <NavButton active={view === "reimbursements"} icon="money" onClick={() => setView("reimbursements")}>Reembolsos</NavButton>}</>}
         </nav>
       </section>
@@ -1426,8 +1430,30 @@ function NewProposalModal({
               <div className="responsible-grid">
                 <article className="responsible-card">
                   <span>Responsável da concessionária</span>
-                  <label className="field"><span>Nome</span><input value={contactName} readOnly={Boolean(selectedDealer?.dealerManagerName)} onChange={(event) => setContactName(event.target.value)} required /></label>
-                  <label className="field"><span>E-mail destinatário</span><input type="email" value={contactEmail} readOnly={Boolean(selectedDealer?.dealerManagerEmail)} onChange={(event) => setContactEmail(event.target.value)} required /></label>
+                  {selectedDealer?.dealerManagerOptions?.length ? (
+                    <label className="field">
+                      <span>Selecionar responsável</span>
+                      <select
+                        value={contactEmail}
+                        onChange={(event) => {
+                          const manager = selectedDealer.dealerManagerOptions?.find((item) => item.email === event.target.value);
+                          setContactEmail(event.target.value);
+                          setContactName(manager?.name || "");
+                        }}
+                        required
+                      >
+                        <option value="">Selecione o responsável</option>
+                        {selectedDealer.dealerManagerOptions.map((manager) => (
+                          <option key={manager.email} value={manager.email}>{manager.name} · {manager.email}</option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : (
+                    <>
+                      <label className="field"><span>Nome</span><input value={contactName} readOnly={Boolean(selectedDealer?.dealerManagerName)} onChange={(event) => setContactName(event.target.value)} required /></label>
+                      <label className="field"><span>E-mail destinatário</span><input type="email" value={contactEmail} readOnly={Boolean(selectedDealer?.dealerManagerEmail)} onChange={(event) => setContactEmail(event.target.value)} required /></label>
+                    </>
+                  )}
                 </article>
                 <article className="responsible-card">
                   <span>Responsável HORSCH</span>
