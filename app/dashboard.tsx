@@ -1717,8 +1717,8 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
   const canClaimWorkflow = ["general_admin", "global_management"].includes(me.role) && status === "awaiting_global";
   const canOfferWorkflow = ["general_admin", "global_management"].includes(me.role) && status === "in_analysis" && (me.role === "general_admin" || proposal.claimedByEmail === me.email);
   const canAcceptWorkflow = me.role === "dealer_manager" && proposal.isActionOwner && status === "awaiting_dealer_acceptance";
-  const canRecordOrder = me.role === "general_admin" || (me.role === "factory_manager" && status === "awaiting_order" && proposal.isActionOwner);
-  const canSubmitOrderNumber = me.role === "general_admin" || (me.role === "factory_manager" && status === "awaiting_order_number" && proposal.isActionOwner);
+  const canRecordOrder = me.role === "general_admin" || (me.role === "factory_manager" && status === "awaiting_order");
+  const canSubmitOrderNumber = me.role === "general_admin" || (me.role === "factory_manager" && status === "awaiting_order_number");
 
   function updateCounterItem(
     id: number,
@@ -1991,7 +1991,7 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
           </section>
         )}
 
-        {isWorkflow && (proposal.isActionOwner || me.permissions.manageAnyProposalStatus || ["general_admin", "global_management"].includes(me.role) || status === "order_generated") && (
+        {isWorkflow && (proposal.isActionOwner || canRecordOrder || canSubmitOrderNumber || me.permissions.manageAnyProposalStatus || ["general_admin", "global_management"].includes(me.role) || status === "order_generated") && (
           <section className="workflow-panel no-print">
             <div className="workflow-panel-heading">
               <div>

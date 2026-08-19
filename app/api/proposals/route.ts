@@ -185,6 +185,20 @@ function linkedDealerManagerEmails(
     .map((record) => record.email.trim().toLowerCase());
 }
 
+function linkedFactoryManagerEmails(
+  dealershipId: number,
+  allUsers: UserRecord[],
+  assignmentsByEmail: Map<string, number[]>,
+) {
+  return allUsers
+    .filter((record) => (
+      record.active &&
+      normalizeUserRole(record.email, record.role) === "factory_manager" &&
+      assignmentIdsForUser(record, assignmentsByEmail).includes(dealershipId)
+    ))
+    .map((record) => record.email.trim().toLowerCase());
+}
+
 function proposalActionOwnerEmails(
   proposal: { status: string; commercialOwnerEmail: string; createdByEmail: string; dealershipId: number; claimedByEmail?: string },
   dealer: { id: number; contactEmail: string; factoryManagerEmail?: string },
@@ -192,6 +206,12 @@ function proposalActionOwnerEmails(
   assignmentsByEmail: Map<string, number[]>,
 ) {
   const primary = proposalActionOwnerEmail(proposal, dealer, allUsers);
+  if (["awaiting_order", "awaiting_order_number"].includes(proposal.status)) {
+    return [...new Set([
+      primary,
+      ...linkedFactoryManagerEmails(dealer.id, allUsers, assignmentsByEmail),
+    ].filter(Boolean))];
+  }
   if (!["sent", "awaiting_dealer_acceptance"].includes(proposal.status)) {
     return primary ? [primary] : [];
   }
@@ -1037,6 +1057,9 @@ export async function PATCH(request: Request) {
       if (!["general_admin", "factory_manager"].includes(profile.role)) {
         return Response.json({ error: "Somente o Gestor Fábrica pode marcar a colocação do pedido." }, { status: 403 });
       }
+      if (!dealerIsVisible(profile, record.dealer)) {
+        return forbidden();
+      }
       if (record.proposal.status !== "awaiting_order") {
         return Response.json({ error: "Esta proposta ainda não está aguardando pedido." }, { status: 409 });
       }
@@ -1059,6 +1082,9 @@ export async function PATCH(request: Request) {
     if (payload.action === "submit_order_number") {
       if (!["general_admin", "factory_manager"].includes(profile.role)) {
         return Response.json({ error: "Somente o Gestor Fábrica pode informar o número do pedido." }, { status: 403 });
+      }
+      if (!dealerIsVisible(profile, record.dealer)) {
+        return forbidden();
       }
       if (record.proposal.status !== "awaiting_order_number") {
         return Response.json({ error: "O pedido ainda não foi marcado como colocado pela fábrica." }, { status: 409 });
