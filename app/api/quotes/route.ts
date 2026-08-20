@@ -1,6 +1,6 @@
 import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { dealerships, priceListImports, priceListItems, quoteCatalog, quotePriceListControl, quoteRequests, users } from "../../../db/schema";
+import { dealerships, priceListImports, priceListItems, quoteCatalog, quoteOutboxEvents, quotePriceListControl, quoteRequests, users } from "../../../db/schema";
 import { recordAudit } from "../../../lib/audit";
 import { getAccessProfile, isModuleEnabled, normalizeUserRole, profileHasDealership } from "../../../lib/access";
 export const dynamic = "force-dynamic";
@@ -113,6 +113,12 @@ export async function PATCH(request: Request) {
     }
     if (payload.action === "promote_to_price_list") {
       if (!canManagePriceList(profile)) return Response.json({ error: "Somente ADM Geral e Gestão Global podem aprovar inclusão na lista de preços." }, { status: 403 });
+      const generatedOrders = (await db.select({ status: quoteRequests.status }).from(quoteRequests).where(eq(quoteRequests.partNumber, record.quote.partNumber))).filter((quote) => quote.status === "order_generated").length;
+      if (generatedOrders <= 10) return Response.json({ error: "O PN ainda não atingiu mais de 10 pedidos gerados." }, { status: 409 });
+      const payloadEvent = { partNumber: record.quote.partNumber, description: record.quote.description, ncm: record.quote.ncm, vt: record.quote.vt, origin: record.quote.origin || deriveOrigin(record.quote.vt), netPriceCents: record.quote.netPriceCents, generatedOrders, requestedBy: profile.email };
+      await db.insert(quoteOutboxEvents).values({ id: crypto.randomUUID(), eventType: "quote.price_list_requested.v1", aggregateId: record.quote.partNumber, payloadJson: JSON.stringify(payloadEvent), idempotencyKey: `price-list:${record.quote.partNumber}:${new Date().toISOString().slice(0, 10)}`, status: "pending", createdAt: new Date().toISOString() }).onConflictDoNothing();
+      await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "quote_price_list_event_created", entity: "quote", details: `Evento de inclusão do PN ${record.quote.partNumber} criado para Lista de Preços.`, after: payloadEvent });
+      return Response.json({ ok: true, queued: true, generatedOrders });
       const partNumber = String(payload.partNumber ?? record.quote.partNumber).trim();
       const description = String(payload.description ?? record.quote.description).trim();
       const ncm = String(payload.ncm ?? record.quote.ncm).trim();

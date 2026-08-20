@@ -277,6 +277,18 @@ export const quotePriceListControl = sqliteTable("quote_price_list_control", {
   includedByEmail: text("included_by_email").notNull(),
 });
 
+// Outbox owned by Cotações. A worker/consumer delivers these events to the
+// Lista de Preços API; this service never writes into price-list tables.
+export const quoteOutboxEvents = sqliteTable("quote_outbox_events", {
+  id: text("id").primaryKey(),
+  eventType: text("event_type").notNull(),
+  aggregateId: text("aggregate_id").notNull(),
+  payloadJson: text("payload_json").notNull(),
+  idempotencyKey: text("idempotency_key").notNull(),
+  status: text("status").notNull().default("pending"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [uniqueIndex("quote_outbox_idempotency_idx").on(table.idempotencyKey), index("quote_outbox_status_idx").on(table.status)]);
+
 export const priceListImports = sqliteTable("price_list_imports", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   fileName: text("file_name").notNull(),
