@@ -106,6 +106,9 @@ type Proposal = {
   documents: ProposalDocument[];
 };
 
+type AnalysisRow = { key: string; value: number; count: number };
+type PartAnalysisRow = AnalysisRow & { quantity: number };
+
 type QuoteStatus = "awaiting_quote" | "awaiting_dealer_acceptance" | "awaiting_cost_review" | "closed" | "awaiting_order" | "order_generated";
 type Quote = {
   id: string; partNumber: string; dealershipId: number; dealership: string; city: string; state: string;
@@ -326,6 +329,7 @@ function HorschDocumentLogo() {
 
 export function Dashboard({ user }: { user: AppUser }) {
   const [view, setView] = useState<View>("overview");
+  const [proposalTab, setProposalTab] = useState<"operation" | "management">("management");
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -437,8 +441,12 @@ export function Dashboard({ user }: { user: AppUser }) {
           <HorschLeadsView data={leadData} me={data.me} onChanged={async (message) => refreshed(message)} />
         ) : view === "reimbursements" && reimbursementsEnabled ? <ReimbursementsView me={data.me as ReimbursementAccess} dealerships={data.dealerships} /> : view === "database" && databaseEnabled ? <DatabaseView me={data.me} /> : view === "price-list" && priceListEnabled ? <PriceListView me={data.me} mode="consult" /> : concessionOnly && priceListEnabled && view !== "quotes" && view !== "proposals" && view !== "overview" ? <PriceListView me={data.me} mode="consult" /> : (view === "overview" || view === "proposals") && proposalsEnabled ? (
           <>
-            {["general_admin", "global_management"].includes(data.me.role) && <Overview data={data} onNew={() => setShowNewProposal(true)} onOpen={setPreview} onHistory={openHistory} onAll={() => setView("proposals")} />}
-          <ProposalsView proposals={filteredProposals} me={data.me} allCount={data.proposals.length} search={search} onSearch={setSearch} status={statusFilter} onStatus={setStatusFilter} canCreate={canCreate} canRequestProposal={canRequestProposal} onNew={() => setShowNewProposal(true)} onNewRequest={() => setShowNewProposalRequest(true)} onOpen={setPreview} canViewHistory={data.me.role === "general_admin"} onHistory={openHistory} onChanged={() => refreshed("Solicitação de proposta atualizada.")} />
+            <ProposalModuleTabs tab={proposalTab} onChange={setProposalTab} canViewManagement={["general_admin", "global_management"].includes(data.me.role)} />
+            {proposalTab === "management" && ["general_admin", "global_management"].includes(data.me.role) ? (
+              <ManagementDashboard data={data} />
+            ) : (
+              <ProposalsView proposals={filteredProposals} me={data.me} allCount={data.proposals.length} search={search} onSearch={setSearch} status={statusFilter} onStatus={setStatusFilter} canCreate={canCreate} canRequestProposal={canRequestProposal} onNew={() => setShowNewProposal(true)} onNewRequest={() => setShowNewProposalRequest(true)} onOpen={setPreview} canViewHistory={data.me.role === "general_admin"} onHistory={openHistory} onChanged={() => refreshed("Solicitação de proposta atualizada.")} />
+            )}
           </>
         ) : view === "quotes" && quotesEnabled ? (
           <QuotesView quotes={data.quotes} me={data.me} onChanged={() => refreshed("Cotação atualizada com sucesso.")} />
@@ -805,6 +813,73 @@ function MachineModelsDatabase() {
 
 function NavButton({ active, icon, children, onClick }: { active: boolean; icon: IconName; children: ReactNode; onClick: () => void }) {
   return <button className={`nav-button ${active ? "active" : ""}`} onClick={onClick}><Icon name={icon} size={19} /><span>{children}</span></button>;
+}
+
+function ProposalModuleTabs({ tab, onChange, canViewManagement }: { tab: "operation" | "management"; onChange: (tab: "operation" | "management") => void; canViewManagement: boolean }) {
+  return <div className="proposal-module-tabs" role="tablist" aria-label="Seções do módulo Propostas">
+    <button type="button" role="tab" aria-selected={tab === "operation"} className={`proposal-module-tab ${tab === "operation" ? "active" : ""}`} onClick={() => onChange("operation")}><Icon name="file" size={17} />Operação</button>
+    {canViewManagement && <button type="button" role="tab" aria-selected={tab === "management"} className={`proposal-module-tab ${tab === "management" ? "active" : ""}`} onClick={() => onChange("management")}><Icon name="trend" size={17} />Visão gerencial</button>}
+  </div>;
+}
+
+function ManagementDashboard({ data }: { data: DashboardData }) {
+  const closedStatuses: ProposalStatus[] = ["approved", "order_generated"];
+  const closed = data.proposals.filter((proposal) => closedStatuses.includes(proposal.status));
+  const currentDate = new Date();
+  const isCurrentMonth = (value: string) => {
+    const date = new Date(value);
+    return date.getFullYear() === currentDate.getFullYear() && date.getMonth() === currentDate.getMonth();
+  };
+  const currentMonth = closed.filter((proposal) => isCurrentMonth(proposal.updatedAt || proposal.issueDate));
+  const currentMonthValue = currentMonth.reduce((sum, proposal) => sum + proposal.totalCents, 0);
+  const averageTicket = closed.length ? Math.round(closed.reduce((sum, proposal) => sum + proposal.totalCents, 0) / closed.length) : 0;
+  const ranking = (items: AnalysisRow[]) => items.sort((a, b) => b.value - a.value).slice(0, 5);
+  const byOwner = ranking(Array.from(closed.reduce((map, proposal) => {
+    const key = proposal.commercialOwner || "Sem responsável";
+    const current = map.get(key) ?? { key, value: 0, count: 0 };
+    current.value += proposal.totalCents; current.count += 1; map.set(key, current); return map;
+  }, new Map()).values()));
+  const byDealership = ranking(Array.from(closed.reduce((map, proposal) => {
+    const key = proposal.dealership || "Sem concessionária";
+    const current = map.get(key) ?? { key, value: 0, count: 0 };
+    current.value += proposal.totalCents; current.count += 1; map.set(key, current); return map;
+  }, new Map()).values()));
+  const byMonth = ranking(Array.from(closed.reduce((map, proposal) => {
+    const date = new Date(proposal.updatedAt || proposal.issueDate);
+    const key = date.toLocaleDateString("pt-BR", { month: "short", year: "numeric" });
+    const current = map.get(key) ?? { key, value: 0, count: 0 };
+    current.value += proposal.totalCents; current.count += 1; map.set(key, current); return map;
+  }, new Map()).values()).reverse());
+  const byPart = Array.from(closed.reduce((map, proposal) => {
+    proposal.items.forEach((item) => {
+      const key = item.partNumber || "PN não informado";
+      const current = map.get(key) ?? { key, value: 0, count: 0, quantity: 0 };
+      current.value += item.quantity * item.unitPriceCents; current.count += 1; current.quantity += item.quantity; map.set(key, current);
+    });
+    return map;
+  }, new Map()).values()).sort((a, b) => b.quantity - a.quantity).slice(0, 5);
+  const maxMonthly = Math.max(1, ...byMonth.map((item) => item.value));
+  const currentMonthLabel = currentDate.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+  return <div className="content-frame management-dashboard">
+    <header className="page-heading"><div><span className="eyebrow">Gestão comercial</span><h1>Visão gerencial</h1><p>Fechamentos consolidados por responsável, concessionária, mês e PN.</p></div><span className="analysis-period"><Icon name="clock" size={15} />{currentMonthLabel}</span></header>
+    <section className="metric-grid" aria-label="Resumo gerencial">
+      <MetricCard label="Fechado no mês" value={formatBRL(currentMonthValue)} meta={`${currentMonth.length} propostas concluídas`} icon="money" tone="red" />
+      <MetricCard label="Propostas fechadas" value={String(closed.length)} meta="Aceitas ou com pedido gerado" icon="check" tone="green" />
+      <MetricCard label="Ticket médio" value={formatBRL(averageTicket)} meta="Valor médio por fechamento" icon="trend" tone="dark" />
+      <MetricCard label="Em negociação" value={String(data.proposals.filter((proposal) => ["sent", "counteroffer", "awaiting_dealer_acceptance", "awaiting_order"].includes(proposal.status)).length)} meta="Aguardando próxima ação" icon="clock" tone="amber" />
+    </section>
+    <section className="management-dashboard-grid">
+      <article className="panel analysis-panel"><PanelHeader title="Quem mais fechou" subtitle="Ranking por valor total das propostas concluídas" /><AnalysisRanking rows={byOwner} /></article>
+      <article className="panel analysis-panel"><PanelHeader title="Concessionárias líderes" subtitle="Valor fechado por carteira" /><AnalysisRanking rows={byDealership} /></article>
+      <article className="panel analysis-panel monthly-analysis-panel"><PanelHeader title="Evolução mensal" subtitle="Valor fechado por mês" /><div className="monthly-analysis">{byMonth.length ? byMonth.map((item) => <div className="monthly-row" key={item.key}><div><strong>{item.key}</strong><small>{item.count} fechamento{item.count === 1 ? "" : "s"}</small></div><div className="monthly-track"><span style={{ width: `${Math.max(8, (item.value / maxMonthly) * 100)}%` }} /></div><strong>{formatBRL(item.value)}</strong></div>) : <EmptyMini text="Ainda não há fechamentos para analisar." />}</div></article>
+      <article className="panel analysis-panel"><PanelHeader title="PN com mais saída" subtitle="Quantidade total em propostas fechadas" /><div className="pn-analysis">{byPart.length ? byPart.map((item, index) => <div className="pn-row" key={item.key}><span className="ranking-index">{String(index + 1).padStart(2, "0")}</span><div><strong>{item.key}</strong><small>{item.count} proposta{item.count === 1 ? "" : "s"}</small></div><span><strong>{item.quantity}</strong><small>un.</small></span></div>) : <EmptyMini text="Nenhum PN fechado no período." />}</div></article>
+    </section>
+    <div className="analysis-footnote"><Icon name="grid" size={15} />Análise baseada em propostas com status Aceita ou Pedido Gerado. Os valores acompanham o escopo de acesso do usuário.</div>
+  </div>;
+}
+
+function AnalysisRanking({ rows }: { rows: AnalysisRow[] }) {
+  return rows.length ? <div className="analysis-ranking">{rows.map((row, index) => <div className="analysis-ranking-row" key={row.key}><span className="ranking-index">{String(index + 1).padStart(2, "0")}</span><div><strong>{row.key}</strong><small>{row.count} fechamento{row.count === 1 ? "" : "s"}</small></div><strong>{formatBRL(row.value)}</strong></div>)}</div> : <EmptyMini text="Nenhum fechamento disponível." />;
 }
 
 function Overview({ data, onNew, onOpen, onHistory, onAll }: { data: DashboardData; onNew: () => void; onOpen: (proposal: Proposal) => void; onHistory: (proposalId: string) => void; onAll: () => void }) {

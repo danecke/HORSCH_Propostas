@@ -1847,3 +1847,50 @@ body {
   .workspace-topbar, .overview-hero { display: none !important; }
   .app-shell, .workspace { background: #fff !important; }
 }
+
+.proposal-module-tabs { width: 100%; margin: 4px auto 0; padding: 5px; display: flex; gap: 5px; border: 1px solid var(--horsch-line); border-radius: 5px; background: #eef3f0; }
+.proposal-module-tab { min-height: 43px; padding: 0 18px; display: inline-flex; align-items: center; gap: 9px; border: 1px solid transparent; border-radius: 3px; color: var(--horsch-muted); background: transparent; font-size: 12px; font-weight: 800; }
+.proposal-module-tab:hover { color: var(--horsch-navy); background: #fff; }
+.proposal-module-tab.active { border-color: var(--horsch-navy); color: #fff; background: var(--horsch-navy); box-shadow: 0 5px 12px rgb(15 31 45 / 14%); }
+.management-dashboard { padding-top: 28px; }
+.management-dashboard .page-heading { margin-bottom: 22px; }
+.analysis-period { min-height: 34px; padding: 0 12px; display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--horsch-line); border-radius: 3px; color: var(--horsch-muted); background: #fff; font-size: 11px; font-weight: 800; text-transform: capitalize; }
+.management-dashboard-grid { margin-top: 18px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.analysis-panel { min-height: 270px; padding: 23px; }
+.analysis-ranking { display: grid; }
+.analysis-ranking-row { min-height: 54px; display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 10px; align-items: center; border-bottom: 1px solid #e7ede9; }
+.analysis-ranking-row:last-child { border-bottom: 0; }
+.analysis-ranking-row div { min-width: 0; }
+.analysis-ranking-row strong, .analysis-ranking-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.analysis-ranking-row div strong { color: var(--horsch-navy); font-size: 11px; }
+.analysis-ranking-row small { margin-top: 3px; color: var(--horsch-muted); font-size: 9px; }
+.analysis-ranking-row > strong { color: var(--horsch-green); font-size: 11px; }
+.monthly-analysis { display: grid; gap: 15px; }
+.monthly-row { display: grid; grid-template-columns: 112px minmax(0, 1fr) 100px; gap: 12px; align-items: center; }
+.monthly-row div { min-width: 0; }
+.monthly-row strong, .monthly-row small { display: block; }
+.monthly-row strong { color: var(--horsch-navy); font-size: 11px; text-transform: capitalize; }
+.monthly-row small { margin-top: 3px; color: var(--horsch-muted); font-size: 9px; }
+.monthly-row > strong { color: var(--horsch-text); text-align: right; }
+.monthly-track { height: 8px; overflow: hidden; border-radius: 3px; background: #eaf0ed; }
+.monthly-track span { height: 100%; display: block; border-radius: 3px; background: linear-gradient(90deg, var(--horsch-red), #e88479); }
+.pn-analysis { display: grid; }
+.pn-row { min-height: 58px; display: grid; grid-template-columns: 26px minmax(0, 1fr) 44px; gap: 10px; align-items: center; border-bottom: 1px solid #e7ede9; }
+.pn-row:last-child { border-bottom: 0; }
+.pn-row div { min-width: 0; }
+.pn-row strong, .pn-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pn-row div strong { color: var(--horsch-navy); font-size: 11px; }
+.pn-row small { margin-top: 3px; color: var(--horsch-muted); font-size: 9px; }
+.pn-row > span:last-child { text-align: right; }
+.pn-row > span:last-child strong { color: var(--horsch-red); font-size: 15px; }
+.analysis-footnote { margin-top: 14px; display: flex; align-items: center; gap: 8px; color: var(--horsch-muted); font-size: 10px; }
+
+@media (max-width: 720px) {
+  .proposal-module-tabs { margin-top: 0; overflow-x: auto; }
+  .proposal-module-tab { flex: 1 0 auto; justify-content: center; }
+  .management-dashboard { padding-top: 20px; }
+  .management-dashboard-grid { grid-template-columns: 1fr; gap: 13px; }
+  .analysis-period { align-self: stretch; justify-content: center; }
+  .monthly-row { grid-template-columns: 92px minmax(0, 1fr); }
+  .monthly-row > strong { grid-column: 2; text-align: left; }
+}
