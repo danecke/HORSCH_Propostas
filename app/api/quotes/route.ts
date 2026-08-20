@@ -1,6 +1,6 @@
 import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { dealerships, priceListImports, priceListItems, quoteCatalog, quoteOutboxEvents, quotePriceListControl, quoteRequests, users } from "../../../db/schema";
+import { dealerships, priceListImports, priceListItems, quoteCatalog, quoteOutboxEvents, quotePriceListControl, quoteRequests, userDealerships, users } from "../../../db/schema";
 import { recordAudit } from "../../../lib/audit";
 import { getAccessProfile, isModuleEnabled, normalizeUserRole, profileHasDealership } from "../../../lib/access";
 export const dynamic = "force-dynamic";
@@ -21,6 +21,17 @@ function canAct(profile: NonNullable<Awaited<ReturnType<typeof getAccessProfile>
   if (["return_quote", "needs_action"].includes(action)) return ["general_admin", "global_management"].includes(profile.role) && (isAssigned || profile.role === "general_admin");
   if (["approve", "reject"].includes(action)) return profile.role === "dealer_manager" && isAssigned && status === "awaiting_dealer_acceptance";
   return action === "place_order" && profile.role === "factory_manager" && isAssigned && status === "awaiting_order";
+}
+async function findDealerManager(db: Awaited<ReturnType<typeof getDb>>, dealershipId: number) {
+  const [allUsers, assignments] = await Promise.all([
+    db.select().from(users),
+    db.select({ userEmail: userDealerships.userEmail }).from(userDealerships).where(eq(userDealerships.dealershipId, dealershipId)),
+  ]);
+  const linkedEmails = new Set(assignments.map((assignment) => assignment.userEmail.trim().toLowerCase()));
+  return allUsers.find((user) => {
+    const role = normalizeUserRole(user.email, user.role);
+    return user.active && role === "dealer_manager" && (user.dealershipId === dealershipId || linkedEmails.has(user.email.trim().toLowerCase()));
+  }) || null;
 }
 function errorMessage(error: unknown) { const message = error instanceof Error ? error.message : "Erro inesperado."; return message.includes("no such table") ? "A estrutura de cotações ainda está sendo preparada. Tente novamente." : message; }
 export async function GET() {
@@ -75,17 +86,19 @@ export async function POST(request: Request) {
         deriveOrigin(catalog.vt).trim() &&
         catalog.netPriceCents > 0,
     );
-    const autoReturned = fresh && catalogReady;
+    const dealerManager = await findDealerManager(db, dealer.id);
+    const autoReturned = fresh && catalogReady && Boolean(dealerManager);
     const allUsers = await db.select().from(users);
     const globalUser = allUsers.find((user) => user.active && ["global_management", "general_admin"].includes(normalizeUserRole(user.email, user.role) || ""));
-    const dealerManager = allUsers.find((user) => user.active && normalizeUserRole(user.email, user.role) === "dealer_manager" && user.dealershipId === dealer.id);
     const now = new Date().toISOString();
     const id = "COT-" + Date.now().toString(36).toUpperCase();
-    const status = "awaiting_quote";
-    const actionOwnerRole = "global_management";
-    const actionOwnerEmail = globalUser?.email || "";
-    const actionNote = "Solicitação recebida e encaminhada para análise.";
-    await db.insert(quoteRequests).values({ id, partNumber, dealershipId: profile.dealershipId, requestedByEmail: profile.email, requestedByName: profile.name, requestedQuantity, targetNetPriceCents: null, requestObservation: "", status, actionOwnerRole, actionOwnerEmail, description: catalog?.description || "", ncm: catalog?.ncm || "", vt: catalog?.vt || "", origin: catalog ? deriveOrigin(catalog.vt) : "", netPriceCents: catalog?.netPriceCents || null, catalogImportedAt: catalog?.importedAt || null, actionNote, requestedAt: now, createdAt: now, updatedAt: now });
+    const status = autoReturned ? "awaiting_dealer_acceptance" : "awaiting_quote";
+    const actionOwnerRole = autoReturned ? "dealer_manager" : "global_management";
+    const actionOwnerEmail = autoReturned ? dealerManager!.email : globalUser?.email || "";
+    const actionNote = autoReturned
+      ? "Cotação encontrada automaticamente e encaminhada ao Gestor do Concessionário para aprovação."
+      : "Solicitação recebida e encaminhada para análise.";
+    await db.insert(quoteRequests).values({ id, partNumber, dealershipId: profile.dealershipId, requestedByEmail: profile.email, requestedByName: profile.name, requestedQuantity, targetNetPriceCents: null, requestObservation: "", status, actionOwnerRole, actionOwnerEmail, description: catalog?.description || "", ncm: catalog?.ncm || "", vt: catalog?.vt || "", origin: catalog ? deriveOrigin(catalog.vt) : "", netPriceCents: catalog?.netPriceCents || null, catalogImportedAt: catalog?.importedAt || null, actionNote, returnedAt: autoReturned ? now : null, requestedAt: now, createdAt: now, updatedAt: now });
     await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "quote_requested", entity: "quote", details: "Cotação " + id + " solicitada para o PN " + partNumber + ".", after: { id, partNumber, status, dealership: dealer.name } });
     return Response.json({ id, status, fresh, autoReturned, requestedQuantity });
   } catch (error) { return Response.json({ error: errorMessage(error) }, { status: 500 }); }
@@ -160,9 +173,7 @@ export async function PATCH(request: Request) {
     else if (payload.action === "return_quote") {
       const description = payload.description?.trim() || ""; const ncm = payload.ncm?.trim() || ""; const vt = payload.vt?.trim() || ""; const origin = deriveOrigin(vt); const netPriceCents = Math.trunc(Number(payload.netPriceCents) || 0);
       if (!description || !ncm || !vt || !origin || netPriceCents <= 0) return Response.json({ error: "Preencha descrição, NCM, VT e net price para retornar a cotação. A origem é calculada pelo 3º caractere da VT." }, { status: 400 });
-      const allUsers = await db.select().from(users);
-      const dealerUser = allUsers.find((user) => user.active && normalizeUserRole(user.email, user.role) === "dealer_manager" && user.dealershipId === record.quote.dealershipId)
-        || allUsers.find((user) => user.active && normalizeUserRole(user.email, user.role) === "concession" && user.dealershipId === record.quote.dealershipId);
+      const dealerUser = await findDealerManager(db, record.quote.dealershipId);
       await db.insert(quoteCatalog).values({ partNumber: record.quote.partNumber, description, ncm, vt, origin, netPriceCents, importedAt: now, updatedAt: now }).onConflictDoUpdate({ target: quoteCatalog.partNumber, set: { description, ncm, vt, origin, netPriceCents, importedAt: now, updatedAt: now } });
       patch = { ...patch, status: "awaiting_dealer_acceptance", actionOwnerRole: "dealer_manager", actionOwnerEmail: dealerUser?.email || record.quote.requestedByEmail, description, ncm, vt, origin, netPriceCents, catalogImportedAt: now, actionNote: payload.actionNote?.trim() || "Cotação retornada pela Gestão Global.", returnedAt: now };
     } else if (["approve", "reject"].includes(payload.action)) {

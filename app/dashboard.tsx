@@ -737,7 +737,7 @@ function QuoteHistoryFolder({ quotes, open, onToggle }: { quotes: Quote[]; open:
   </aside>;
 }
 function QuoteReturnAlert({ quotes }: { quotes: Quote[] }) {
-  return <section className="quote-return-alert" role="status"><div className="quote-alert-icon"><Icon name="check" size={20} /></div><div className="quote-alert-copy"><span className="eyebrow">Retorno disponível</span><h2>As informações solicitadas já foram retornadas</h2><p>As cotações abaixo estão aguardando sua ação. Confira os dados e aprove ou reprove cada uma.</p><div className="quote-alert-list">{quotes.slice(0, 4).map((quote) => <div key={quote.id}><strong>PN {quote.partNumber}</strong><span>Aguardando sua ação</span></div>)}</div>{quotes.length > 4 && <small>+{quotes.length - 4} retornos disponíveis abaixo.</small>}</div></section>;
+  return <section className="quote-return-alert" role="status"><div className="quote-alert-icon"><Icon name="check" size={20} /></div><div className="quote-alert-copy"><span className="eyebrow">Retorno automático</span><h2>Cotação encaminhada para aprovação</h2><p>As informações retornadas automaticamente já foram direcionadas ao Gestor do Concessionário. Aprove ou reprove cada cotação abaixo.</p><div className="quote-alert-list">{quotes.slice(0, 4).map((quote) => <div key={quote.id}><strong>PN {quote.partNumber}</strong><span>Aguardando sua ação</span></div>)}</div>{quotes.length > 4 && <small>+{quotes.length - 4} retornos disponíveis abaixo.</small>}</div></section>;
 }
 function QuoteMetrics({ quotes }: { quotes: Quote[] }) {
   const orders = quotes.filter((quote) => quote.status === "order_generated").length;
