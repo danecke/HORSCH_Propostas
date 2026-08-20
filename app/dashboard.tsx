@@ -698,8 +698,11 @@ function QuoteAnalysisDetailLegacy({ insight, canManagePriceList, updating, onTo
 
 function QuotesView({ quotes, me, onChanged }: { quotes: Quote[]; me: CurrentAccess; onChanged: () => Promise<void> }) {
   const [section, setSection] = useState<"flow" | "analysis">("flow");
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [pn, setPn] = useState(""); const [quantity, setQuantity] = useState("1"); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
-  const returnedQuotes = quotes.filter((quote) => quote.status === "awaiting_dealer_acceptance");
+  const openQuotes = quotes.filter((quote) => isOpenQuoteStatus(quote.status));
+  const historyQuotes = quotes.filter((quote) => !isOpenQuoteStatus(quote.status));
+  const returnedQuotes = openQuotes.filter((quote) => quote.status === "awaiting_dealer_acceptance");
   const globalView = ["general_admin", "global_management"].includes(me.role);
   async function submit(event: FormEvent) {
     event.preventDefault(); setSaving(true); setError("");
@@ -714,9 +717,24 @@ function QuotesView({ quotes, me, onChanged }: { quotes: Quote[]; me: CurrentAcc
     {["dealer_manager", "concession"].includes(me.role) && returnedQuotes.length > 0 && <QuoteReturnAlert quotes={returnedQuotes} />}
     {globalView && <QuoteMetrics quotes={quotes} />}
     {canRequestQuote && <form className="panel quote-request-panel" onSubmit={(event) => void submit(event)}><div className="quote-request-copy"><span className="eyebrow">Nova solicitação</span><strong>Solicitar cotação</strong></div><div className="quote-request-fields"><label className="field"><span>PN necessário</span><input value={pn} onChange={(event) => setPn(event.target.value)} placeholder="Ex.: 34061200" required /></label><label className="field"><span>Qtd.</span><input type="number" min="1" value={quantity} onChange={(event) => setQuantity(event.target.value)} required /></label><button className="primary-button" disabled={saving}>{saving ? "Enviando..." : "Solicitar"}</button></div>{error && <p className="form-error">{error}</p>}</form>}
-    <section className="quote-list">{quotes.length ? quotes.map((quote) => <QuoteCard key={quote.id} quote={quote} me={me} onChanged={onChanged} />) : <article className="panel"><EmptyState title="Nenhuma cotação registrada" text={me.permissions.requestQuote ? "Solicite o primeiro PN para iniciar o fluxo." : "As cotações do seu escopo aparecerão aqui."} /></article>}</section>
+    <section className="quote-workspace-grid"><div className="quote-active-column"><header className="quote-queue-heading"><div><span className="eyebrow">Fila de trabalho</span><h2>Cotações que exigem ação</h2><p>Somente solicitações em aberto ou aguardando a próxima etapa aparecem nesta visão.</p></div><strong>{openQuotes.length} abertas</strong></header><section className="quote-list">{openQuotes.length ? openQuotes.map((quote) => <QuoteCard key={quote.id} quote={quote} me={me} onChanged={onChanged} />) : <article className="panel"><EmptyState title="Nenhuma cotação em aberto" text={me.permissions.requestQuote ? "Solicite um novo PN para iniciar o fluxo." : "Não há solicitações pendentes no seu escopo."} /></article>}</section></div><QuoteHistoryFolder quotes={historyQuotes} open={historyOpen} onToggle={() => setHistoryOpen((current) => !current)} /></section>
     </>}
   </div>;
+}
+
+function isOpenQuoteStatus(status: QuoteStatus) {
+  return ["awaiting_quote", "awaiting_dealer_acceptance", "awaiting_cost_review", "awaiting_order"].includes(status);
+}
+
+function QuoteHistoryFolder({ quotes, open, onToggle }: { quotes: Quote[]; open: boolean; onToggle: () => void }) {
+  return <aside className={`quote-history-folder ${open ? "open" : ""}`} aria-label="Histórico de cotações">
+    <button type="button" className="quote-history-tab" onClick={onToggle} aria-expanded={open}>
+      <span className="quote-history-icon"><Icon name="history" size={20} /></span>
+      <span><strong>Histórico</strong><small>Cotações concluídas</small></span>
+      <b>{quotes.length}</b>
+    </button>
+    {open && <div className="quote-history-panel"><header><div><span className="eyebrow">Arquivo</span><h2>Histórico de cotações</h2><p>Registros encerrados e pedidos já gerados.</p></div><button type="button" className="icon-button" onClick={onToggle} aria-label="Fechar histórico"><Icon name="close" size={16} /></button></header><div className="quote-history-list">{quotes.length ? quotes.map((quote) => <article className="quote-history-row" key={quote.id}><div><strong>PN {quote.partNumber}</strong><small>{quote.dealership} · {formatDateTime(quote.updatedAt || quote.requestedAt)}</small></div><div><span className={`status-badge quote-status ${quote.status}`}><i />{quote.statusLabel}</span>{quote.horschOrderNumber && <small>Pedido {quote.horschOrderNumber}</small>}</div></article>) : <EmptyMini text="Nenhuma cotação concluída." />}</div></div>}
+  </aside>;
 }
 function QuoteReturnAlert({ quotes }: { quotes: Quote[] }) {
   return <section className="quote-return-alert" role="status"><div className="quote-alert-icon"><Icon name="check" size={20} /></div><div className="quote-alert-copy"><span className="eyebrow">Retorno disponível</span><h2>As informações solicitadas já foram retornadas</h2><p>As cotações abaixo estão aguardando sua ação. Confira os dados e aprove ou reprove cada uma.</p><div className="quote-alert-list">{quotes.slice(0, 4).map((quote) => <div key={quote.id}><strong>PN {quote.partNumber}</strong><span>Aguardando sua ação</span></div>)}</div>{quotes.length > 4 && <small>+{quotes.length - 4} retornos disponíveis abaixo.</small>}</div></section>;
