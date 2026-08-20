@@ -96,7 +96,7 @@ export async function POST(request: Request) {
     const actionOwnerRole = autoReturned ? "dealer_manager" : "global_management";
     const actionOwnerEmail = autoReturned ? dealerManager!.email : globalUser?.email || "";
     const actionNote = autoReturned
-      ? "Cotação encontrada automaticamente e encaminhada ao Gestor do Concessionário para aprovação."
+      ? "Cotação disponível para aprovação do Gestor do Concessionário."
       : "Solicitação recebida e encaminhada para análise.";
     await db.insert(quoteRequests).values({ id, partNumber, dealershipId: profile.dealershipId, requestedByEmail: profile.email, requestedByName: profile.name, requestedQuantity, targetNetPriceCents: null, requestObservation: "", status, actionOwnerRole, actionOwnerEmail, description: catalog?.description || "", ncm: catalog?.ncm || "", vt: catalog?.vt || "", origin: catalog ? deriveOrigin(catalog.vt) : "", netPriceCents: catalog?.netPriceCents || null, catalogImportedAt: catalog?.importedAt || null, actionNote, returnedAt: autoReturned ? now : null, requestedAt: now, createdAt: now, updatedAt: now });
     await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "quote_requested", entity: "quote", details: "Cotação " + id + " solicitada para o PN " + partNumber + ".", after: { id, partNumber, status, dealership: dealer.name } });
@@ -175,7 +175,7 @@ export async function PATCH(request: Request) {
       if (!description || !ncm || !vt || !origin || netPriceCents <= 0) return Response.json({ error: "Preencha descrição, NCM, VT e net price para retornar a cotação. A origem é calculada pelo 3º caractere da VT." }, { status: 400 });
       const dealerUser = await findDealerManager(db, record.quote.dealershipId);
       await db.insert(quoteCatalog).values({ partNumber: record.quote.partNumber, description, ncm, vt, origin, netPriceCents, importedAt: now, updatedAt: now }).onConflictDoUpdate({ target: quoteCatalog.partNumber, set: { description, ncm, vt, origin, netPriceCents, importedAt: now, updatedAt: now } });
-      patch = { ...patch, status: "awaiting_dealer_acceptance", actionOwnerRole: "dealer_manager", actionOwnerEmail: dealerUser?.email || record.quote.requestedByEmail, description, ncm, vt, origin, netPriceCents, catalogImportedAt: now, actionNote: payload.actionNote?.trim() || "Cotação retornada pela Gestão Global.", returnedAt: now };
+      patch = { ...patch, status: "awaiting_dealer_acceptance", actionOwnerRole: "dealer_manager", actionOwnerEmail: dealerUser?.email || record.quote.requestedByEmail, description, ncm, vt, origin, netPriceCents, catalogImportedAt: now, actionNote: payload.actionNote?.trim() || "Cotação disponível para aprovação do Gestor do Concessionário.", returnedAt: now };
     } else if (["approve", "reject"].includes(payload.action)) {
       if (payload.action === "approve") {
         const allUsers = await db.select().from(users);
