@@ -106,7 +106,7 @@ type Proposal = {
   documents: ProposalDocument[];
 };
 
-type QuoteStatus = "global_review" | "data_pending" | "returned" | "approved" | "rejected" | "order_pending" | "order_input";
+type QuoteStatus = "awaiting_quote" | "awaiting_dealer_acceptance" | "awaiting_cost_review" | "closed" | "awaiting_order" | "order_generated";
 type Quote = {
   id: string; partNumber: string; dealershipId: number; dealership: string; city: string; state: string;
   requestedByEmail: string; requestedByName: string; status: QuoteStatus; statusLabel: string;
@@ -690,7 +690,7 @@ function QuoteAnalysisDetailLegacy({ insight, canManagePriceList, updating, onTo
 function QuotesView({ quotes, me, onChanged }: { quotes: Quote[]; me: CurrentAccess; onChanged: () => Promise<void> }) {
   const [section, setSection] = useState<"flow" | "analysis">("flow");
   const [pn, setPn] = useState(""); const [quantity, setQuantity] = useState("1"); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
-  const returnedQuotes = quotes.filter((quote) => quote.status === "returned");
+  const returnedQuotes = quotes.filter((quote) => quote.status === "awaiting_dealer_acceptance");
   const globalView = ["general_admin", "global_management"].includes(me.role);
   async function submit(event: FormEvent) {
     event.preventDefault(); setSaving(true); setError("");
@@ -713,19 +713,19 @@ function QuoteReturnAlert({ quotes }: { quotes: Quote[] }) {
   return <section className="quote-return-alert" role="status"><div className="quote-alert-icon"><Icon name="check" size={20} /></div><div className="quote-alert-copy"><span className="eyebrow">Retorno disponível</span><h2>As informações solicitadas já foram retornadas</h2><p>As cotações abaixo estão aguardando sua ação. Confira os dados e aprove ou reprove cada uma.</p><div className="quote-alert-list">{quotes.slice(0, 4).map((quote) => <div key={quote.id}><strong>PN {quote.partNumber}</strong><span>Aguardando sua ação</span></div>)}</div>{quotes.length > 4 && <small>+{quotes.length - 4} retornos disponíveis abaixo.</small>}</div></section>;
 }
 function QuoteMetrics({ quotes }: { quotes: Quote[] }) {
-  const orders = quotes.filter((quote) => quote.status === "order_input").length;
-  const rejected = quotes.filter((quote) => quote.status === "rejected").length;
-  const decided = quotes.filter((quote) => ["approved", "rejected", "order_pending", "order_input"].includes(quote.status)).length;
-  const approved = quotes.filter((quote) => ["approved", "order_pending", "order_input"].includes(quote.status)).length;
+  const orders = quotes.filter((quote) => quote.status === "order_generated").length;
+  const rejected = quotes.filter((quote) => quote.status === "closed").length;
+  const decided = quotes.filter((quote) => ["awaiting_order", "closed", "order_generated"].includes(quote.status)).length;
+  const approved = quotes.filter((quote) => ["awaiting_order", "order_generated"].includes(quote.status)).length;
   const conversion = quotes.length ? Math.round((orders / quotes.length) * 100) : 0;
   const approval = decided ? Math.round((approved / decided) * 100) : 0;
-  const pending = quotes.filter((quote) => ["global_review", "data_pending"].includes(quote.status)).length;
+  const pending = quotes.filter((quote) => ["awaiting_quote", "awaiting_cost_review"].includes(quote.status)).length;
   return <section className="quote-metrics-block"><div className="section-heading"><div><span className="eyebrow">Gestão de cotações</span><h2>Indicadores de cotações</h2><p>Acompanhe o volume solicitado, a conversão em pedido e os pontos de atenção.</p></div></div><div className="metric-grid quote-metrics"><MetricCard label="PNs solicitados" value={String(quotes.length)} meta="Cotações registradas" icon="file" tone="red" /><MetricCard label="Viraram pedido" value={String(orders)} meta={`${conversion}% do total solicitado`} icon="check" tone="green" /><MetricCard label="Negativa para pedido" value={String(rejected)} meta="Reprovadas pela Concessionária" icon="close" tone="amber" /><MetricCard label="Taxa de aprovação" value={`${approval}%`} meta={`${approved} aprovadas ou em pedido`} icon="trend" tone="dark" /><MetricCard label="Em análise" value={String(pending)} meta="Aguardando Gestão Global / ADM" icon="clock" tone="amber" /></div></section>;
 }
 function QuoteCard({ quote, me, onChanged }: { quote: Quote; me: CurrentAccess; onChanged: () => Promise<void> }) {
   const [description, setDescription] = useState(quote.description); const [ncm, setNcm] = useState(quote.ncm); const [vt, setVt] = useState(quote.vt); const [price, setPrice] = useState(quote.netPriceCents ? formatMoneyInput(String(quote.netPriceCents / 100).replace(".", ",")) : ""); const [approvedQuantity, setApprovedQuantity] = useState(String(quote.approvedQuantity ?? quote.requestedQuantity ?? 1)); const [note, setNote] = useState(""); const [orderNumber, setOrderNumber] = useState(quote.horschOrderNumber || ""); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
   const origin = quoteOriginFromVt(vt) || quote.origin;
-  const review = quote.isActionOwner && ["general_admin", "global_management"].includes(me.role) && ["global_review", "data_pending"].includes(quote.status); const decide = quote.isActionOwner && ["general_admin", "dealer_manager", "concession"].includes(me.role) && quote.status === "returned"; const place = quote.isActionOwner && ["general_admin", "factory_manager"].includes(me.role) && quote.status === "order_pending";
+  const review = quote.isActionOwner && ["general_admin", "global_management"].includes(me.role) && ["awaiting_quote", "awaiting_cost_review"].includes(quote.status); const decide = quote.isActionOwner && me.role === "dealer_manager" && quote.status === "awaiting_dealer_acceptance"; const place = quote.isActionOwner && me.role === "factory_manager" && quote.status === "awaiting_order";
   async function action(name: string) {
     setSaving(true); setError("");
     const response = await fetch("/api/quotes", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: quote.id, action: name, description, ncm, vt, origin, netPriceCents: parseMoneyToCents(price), approvedQuantity: Number(approvedQuantity), horschOrderNumber: orderNumber, actionNote: note }) });
