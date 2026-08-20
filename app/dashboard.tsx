@@ -1715,6 +1715,7 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
   const invoiceTotalCents = proposal.items.reduce((sum, item) => sum + (item.invoiceUnitPriceCents ?? 0) * item.quantity, 0);
   const isAwaitingFactoryOrder = ["awaiting_order", "approved"].includes(status);
   const isWorkflow = ["awaiting_global", "in_analysis", "awaiting_dealer_acceptance", "awaiting_order", "awaiting_order_number", "approved", "order_generated", "reproved"].includes(status);
+  const canEditAcceptedProposal = me.role === "general_admin" && ["approved", "awaiting_order", "awaiting_order_number", "order_generated"].includes(status);
   const canClaimWorkflow = ["general_admin", "global_management"].includes(me.role) && status === "awaiting_global";
   const canOfferWorkflow = ["general_admin", "global_management"].includes(me.role) && status === "in_analysis" && (me.role === "general_admin" || proposal.claimedByEmail === me.email);
   const canAcceptWorkflow = me.role === "dealer_manager" && proposal.isActionOwner && status === "awaiting_dealer_acceptance";
@@ -1924,7 +1925,7 @@ function ProposalPreview({ proposal, me, onClose, onEdit, onUpdated, onDeleted }
                 Excluir
               </button>
             )}
-            {!isWorkflow && canEdit && <button type="button" className="outline-button dark" onClick={onEdit}>Editar proposta</button>}
+            {((!isWorkflow && canEdit) || canEditAcceptedProposal) && <button type="button" className="outline-button dark" onClick={onEdit}>Editar proposta</button>}
             {!isWorkflow && !decisionOpen && proposal.isActionOwner && status !== "expired" && emailStatus !== "sent" && (
               <button
                 type="button"
