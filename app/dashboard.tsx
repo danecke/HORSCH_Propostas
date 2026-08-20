@@ -697,8 +697,7 @@ function QuoteAnalysisDetailLegacy({ insight, canManagePriceList, updating, onTo
 }
 
 function QuotesView({ quotes, me, onChanged }: { quotes: Quote[]; me: CurrentAccess; onChanged: () => Promise<void> }) {
-  const [section, setSection] = useState<"flow" | "analysis">("flow");
-  const [historyOpen, setHistoryOpen] = useState(false);
+  const [section, setSection] = useState<"flow" | "history" | "analysis">("flow");
   const [pn, setPn] = useState(""); const [quantity, setQuantity] = useState("1"); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
   const openQuotes = quotes.filter((quote) => isOpenQuoteStatus(quote.status));
   const historyQuotes = quotes.filter((quote) => !isOpenQuoteStatus(quote.status));
@@ -711,11 +710,11 @@ function QuotesView({ quotes, me, onChanged }: { quotes: Quote[]; me: CurrentAcc
     setPn(""); setQuantity("1"); setSaving(false); await onChanged();
   }
   const canRequestQuote = me.permissions.requestQuote;
-  return <div className="content-frame quotes-shell"><header className="page-heading quote-page-heading"><div><span className="eyebrow">Peças</span><h1>Cotações</h1></div><div className="quotes-tabs" role="tablist"><button type="button" className={section === "flow" ? "active" : ""} onClick={() => setSection("flow")}>Fluxo</button>{me.permissions.analyzeQuotes && <button type="button" className={section === "analysis" ? "active" : ""} onClick={() => setSection("analysis")}>360º</button>}</div></header>
-    {section === "analysis" ? <QuoteAnalysisView quotes={quotes} me={me} onChanged={onChanged} /> : <>
+  return <div className="content-frame quotes-shell"><header className="page-heading quote-page-heading"><div><span className="eyebrow">Peças</span><h1>Cotações</h1></div><div className="quotes-tabs" role="tablist" aria-label="Visões de cotações"><button type="button" className={section === "flow" ? "active" : ""} onClick={() => setSection("flow")}>Fluxo</button><button type="button" className={section === "history" ? "active" : ""} onClick={() => setSection("history")}>Histórico <span className="quotes-tab-count">{historyQuotes.length}</span></button>{me.permissions.analyzeQuotes && <button type="button" className={section === "analysis" ? "active" : ""} onClick={() => setSection("analysis")}>360º</button>}</div></header>
+    {section === "analysis" ? <QuoteAnalysisView quotes={quotes} me={me} onChanged={onChanged} /> : section === "history" ? <QuoteHistoryView quotes={historyQuotes} me={me} onChanged={onChanged} /> : <>
     {globalView && <QuoteMetrics quotes={quotes} />}
     {canRequestQuote && <form className="panel quote-request-panel" onSubmit={(event) => void submit(event)}><div className="quote-request-copy"><span className="eyebrow">Nova solicitação</span><strong>Solicitar cotação</strong></div><div className="quote-request-fields"><label className="field"><span>PN necessário</span><input value={pn} onChange={(event) => setPn(event.target.value)} placeholder="Ex.: 34061200" required /></label><label className="field"><span>Qtd.</span><input type="number" min="1" value={quantity} onChange={(event) => setQuantity(event.target.value)} required /></label><button className="primary-button" disabled={saving}>{saving ? "Enviando..." : "Solicitar"}</button></div>{error && <p className="form-error">{error}</p>}</form>}
-    <section className="quote-workspace-grid"><div className="quote-active-column"><header className="quote-queue-heading"><div><span className="eyebrow">Fila de trabalho</span><h2>Cotações que exigem ação</h2><p>Somente solicitações em aberto ou aguardando a próxima etapa aparecem nesta visão.</p></div><strong>{openQuotes.length} abertas</strong></header><section className="quote-list">{openQuotes.length ? openQuotes.map((quote) => <QuoteCard key={quote.id} quote={quote} me={me} onChanged={onChanged} />) : <article className="panel"><EmptyState title="Nenhuma cotação em aberto" text={me.permissions.requestQuote ? "Solicite um novo PN para iniciar o fluxo." : "Não há solicitações pendentes no seu escopo."} /></article>}</section></div><QuoteHistoryFolder quotes={historyQuotes} open={historyOpen} onToggle={() => setHistoryOpen((current) => !current)} /></section>
+    <section className="quote-active-column"><header className="quote-queue-heading"><div><span className="eyebrow">Fila de trabalho</span><h2>Cotações que exigem ação</h2><p>Somente solicitações em aberto ou aguardando a próxima etapa aparecem nesta visão.</p></div><strong>{openQuotes.length} abertas</strong></header><section className="quote-list">{openQuotes.length ? openQuotes.map((quote) => <QuoteCard key={quote.id} quote={quote} me={me} onChanged={onChanged} />) : <article className="panel"><EmptyState title="Nenhuma cotação em aberto" text={me.permissions.requestQuote ? "Solicite um novo PN para iniciar o fluxo." : "Não há solicitações pendentes no seu escopo."} /></article>}</section></section>
     </>}
   </div>;
 }
@@ -724,15 +723,21 @@ function isOpenQuoteStatus(status: QuoteStatus) {
   return ["awaiting_quote", "awaiting_dealer_acceptance", "awaiting_cost_review", "awaiting_order"].includes(status);
 }
 
-function QuoteHistoryFolder({ quotes, open, onToggle }: { quotes: Quote[]; open: boolean; onToggle: () => void }) {
-  return <aside className={`quote-history-folder ${open ? "open" : ""}`} aria-label="Histórico de cotações">
-    <button type="button" className="quote-history-tab" onClick={onToggle} aria-expanded={open}>
-      <span className="quote-history-icon"><Icon name="history" size={20} /></span>
-      <span><strong>Histórico</strong><small>Cotações concluídas</small></span>
-      <b>{quotes.length}</b>
-    </button>
-    {open && <div className="quote-history-panel"><header><div><span className="eyebrow">Arquivo</span><h2>Histórico de cotações</h2><p>Registros encerrados e pedidos já gerados.</p></div><button type="button" className="icon-button" onClick={onToggle} aria-label="Fechar histórico"><Icon name="close" size={16} /></button></header><div className="quote-history-list">{quotes.length ? quotes.map((quote) => <article className="quote-history-row" key={quote.id}><div><strong>PN {quote.partNumber}</strong><small>{quote.dealership} · {formatDateTime(quote.updatedAt || quote.requestedAt)}</small></div><div><span className={`status-badge quote-status ${quote.status}`}><i />{quote.statusLabel}</span>{quote.horschOrderNumber && <small>Pedido {quote.horschOrderNumber}</small>}</div></article>) : <EmptyMini text="Nenhuma cotação concluída." />}</div></div>}
-  </aside>;
+function QuoteHistoryView({ quotes, me, onChanged }: { quotes: Quote[]; me: CurrentAccess; onChanged: () => Promise<void> }) {
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState<"all" | QuoteStatus>("all");
+  const [dealership, setDealership] = useState("all");
+  const dealerships = useMemo(() => [...new Set(quotes.map((quote) => quote.dealership).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR")), [quotes]);
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return quotes.filter((quote) => {
+      const matchesSearch = !term || [quote.id, quote.partNumber, quote.dealership, quote.requestedByName, quote.horschOrderNumber].some((value) => value.toLowerCase().includes(term));
+      return matchesSearch && (status === "all" || quote.status === status) && (dealership === "all" || quote.dealership === dealership);
+    });
+  }, [dealership, quotes, search, status]);
+  const orderCount = quotes.filter((quote) => quote.status === "order_generated").length;
+  const closedCount = quotes.filter((quote) => quote.status === "closed").length;
+  return <section className="quote-history-view"><header className="quote-history-heading"><div><span className="eyebrow">Arquivo completo</span><h2>Histórico de cotações</h2><p>Consulte todos os registros encerrados e pedidos gerados no seu escopo.</p></div><strong>{filtered.length} de {quotes.length} registros</strong></header><div className="quote-history-metrics"><MetricCard label="Registros" value={String(quotes.length)} meta="Cotações concluídas" icon="file" tone="dark" /><MetricCard label="Pedidos gerados" value={String(orderCount)} meta="Pedidos lançados pela Fábrica" icon="check" tone="green" /><MetricCard label="Encerradas" value={String(closedCount)} meta="Reprovadas pela Concessionária" icon="close" tone="amber" /></div><section className="panel quote-history-toolbar"><label className="field"><span>Buscar no histórico</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="PN, cotação, concessionária ou pedido" /></label><label className="field"><span>Status</span><select value={status} onChange={(event) => setStatus(event.target.value as "all" | QuoteStatus)}><option value="all">Todos os status</option><option value="order_generated">Pedido Gerado</option><option value="closed">Encerrada</option></select></label><label className="field"><span>Concessionária</span><select value={dealership} onChange={(event) => setDealership(event.target.value)}><option value="all">Todas as concessionárias</option>{dealerships.map((name) => <option value={name} key={name}>{name}</option>)}</select></label></section><section className="quote-history-full-list">{filtered.length ? filtered.map((quote) => <QuoteCard key={quote.id} quote={quote} me={me} onChanged={onChanged} />) : <article className="panel"><EmptyState title="Nenhum registro encontrado" text={quotes.length ? "Ajuste os filtros para consultar o histórico completo." : "Ainda não há cotações concluídas no seu escopo."} /></article>}</section></section>;
 }
 function QuoteMetrics({ quotes }: { quotes: Quote[] }) {
   const orders = quotes.filter((quote) => quote.status === "order_generated").length;

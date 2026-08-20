@@ -1826,6 +1826,22 @@ body {
   .content-frame { padding-top: 28px; }
 }
 
+.quotes-tabs .quotes-tab-count { display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: 4px; padding: 0 4px; border-radius: 10px; color: var(--horsch-navy); background: #e8efeb; font-size: 8px; }
+.quotes-tabs button.active .quotes-tab-count { color: #fff; background: var(--horsch-red); }
+.quote-history-view { display: grid; gap: 16px; }
+.quote-history-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; padding: 4px 0 2px; }
+.quote-history-heading h2 { margin: 3px 0 0; color: var(--horsch-navy); font-size: 22px; letter-spacing: -.03em; }
+.quote-history-heading p { margin: 6px 0 0; color: var(--horsch-muted); font-size: 11px; }
+.quote-history-heading > strong { color: var(--horsch-muted); font-size: 10px; white-space: nowrap; }
+.quote-history-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.quote-history-metrics .metric-card { min-height: 112px; padding: 15px 17px; }
+.quote-history-toolbar { display: grid; grid-template-columns: minmax(260px, 1.5fr) minmax(160px, .7fr) minmax(220px, 1fr); gap: 12px; padding: 15px 17px; border-top: 3px solid var(--horsch-steel); }
+.quote-history-full-list { display: grid; gap: 12px; }
+@media (max-width: 760px) {
+  .quote-history-heading { display: grid; align-items: start; }
+  .quote-history-metrics, .quote-history-toolbar { grid-template-columns: 1fr; }
+}
+
 @media (max-width: 720px) {
   .content-frame { padding-inline: 17px; padding-bottom: 94px; }
   .page-heading { align-items: flex-start; flex-direction: column; gap: 16px; }
