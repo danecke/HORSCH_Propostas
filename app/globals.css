@@ -637,6 +637,15 @@ button { cursor: pointer; }
 .quote-request-fields { grid-template-columns: minmax(0, 1fr) 90px minmax(150px, .7fr) auto; }
 .quote-request-fields select { width: 100%; height: 41px; padding: 0 11px; border: 1px solid #d7dade; color: var(--ink); background: white; font-size: 11px; }
 .quote-request-panel .quote-observation-field { margin-top: 0; }
+.quote-import-panel { display: grid; gap: 14px; margin: 0 0 16px; padding: 17px 20px; border-top: 3px solid var(--horsch-steel); }
+.quote-import-panel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.quote-import-panel h2 { margin: 3px 0 0; color: var(--horsch-navy); font-size: 17px; }
+.quote-import-panel p { margin: 5px 0 0; color: var(--horsch-muted); font-size: 10px; line-height: 1.45; }
+.quote-import-badge { padding: 5px 8px; border: 1px solid #c7d5ce; color: var(--horsch-navy); background: #f3f7f5; font-size: 9px; font-weight: 800; letter-spacing: .08em; }
+.quote-import-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: end; }
+.quote-import-form small { display: block; margin-top: 5px; color: var(--horsch-muted); font-size: 9px; line-height: 1.4; }
+.quote-import-result { padding: 9px 11px; border-left: 3px solid var(--horsch-red); background: #faf4f3; }
+@media (max-width:780px) { .quote-import-form { grid-template-columns: 1fr; } .quote-import-form button { width: 100%; } }
 .quote-request-observation { padding: 9px 11px; }
 .quote-card-header p { display: none; }
 .quote-meta-grid small { color: #85898e; }

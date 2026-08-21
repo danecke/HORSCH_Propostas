@@ -3,6 +3,7 @@ import { getDb } from "../../../db";
 import { dealerships, priceListImports, priceListItems, quoteCatalog, quoteOutboxEvents, quotePriceListControl, quoteRequests, userDealerships, users } from "../../../db/schema";
 import { recordAudit } from "../../../lib/audit";
 import { getAccessProfile, isModuleEnabled, normalizeUserRole, profileHasDealership } from "../../../lib/access";
+import { parseQuoteImport, type QuoteImportRow } from "../../../lib/quote-import";
 export const dynamic = "force-dynamic";
 const DAY = 86400000;
 function forbidden() { return Response.json({ error: "Seu perfil não possui acesso às cotações." }, { status: 403 }); }
@@ -36,6 +37,69 @@ async function findDealerManager(db: Awaited<ReturnType<typeof getDb>>, dealersh
     return user.active && role === "dealer_manager" && (user.dealershipId === dealershipId || linkedEmails.has(user.email.trim().toLowerCase()));
   }) || null;
 }
+function importKey(value: unknown) {
+  return String(value ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+async function importQuoteResponses(request: Request, profile: NonNullable<Awaited<ReturnType<typeof getAccessProfile>>>) {
+  const form = await request.formData();
+  const file = form.get("file");
+  if (!(file instanceof File)) return Response.json({ error: "Selecione uma planilha de respostas." }, { status: 400 });
+  if (!/\.(xlsx|csv|tsv)$/i.test(file.name)) return Response.json({ error: "Envie um arquivo Excel (.xlsx), CSV ou TSV." }, { status: 400 });
+  const rows = parseQuoteImport(new Uint8Array(await file.arrayBuffer()), file.name);
+  const db = await getDb();
+  const [pending, dealers] = await Promise.all([
+    db.select().from(quoteRequests),
+    db.select().from(dealerships),
+  ]);
+  const dealerById = new Map(dealers.map((dealer) => [dealer.id, dealer]));
+  const now = new Date().toISOString();
+  const updated: string[] = [];
+  const skipped: Array<{ row: number; reason: string }> = [];
+  for (const row of rows as QuoteImportRow[]) {
+    if (!row.partNumber || !row.description || !row.vt || row.netPriceCents <= 0) {
+      skipped.push({ row: row.rowNumber, reason: "PN, descrição, VT e Net Price são obrigatórios." });
+      continue;
+    }
+    const matches = pending.filter((quote) =>
+      ["awaiting_quote", "awaiting_cost_review"].includes(quote.status) &&
+      importKey(quote.partNumber) === importKey(row.partNumber) &&
+      (!row.dealership || importKey(dealerById.get(quote.dealershipId)?.name) === importKey(row.dealership)),
+    );
+    if (!matches.length) {
+      skipped.push({ row: row.rowNumber, reason: row.dealership ? `Nenhuma cotação aberta para PN ${row.partNumber} na concessionária informada.` : `Nenhuma cotação aberta encontrada para o PN ${row.partNumber}.` });
+      continue;
+    }
+    for (const quote of matches) {
+      const manager = await findDealerManager(db, quote.dealershipId);
+      if (!manager) {
+        skipped.push({ row: row.rowNumber, reason: `Não há Gestor do Concessionário ativo para ${dealerById.get(quote.dealershipId)?.name || quote.dealershipId}.` });
+        continue;
+      }
+      const vt = row.vt.trim();
+      const origin = deriveOrigin(vt);
+      const note = row.comments || `Resposta importada pelo ADM em ${now.slice(0, 10)}.`;
+      await db.update(quoteRequests).set({
+        requestedQuantity: row.quantity || quote.requestedQuantity,
+        status: "awaiting_dealer_acceptance",
+        actionOwnerRole: "dealer_manager",
+        actionOwnerEmail: manager.email,
+        description: row.description,
+        ncm: row.ncm || quote.ncm,
+        vt,
+        origin,
+        netPriceCents: row.netPriceCents,
+        catalogImportedAt: now,
+        actionNote: note,
+        returnedAt: now,
+        updatedAt: now,
+      }).where(eq(quoteRequests.id, quote.id));
+      await db.insert(quoteCatalog).values({ partNumber: quote.partNumber, description: row.description, ncm: row.ncm || quote.ncm, vt, origin, netPriceCents: row.netPriceCents, importedAt: now, updatedAt: now }).onConflictDoUpdate({ target: quoteCatalog.partNumber, set: { description: row.description, ncm: row.ncm || quote.ncm, vt, origin, netPriceCents: row.netPriceCents, importedAt: now, updatedAt: now } });
+      await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "quote_response_imported", entity: "quote", details: `Resposta da cotação ${quote.id} importada pelo ADM para o PN ${quote.partNumber}.`, before: { status: quote.status }, after: { status: "awaiting_dealer_acceptance", returnedAt: now, actionOwnerEmail: manager.email, sourceFile: file.name } });
+      updated.push(quote.id);
+    }
+  }
+  return Response.json({ ok: true, fileName: file.name, rowsRead: rows.length, updatedCount: updated.length, updatedQuoteIds: updated, skipped });
+}
 function errorMessage(error: unknown) { const message = error instanceof Error ? error.message : "Erro inesperado."; return message.includes("no such table") ? "A estrutura de cotações ainda está sendo preparada. Tente novamente." : message; }
 export async function GET() {
   const profile = await getAccessProfile();
@@ -68,7 +132,11 @@ export async function GET() {
 }
 export async function POST(request: Request) {
   const profile = await getAccessProfile();
-  if (!profile || !["dealer_manager", "concession"].includes(profile.role)) return forbidden();
+  if (!profile) return forbidden();
+  if (profile.role === "general_admin" && request.headers.get("content-type")?.toLowerCase().includes("multipart/form-data")) {
+    try { return await importQuoteResponses(request, profile); } catch (error) { return Response.json({ error: errorMessage(error) }, { status: 400 }); }
+  }
+  if (!["dealer_manager", "concession"].includes(profile.role)) return forbidden();
   try {
     const payload = (await request.json()) as { partNumber?: string; quantity?: number; priority?: string };
     const partNumber = payload.partNumber?.trim();

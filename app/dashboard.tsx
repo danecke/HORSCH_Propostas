@@ -703,9 +703,11 @@ function QuoteAnalysisDetailLegacy({ insight, canManagePriceList, updating, onTo
 function QuotesView({ quotes, me, onChanged }: { quotes: Quote[]; me: CurrentAccess; onChanged: () => Promise<void> }) {
   const [section, setSection] = useState<"flow" | "history" | "analysis">("flow");
   const [pn, setPn] = useState(""); const [quantity, setQuantity] = useState("1"); const [priority, setPriority] = useState<QuotePriority>("normal"); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
+  const [importFile, setImportFile] = useState<File | null>(null); const [importSaving, setImportSaving] = useState(false); const [importMessage, setImportMessage] = useState("");
   const openQuotes = quotes.filter((quote) => isOpenQuoteStatus(quote.status));
   const historyQuotes = quotes.filter((quote) => !isOpenQuoteStatus(quote.status));
   const globalView = ["general_admin", "global_management"].includes(me.role);
+  const canImportResponses = me.role === "general_admin";
   async function submit(event: FormEvent) {
     event.preventDefault(); setSaving(true); setError("");
     const response = await fetch("/api/quotes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ partNumber: pn, quantity: Number(quantity), priority }) });
@@ -713,10 +715,27 @@ function QuotesView({ quotes, me, onChanged }: { quotes: Quote[]; me: CurrentAcc
     if (!response.ok) { setError(payload.error || "Não foi possível solicitar a cotação."); setSaving(false); return; }
     setPn(""); setQuantity("1"); setPriority("normal"); setSaving(false); await onChanged();
   }
+  async function importResponses(event: FormEvent) {
+    event.preventDefault();
+    if (!importFile) { setImportMessage("Selecione uma planilha para importar."); return; }
+    setImportSaving(true); setImportMessage("");
+    const form = new FormData(); form.set("file", importFile);
+    try {
+      const response = await fetch("/api/quotes", { method: "POST", body: form });
+      const payload = (await response.json()) as { error?: string; rowsRead?: number; updatedCount?: number; skipped?: Array<{ row: number; reason: string }> };
+      if (!response.ok) throw new Error(payload.error || "Não foi possível importar as respostas.");
+      const skipped = payload.skipped?.length ?? 0;
+      setImportMessage(`${payload.updatedCount ?? 0} cotação(ões) respondida(s) hoje. ${skipped ? `${skipped} linha(s) ficaram pendentes para conferência.` : "Todas as linhas foram vinculadas."}`);
+      setImportFile(null);
+      await onChanged();
+    } catch (importError) { setImportMessage(importError instanceof Error ? importError.message : "Não foi possível importar as respostas."); }
+    finally { setImportSaving(false); }
+  }
   const canRequestQuote = me.permissions.requestQuote;
   return <div className="content-frame quotes-shell"><header className="page-heading quote-page-heading"><div><span className="eyebrow">Peças</span><h1>Cotações</h1></div><div className="quotes-tabs" role="tablist" aria-label="Visões de cotações"><button type="button" className={section === "flow" ? "active" : ""} onClick={() => setSection("flow")}>Fluxo</button><button type="button" className={section === "history" ? "active" : ""} onClick={() => setSection("history")}>Histórico <span className="quotes-tab-count">{historyQuotes.length}</span></button>{me.permissions.analyzeQuotes && <button type="button" className={section === "analysis" ? "active" : ""} onClick={() => setSection("analysis")}>360º</button>}</div></header>
     {section === "analysis" ? <QuoteAnalysisView quotes={quotes} me={me} onChanged={onChanged} /> : section === "history" ? <QuoteHistoryView quotes={historyQuotes} me={me} onChanged={onChanged} /> : <>
     {globalView && <QuoteMetrics quotes={quotes} />}
+    {canImportResponses && <section className="panel quote-import-panel"><header><div><span className="eyebrow">Carga administrativa</span><h2>Importar respostas de hoje</h2><p>Use uma base já preenchida para retornar várias cotações de uma vez ao Gestor do Concessionário.</p></div><span className="quote-import-badge">ADM</span></header><form className="quote-import-form" onSubmit={(event) => void importResponses(event)}><label className="field"><span>Planilha de respostas</span><input type="file" accept=".xlsx,.csv,.tsv" onChange={(event) => setImportFile(event.target.files?.[0] ?? null)} required /><small>Colunas obrigatórias: PN, Descrição, VT e Net Price. NCM, comentários, quantidade e concessionária são opcionais.</small></label><button type="submit" className="primary-button" disabled={importSaving || !importFile}>{importSaving ? "Importando..." : "Importar e retornar hoje"}</button></form>{importMessage && <p className="quote-import-result" role="status">{importMessage}</p>}</section>}
     {canRequestQuote && <form className="panel quote-request-panel" onSubmit={(event) => void submit(event)}><div className="quote-request-copy"><span className="eyebrow">Nova solicitação</span><strong>Solicitar cotação</strong></div><div className="quote-request-fields"><label className="field"><span>PN necessário</span><input value={pn} onChange={(event) => setPn(event.target.value)} placeholder="Ex.: 34061200" required /></label><label className="field"><span>Qtd.</span><input type="number" min="1" value={quantity} onChange={(event) => setQuantity(event.target.value)} required /></label><label className="field"><span>Prioridade</span><select value={priority} onChange={(event) => setPriority(event.target.value as QuotePriority)}><option value="machine_stopped">{quotePriorityLabel("machine_stopped")}</option><option value="urgent">{quotePriorityLabel("urgent")}</option><option value="normal">{quotePriorityLabel("normal")}</option></select></label><button className="primary-button" disabled={saving}>{saving ? "Enviando..." : "Solicitar"}</button></div>{error && <p className="form-error">{error}</p>}</form>}
     <section className="quote-active-column"><header className="quote-queue-heading"><div><span className="eyebrow">Fila de trabalho</span><h2>Cotações que exigem ação</h2><p>Somente solicitações em aberto ou aguardando a próxima etapa aparecem nesta visão.</p></div><strong>{openQuotes.length} abertas</strong></header><section className="quote-list">{openQuotes.length ? openQuotes.map((quote) => <QuoteCard key={quote.id} quote={quote} me={me} onChanged={onChanged} />) : <article className="panel"><EmptyState title="Nenhuma cotação em aberto" text={me.permissions.requestQuote ? "Solicite um novo PN para iniciar o fluxo." : "Não há solicitações pendentes no seu escopo."} /></article>}</section></section>
     </>}
