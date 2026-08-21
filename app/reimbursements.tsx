@@ -49,6 +49,7 @@ type Sale = {
   negotiationCents: number;
   expectedN3Cents: number | null;
   priceDifferenceCents: number | null;
+  duplicateKey: string; baseSource: string; baseStatus: string; reasonCode: string; historicalMarginBps: number | null; marginVariationBps: number | null; justification: string; justificationStatus: string;
 };
 type Summary = {
   salesCents: number;
@@ -112,7 +113,7 @@ function formatPercent(basisPoints: number) {
 function statusClass(status: string) {
   if (status.includes("Negociação") || status.includes("Divergência") || status.includes("Duplicada")) return "danger";
   if (status.includes("Elegível")) return "success";
-  if (status.includes("Não Elegível") || status.includes("Encontrado") || status.includes("Cadastro")) return "warning";
+  if (status.includes("Não Elegível") || status.includes("Encontrado") || status.includes("Cadastro") || status.includes("Pendente") || status.includes("Aprovação Manual")) return "warning";
   return "neutral";
 }
 
@@ -291,6 +292,8 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
       setBusy(false);
     }
   }
+
+  async function runLineAction(sale: Sale, action: string) { let note = ""; let netPriceCents: number | undefined; if (action === "submit_justification") { note = window.prompt("Explique a variação de margem:") ?? ""; if (note.trim().length < 5) { setError("Informe uma justificativa válida."); return; } } if (action === "manual_base_set_net_price") { const value = window.prompt("Net Price unitário correto:", ""); if (!value) return; netPriceCents = Math.round(Number(value.replace(",", ".")) * 100); } setBusy(true); try { const response = await fetch("/api/reimbursements", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lineId: sale.id, action, note, netPriceCents }) }); const payload = await response.json() as { error?: string }; if (!response.ok) throw new Error(payload.error || "Não foi possível atualizar a linha."); setMessage("Linha atualizada."); await load(); } catch (e) { setError(e instanceof Error ? e.message : "Não foi possível atualizar a linha."); } finally { setBusy(false); } }
 
   async function saveClient(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -509,7 +512,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
 
           <div className="reimbursement-table-wrap wide">
             <table className="reimbursement-table reimbursement-detail-table">
-              <thead><tr><th>PN</th><th>Descrição</th><th>Cliente / CPF-CNPJ</th><th>NF / UF</th><th>Concessionário</th><th>Qtd.</th><th>Custo total</th><th>Valor líquido</th><th>Margem</th><th>Base usada</th><th>Reembolso</th><th>Status</th><th>Negociação</th></tr></thead>
+              <thead><tr><th>PN</th><th>Descrição</th><th>Cliente / CPF-CNPJ</th><th>NF / UF</th><th>Concessionário</th><th>Qtd.</th><th>Custo total</th><th>Valor líquido</th><th>Margem</th><th>Base usada</th><th>Reembolso</th><th>Status / validação</th><th>Ações</th></tr></thead>
               <tbody>
                 {data.sales.map((sale) => (
                   <tr key={sale.id}>
@@ -525,7 +528,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
                     <td><strong>{formatBRL(sale.calculationBaseCents)}</strong><small>{sale.netPriceUsedCents === null ? "Custo médio (fallback)" : `Net Price: ${formatBRL(sale.netPriceUsedCents)}`}</small></td>
                     <td><strong>{formatBRL(sale.reimbursementCents)}</strong><small>{sale.reimbursementProgram || "Sem programa"}</small></td>
                     <td><span className={`reimbursement-status ${statusClass(sale.status)}`}>{sale.status}</span>{sale.expectedN3Cents !== null && <small>N3 ref.: {formatBRL(sale.expectedN3Cents)} · Δ {signedBRL(sale.priceDifferenceCents)}</small>}</td>
-                    <td>{formatBRL(sale.negotiationCents)}</td>
+                    <td><div className="reimbursement-row-actions">{sale.status === "Aprovação Manual - Base de Cálculo" && canManageClients && <><button className="outline-button compact" onClick={() => void runLineAction(sale, "manual_base_set_net_price")}>Definir Net Price</button><button className="outline-button compact" onClick={() => void runLineAction(sale, "manual_base_approve_cost")}>Aprovar custo</button></>}{sale.status === "Pendente Justificativa" && dealerScoped && <button className="outline-button compact" onClick={() => void runLineAction(sale, "submit_justification")}>Justificar</button>}{sale.status === "Pendente Justificativa" && canReview && <><button className="primary-button compact" onClick={() => void runLineAction(sale, "approve_justification")}>Aprovar</button><button className="danger-button compact" onClick={() => void runLineAction(sale, "reject_justification")}>Rejeitar</button></>}</div><small>{formatBRL(sale.negotiationCents)} em negociação</small></td>
                   </tr>
                 ))}
               </tbody>

@@ -24,6 +24,8 @@ export async function ensureReimbursementStorage() {
   const { env } = await import("cloudflare:workers");
   if (!env.DB) throw new Error("Cloudflare D1 binding `DB` indisponível.");
   await env.DB.batch(TABLE_STATEMENTS.map((statement) => env.DB.prepare(statement)));
+  const additions: Record<string, Record<string, string>> = { reimbursement_imports: { tolerance_bps: "INTEGER NOT NULL DEFAULT 500" }, reimbursement_sales: { duplicate_key: "TEXT NOT NULL DEFAULT ''", base_source: "TEXT NOT NULL DEFAULT 'NET_PRICE_VIGENTE'", base_status: "TEXT NOT NULL DEFAULT ''", reason_code: "TEXT NOT NULL DEFAULT ''", historical_margin_bps: "INTEGER", margin_variation_bps: "INTEGER", justification: "TEXT NOT NULL DEFAULT ''", justification_status: "TEXT NOT NULL DEFAULT ''" }, reimbursement_approvals: { line_id: "INTEGER" } };
+  for (const [table, columns] of Object.entries(additions)) { const info = await env.DB.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>(); const existing = new Set((info.results ?? []).map((column) => column.name)); for (const [column, definition] of Object.entries(columns)) if (!existing.has(column)) await env.DB.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run(); }
+  await env.DB.prepare("CREATE INDEX IF NOT EXISTS reimbursement_sales_duplicate_key_idx ON reimbursement_sales(duplicate_key)").run();
   return getDb();
 }
-
