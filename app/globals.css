@@ -634,12 +634,17 @@ button { cursor: pointer; }
 .quote-page-heading p { display: none; }
 .quote-request-panel { grid-template-columns: minmax(150px, .45fr) minmax(0, 1.55fr); }
 .quote-request-copy span:last-child { display: none; }
-.quote-request-fields { grid-template-columns: minmax(0, 1fr) 90px auto; }
+.quote-request-fields { grid-template-columns: minmax(0, 1fr) 90px minmax(150px, .7fr) auto; }
+.quote-request-fields select { width: 100%; height: 41px; padding: 0 11px; border: 1px solid #d7dade; color: var(--ink); background: white; font-size: 11px; }
 .quote-request-panel .quote-observation-field { margin-top: 0; }
 .quote-request-observation { padding: 9px 11px; }
 .quote-card-header p { display: none; }
 .quote-meta-grid small { color: #85898e; }
 .quote-meta-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.quote-priority strong { display: inline-block; padding: 4px 7px; border-radius: 3px; font-size: 9px; }
+.quote-priority.machine_stopped strong { color: #8f2838; background: #fff0f2; }
+.quote-priority.urgent strong { color: #8a5d13; background: #fff7e4; }
+.quote-priority.normal strong { color: #315a88; background: #eef5fc; }
 .analysis-item-data + .analysis-detail-metrics { margin-top: 0; border-top: 0; }
 .heading-actions { display: flex; align-items: center; gap: 9px; }
 .proposal-requests-section { margin-bottom: 18px; }

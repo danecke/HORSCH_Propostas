@@ -1,0 +1,1 @@
+ALTER TABLE `quote_requests` ADD `priority` text DEFAULT 'normal' NOT NULL;

@@ -110,9 +110,13 @@ type AnalysisRow = { key: string; value: number; count: number };
 type PartAnalysisRow = AnalysisRow & { quantity: number };
 
 type QuoteStatus = "awaiting_quote" | "awaiting_dealer_acceptance" | "awaiting_cost_review" | "closed" | "awaiting_order" | "order_generated";
+type QuotePriority = "machine_stopped" | "urgent" | "normal";
+const QUOTE_PRIORITY_LABELS: Record<QuotePriority, string> = { machine_stopped: "Máquina parada", urgent: "Urgente", normal: "Normal" };
+function quotePriorityLabel(priority?: string) { return QUOTE_PRIORITY_LABELS[priority as QuotePriority] || QUOTE_PRIORITY_LABELS.normal; }
 type Quote = {
   id: string; partNumber: string; dealershipId: number; dealership: string; city: string; state: string;
   requestedByEmail: string; requestedByName: string; status: QuoteStatus; statusLabel: string;
+  priority: QuotePriority;
   isActionOwner: boolean; actionOwnerRole: string; actionOwnerLabel: string; actionOwnerName: string; actionOwnerEmail: string;
   description: string; ncm: string; vt: string; origin: string; netPriceCents: number | null; targetNetPriceCents: number | null; requestObservation: string; catalogImportedAt: string | null;
   requestedQuantity: number; approvedQuantity: number | null; priceListIncluded: boolean; priceListIncludedAt: string | null; priceListIncludedByEmail: string | null;
@@ -698,22 +702,22 @@ function QuoteAnalysisDetailLegacy({ insight, canManagePriceList, updating, onTo
 
 function QuotesView({ quotes, me, onChanged }: { quotes: Quote[]; me: CurrentAccess; onChanged: () => Promise<void> }) {
   const [section, setSection] = useState<"flow" | "history" | "analysis">("flow");
-  const [pn, setPn] = useState(""); const [quantity, setQuantity] = useState("1"); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
+  const [pn, setPn] = useState(""); const [quantity, setQuantity] = useState("1"); const [priority, setPriority] = useState<QuotePriority>("normal"); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
   const openQuotes = quotes.filter((quote) => isOpenQuoteStatus(quote.status));
   const historyQuotes = quotes.filter((quote) => !isOpenQuoteStatus(quote.status));
   const globalView = ["general_admin", "global_management"].includes(me.role);
   async function submit(event: FormEvent) {
     event.preventDefault(); setSaving(true); setError("");
-    const response = await fetch("/api/quotes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ partNumber: pn, quantity: Number(quantity) }) });
+    const response = await fetch("/api/quotes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ partNumber: pn, quantity: Number(quantity), priority }) });
     const payload = (await response.json()) as { error?: string };
     if (!response.ok) { setError(payload.error || "Não foi possível solicitar a cotação."); setSaving(false); return; }
-    setPn(""); setQuantity("1"); setSaving(false); await onChanged();
+    setPn(""); setQuantity("1"); setPriority("normal"); setSaving(false); await onChanged();
   }
   const canRequestQuote = me.permissions.requestQuote;
   return <div className="content-frame quotes-shell"><header className="page-heading quote-page-heading"><div><span className="eyebrow">Peças</span><h1>Cotações</h1></div><div className="quotes-tabs" role="tablist" aria-label="Visões de cotações"><button type="button" className={section === "flow" ? "active" : ""} onClick={() => setSection("flow")}>Fluxo</button><button type="button" className={section === "history" ? "active" : ""} onClick={() => setSection("history")}>Histórico <span className="quotes-tab-count">{historyQuotes.length}</span></button>{me.permissions.analyzeQuotes && <button type="button" className={section === "analysis" ? "active" : ""} onClick={() => setSection("analysis")}>360º</button>}</div></header>
     {section === "analysis" ? <QuoteAnalysisView quotes={quotes} me={me} onChanged={onChanged} /> : section === "history" ? <QuoteHistoryView quotes={historyQuotes} me={me} onChanged={onChanged} /> : <>
     {globalView && <QuoteMetrics quotes={quotes} />}
-    {canRequestQuote && <form className="panel quote-request-panel" onSubmit={(event) => void submit(event)}><div className="quote-request-copy"><span className="eyebrow">Nova solicitação</span><strong>Solicitar cotação</strong></div><div className="quote-request-fields"><label className="field"><span>PN necessário</span><input value={pn} onChange={(event) => setPn(event.target.value)} placeholder="Ex.: 34061200" required /></label><label className="field"><span>Qtd.</span><input type="number" min="1" value={quantity} onChange={(event) => setQuantity(event.target.value)} required /></label><button className="primary-button" disabled={saving}>{saving ? "Enviando..." : "Solicitar"}</button></div>{error && <p className="form-error">{error}</p>}</form>}
+    {canRequestQuote && <form className="panel quote-request-panel" onSubmit={(event) => void submit(event)}><div className="quote-request-copy"><span className="eyebrow">Nova solicitação</span><strong>Solicitar cotação</strong></div><div className="quote-request-fields"><label className="field"><span>PN necessário</span><input value={pn} onChange={(event) => setPn(event.target.value)} placeholder="Ex.: 34061200" required /></label><label className="field"><span>Qtd.</span><input type="number" min="1" value={quantity} onChange={(event) => setQuantity(event.target.value)} required /></label><label className="field"><span>Prioridade</span><select value={priority} onChange={(event) => setPriority(event.target.value as QuotePriority)}><option value="machine_stopped">{quotePriorityLabel("machine_stopped")}</option><option value="urgent">{quotePriorityLabel("urgent")}</option><option value="normal">{quotePriorityLabel("normal")}</option></select></label><button className="primary-button" disabled={saving}>{saving ? "Enviando..." : "Solicitar"}</button></div>{error && <p className="form-error">{error}</p>}</form>}
     <section className="quote-active-column"><header className="quote-queue-heading"><div><span className="eyebrow">Fila de trabalho</span><h2>Cotações que exigem ação</h2><p>Somente solicitações em aberto ou aguardando a próxima etapa aparecem nesta visão.</p></div><strong>{openQuotes.length} abertas</strong></header><section className="quote-list">{openQuotes.length ? openQuotes.map((quote) => <QuoteCard key={quote.id} quote={quote} me={me} onChanged={onChanged} />) : <article className="panel"><EmptyState title="Nenhuma cotação em aberto" text={me.permissions.requestQuote ? "Solicite um novo PN para iniciar o fluxo." : "Não há solicitações pendentes no seu escopo."} /></article>}</section></section>
     </>}
   </div>;

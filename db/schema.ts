@@ -243,6 +243,7 @@ export const quoteRequests = sqliteTable("quote_requests", {
   requestedByEmail: text("requested_by_email").notNull(),
   requestedByName: text("requested_by_name").notNull().default(""),
   requestedQuantity: integer("requested_quantity").notNull().default(1),
+  priority: text("priority").notNull().default("normal"),
   targetNetPriceCents: integer("target_net_price_cents"),
   requestObservation: text("request_observation").notNull().default(""),
   approvedQuantity: integer("approved_quantity"),

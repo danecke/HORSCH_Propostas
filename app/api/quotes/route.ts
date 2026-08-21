@@ -6,6 +6,9 @@ import { getAccessProfile, isModuleEnabled, normalizeUserRole, profileHasDealers
 export const dynamic = "force-dynamic";
 const DAY = 86400000;
 function forbidden() { return Response.json({ error: "Seu perfil não possui acesso às cotações." }, { status: 403 }); }
+const QUOTE_PRIORITIES = ["machine_stopped", "urgent", "normal"] as const;
+type QuotePriority = typeof QUOTE_PRIORITIES[number];
+function normalizePriority(value: unknown): QuotePriority { return QUOTE_PRIORITIES.includes(value as QuotePriority) ? value as QuotePriority : "normal"; }
 function actionForStatus(status: string) { return ["awaiting_quote", "awaiting_cost_review"].includes(status) ? "global_management" : status === "awaiting_dealer_acceptance" ? "dealer_manager" : status === "awaiting_order" ? "factory_manager" : ""; }
 function statusLabel(status: string) { return ({ awaiting_quote: "Aguardando Cotação", awaiting_dealer_acceptance: "Aguardando Aceite do Concessionário", awaiting_cost_review: "Aguardando Revisão de Custo", closed: "Encerrada", awaiting_order: "Aguardando Pedido", order_generated: "Pedido Gerado" } as Record<string, string>)[status] || status; }
 function deriveOrigin(vt: string) { return vt.trim().toUpperCase().replace(/\s+/g, "").charAt(2) || ""; }
@@ -67,10 +70,11 @@ export async function POST(request: Request) {
   const profile = await getAccessProfile();
   if (!profile || !["dealer_manager", "concession"].includes(profile.role)) return forbidden();
   try {
-    const payload = (await request.json()) as { partNumber?: string; quantity?: number };
+    const payload = (await request.json()) as { partNumber?: string; quantity?: number; priority?: string };
     const partNumber = payload.partNumber?.trim();
     if (!partNumber) return Response.json({ error: "Informe o PN para solicitar a cotação." }, { status: 400 });
     const requestedQuantity = Math.max(1, Math.trunc(Number(payload.quantity) || 1));
+    const priority = normalizePriority(payload.priority);
     if (!profile.dealershipId) return Response.json({ error: "Usuário sem concessionária vinculada." }, { status: 400 });
     const db = await getDb();
     const [dealer] = await db.select().from(dealerships).where(eq(dealerships.id, profile.dealershipId)).limit(1);
@@ -98,9 +102,9 @@ export async function POST(request: Request) {
     const actionNote = autoReturned
       ? "Cotação disponível para aprovação do Gestor do Concessionário."
       : "Solicitação recebida e encaminhada para análise.";
-    await db.insert(quoteRequests).values({ id, partNumber, dealershipId: profile.dealershipId, requestedByEmail: profile.email, requestedByName: profile.name, requestedQuantity, targetNetPriceCents: null, requestObservation: "", status, actionOwnerRole, actionOwnerEmail, description: catalog?.description || "", ncm: catalog?.ncm || "", vt: catalog?.vt || "", origin: catalog ? deriveOrigin(catalog.vt) : "", netPriceCents: catalog?.netPriceCents || null, catalogImportedAt: catalog?.importedAt || null, actionNote, returnedAt: autoReturned ? now : null, requestedAt: now, createdAt: now, updatedAt: now });
+    await db.insert(quoteRequests).values({ id, partNumber, dealershipId: profile.dealershipId, requestedByEmail: profile.email, requestedByName: profile.name, requestedQuantity, priority, targetNetPriceCents: null, requestObservation: "", status, actionOwnerRole, actionOwnerEmail, description: catalog?.description || "", ncm: catalog?.ncm || "", vt: catalog?.vt || "", origin: catalog ? deriveOrigin(catalog.vt) : "", netPriceCents: catalog?.netPriceCents || null, catalogImportedAt: catalog?.importedAt || null, actionNote, returnedAt: autoReturned ? now : null, requestedAt: now, createdAt: now, updatedAt: now });
     await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "quote_requested", entity: "quote", details: "Cotação " + id + " solicitada para o PN " + partNumber + ".", after: { id, partNumber, status, dealership: dealer.name } });
-    return Response.json({ id, status, fresh, autoReturned, requestedQuantity });
+    return Response.json({ id, status, fresh, autoReturned, requestedQuantity, priority });
   } catch (error) { return Response.json({ error: errorMessage(error) }, { status: 500 }); }
 }
 export async function PATCH(request: Request) {
