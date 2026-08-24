@@ -2492,8 +2492,8 @@ function QuotesView({
   }
   function downloadQuoteImportTemplate() {
     const csv = [
-      "ID da Cotação;PN;Descrição;NCM;VT;Net Price;Comentários;Concessionária;Quantidade",
-      "COT-EXEMPLO;34061200;Descrição de fábrica;84329090;100P1;1250,00;Resposta carregada pelo ADM;Concessionária Exemplo;1",
+      "PN;Descrição;VT;Origem;NCM;Netprice",
+      "00360320;PS. 24x 55 DIN 933 10.9 Geom;R00P0;0;7318.15.00;23,26",
     ].join("\n");
     const url = URL.createObjectURL(
       new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" }),
@@ -2563,7 +2563,9 @@ function QuotesView({
                   <p>
                     Carregue uma base já respondida e o sistema marcará as
                     cotações abertas como respondidas hoje, encaminhando-as para
-                    aprovação do Gestor do Concessionário.
+                    aprovação do Gestor do Concessionário. O layout da sua base
+                    (PN, Descrição, VT, Origem, NCM e Netprice) é aceito
+                    diretamente.
                   </p>
                 </div>
                 <div className="quote-import-actions">
@@ -2592,10 +2594,11 @@ function QuotesView({
                     required
                   />
                   <small>
-                    Obrigatórias: PN, Descrição, VT e Net Price. Opcional: ID da
-                    Cotação, NCM, comentários, quantidade e concessionária. O ID
-                    da Cotação tem prioridade; sem ele, o vínculo usa PN +
-                    concessionária.
+                    Obrigatórias: PN, Descrição, VT e Netprice. Origem é
+                    conferida pelo 3º caractere do VT; NCM, comentários,
+                    quantidade e concessionária são opcionais. Sem ID da
+                    Cotação, o vínculo usa PN + concessionária ou todas as
+                    cotações abertas daquele PN.
                   </small>
                 </label>
                 <button

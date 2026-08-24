@@ -7,6 +7,7 @@ export type QuoteImportRow = {
   description: string;
   ncm: string;
   vt: string;
+  origin: string;
   netPriceCents: number;
   comments: string;
   dealership: string;
@@ -191,6 +192,7 @@ export function parseQuoteImport(
     ]),
     ncm: findIndex(headers, ["ncm"]),
     vt: findIndex(headers, ["vt"]),
+    origin: findIndex(headers, ["origem", "origin"]),
     netPrice: findIndex(headers, [
       "netprice",
       "netpricecents",
@@ -231,6 +233,8 @@ export function parseQuoteImport(
       description: String(row[indexes.description] ?? "").trim(),
       ncm: indexes.ncm >= 0 ? String(row[indexes.ncm] ?? "").trim() : "",
       vt: String(row[indexes.vt] ?? "").trim(),
+      origin:
+        indexes.origin >= 0 ? String(row[indexes.origin] ?? "").trim() : "",
       netPriceCents: moneyToCents(row[indexes.netPrice]),
       comments:
         indexes.comments >= 0 ? String(row[indexes.comments] ?? "").trim() : "",

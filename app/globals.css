@@ -781,10 +781,9 @@ button {
   min-height: 69px;
   padding: 11px 20px 11px 24px;
   display: grid;
-  grid-template-columns: minmax(180px, 1.3fr) minmax(130px, 1fr) minmax(
-      150px,
-      1fr
-    ) 72px 24px;
+  grid-template-columns:
+    minmax(180px, 1.3fr) minmax(130px, 1fr) minmax(150px, 1fr)
+    72px 24px;
   gap: 14px;
   align-items: center;
   border: 0;

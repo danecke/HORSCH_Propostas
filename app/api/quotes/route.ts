@@ -150,6 +150,9 @@ function importKey(value: unknown) {
     .replace(/\s+/g, " ")
     .toLowerCase();
 }
+function partNumberKey(value: unknown) {
+  return importKey(value).replace(/^0+(?=\d)/, "");
+}
 async function importQuoteResponses(
   request: Request,
   profile: NonNullable<Awaited<ReturnType<typeof getAccessProfile>>>,
@@ -180,6 +183,7 @@ async function importQuoteResponses(
   const updated: string[] = [];
   const skipped: Array<{ row: number; reason: string }> = [];
   for (const row of rows as QuoteImportRow[]) {
+    const derivedOrigin = deriveOrigin(row.vt);
     if (
       !row.partNumber ||
       !row.description ||
@@ -189,6 +193,13 @@ async function importQuoteResponses(
       skipped.push({
         row: row.rowNumber,
         reason: "PN, descrição, VT e Net Price são obrigatórios.",
+      });
+      continue;
+    }
+    if (row.origin && importKey(row.origin) !== importKey(derivedOrigin)) {
+      skipped.push({
+        row: row.rowNumber,
+        reason: `Origem divergente: o 3º caractere de VT ${row.vt} gera ${derivedOrigin}.`,
       });
       continue;
     }
@@ -202,7 +213,7 @@ async function importQuoteResponses(
           quote.id.trim().toLowerCase() === row.requestId.trim().toLowerCase()
         );
       return (
-        importKey(quote.partNumber) === importKey(row.partNumber) &&
+        partNumberKey(quote.partNumber) === partNumberKey(row.partNumber) &&
         (!row.dealership ||
           importKey(dealerById.get(quote.dealershipId)?.name) ===
             importKey(row.dealership))
@@ -489,33 +500,31 @@ export async function POST(request: Request) {
     const actionNote = autoReturned
       ? "Cotação disponível para aprovação do Gestor do Concessionário."
       : "Solicitação recebida e encaminhada para análise.";
-    await db
-      .insert(quoteRequests)
-      .values({
-        id,
-        partNumber,
-        dealershipId: profile.dealershipId,
-        requestedByEmail: profile.email,
-        requestedByName: profile.name,
-        requestedQuantity,
-        priority,
-        targetNetPriceCents: null,
-        requestObservation: "",
-        status,
-        actionOwnerRole,
-        actionOwnerEmail,
-        description: catalog?.description || "",
-        ncm: catalog?.ncm || "",
-        vt: catalog?.vt || "",
-        origin: catalog ? deriveOrigin(catalog.vt) : "",
-        netPriceCents: catalog?.netPriceCents || null,
-        catalogImportedAt: catalog?.importedAt || null,
-        actionNote,
-        returnedAt: autoReturned ? now : null,
-        requestedAt: now,
-        createdAt: now,
-        updatedAt: now,
-      });
+    await db.insert(quoteRequests).values({
+      id,
+      partNumber,
+      dealershipId: profile.dealershipId,
+      requestedByEmail: profile.email,
+      requestedByName: profile.name,
+      requestedQuantity,
+      priority,
+      targetNetPriceCents: null,
+      requestObservation: "",
+      status,
+      actionOwnerRole,
+      actionOwnerEmail,
+      description: catalog?.description || "",
+      ncm: catalog?.ncm || "",
+      vt: catalog?.vt || "",
+      origin: catalog ? deriveOrigin(catalog.vt) : "",
+      netPriceCents: catalog?.netPriceCents || null,
+      catalogImportedAt: catalog?.importedAt || null,
+      actionNote,
+      returnedAt: autoReturned ? now : null,
+      requestedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
     await recordAudit(db, {
       actorEmail: profile.email,
       actorName: profile.name,
@@ -598,13 +607,11 @@ export async function PATCH(request: Request) {
           .delete(quotePriceListControl)
           .where(eq(quotePriceListControl.partNumber, record.quote.partNumber));
       } else {
-        await db
-          .insert(quotePriceListControl)
-          .values({
-            partNumber: record.quote.partNumber,
-            includedAt: new Date().toISOString(),
-            includedByEmail: profile.email,
-          });
+        await db.insert(quotePriceListControl).values({
+          partNumber: record.quote.partNumber,
+          includedAt: new Date().toISOString(),
+          includedByEmail: profile.email,
+        });
       }
       await recordAudit(db, {
         actorEmail: profile.email,
@@ -803,22 +810,20 @@ export async function PATCH(request: Request) {
           })
           .where(eq(priceListItems.id, existingItem.id));
       } else {
-        await db
-          .insert(priceListItems)
-          .values({
-            importId: activeImport.id,
-            partNumber,
-            description,
-            family: String(payload.family ?? "").trim(),
-            unit: String(payload.unit ?? "").trim(),
-            ncm,
-            vt,
-            origin,
-            netPriceCents,
-            statePricesJson: JSON.stringify(statePrices),
-            importedAt,
-            updatedAt: importedAt,
-          });
+        await db.insert(priceListItems).values({
+          importId: activeImport.id,
+          partNumber,
+          description,
+          family: String(payload.family ?? "").trim(),
+          unit: String(payload.unit ?? "").trim(),
+          ncm,
+          vt,
+          origin,
+          netPriceCents,
+          statePricesJson: JSON.stringify(statePrices),
+          importedAt,
+          updatedAt: importedAt,
+        });
       }
       await db
         .insert(quotePriceListControl)
