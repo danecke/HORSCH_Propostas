@@ -2,6 +2,7 @@ import { unzipSync } from "fflate";
 
 export type QuoteImportRow = {
   rowNumber: number;
+  requestId: string;
   partNumber: string;
   description: string;
   ncm: string;
@@ -169,6 +170,13 @@ export function parseQuoteImport(
     );
   const headers = rows[0].map(normalizeHeader);
   const indexes = {
+    requestId: findIndex(headers, [
+      "id",
+      "cotacao",
+      "idcotacao",
+      "numerocotacao",
+      "solicitacao",
+    ]),
     partNumber: findIndex(headers, [
       "pn",
       "partnumber",
@@ -215,6 +223,10 @@ export function parseQuoteImport(
     .slice(1)
     .map((row, index) => ({
       rowNumber: index + 2,
+      requestId:
+        indexes.requestId >= 0
+          ? String(row[indexes.requestId] ?? "").trim()
+          : "",
       partNumber: String(row[indexes.partNumber] ?? "").trim(),
       description: String(row[indexes.description] ?? "").trim(),
       ncm: indexes.ncm >= 0 ? String(row[indexes.ncm] ?? "").trim() : "",
