@@ -8597,6 +8597,289 @@ button {
   }
 }
 
+/* Conferência por linha — decisões e ajuste auditável */
+.reimbursement-decision-actions {
+  display: grid;
+  grid-template-columns: repeat(3, max-content);
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 7px;
+}
+.reimbursement-line-action {
+  min-height: 32px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: 160ms ease;
+}
+.reimbursement-line-action span {
+  font-size: 14px;
+  line-height: 1;
+}
+.reimbursement-line-action.accept {
+  color: #14614b;
+  border-color: #cde7dc;
+  background: #eef8f4;
+}
+.reimbursement-line-action.adjust {
+  color: #3e5868;
+  border-color: #d9e2e6;
+  background: #f7fafb;
+}
+.reimbursement-line-action.reject {
+  color: #a22933;
+  border-color: #efd5d8;
+  background: #fff5f5;
+}
+.reimbursement-line-action:hover:not(:disabled),
+.reimbursement-line-action:focus-visible:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgb(19 44 57 / 10%);
+}
+.reimbursement-line-action:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+.reimbursement-adjust-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  justify-content: flex-end;
+  background: rgb(8 25 36 / 50%);
+  backdrop-filter: blur(3px);
+  animation: reimbursement-fade-in 160ms ease-out;
+}
+.reimbursement-adjust-drawer {
+  width: min(720px, 94vw);
+  height: 100%;
+  overflow: auto;
+  color: #17313e;
+  background: #fbfcfc;
+  box-shadow: -24px 0 70px rgb(5 28 42 / 22%);
+  animation: reimbursement-slide-in 220ms ease-out;
+}
+.reimbursement-adjust-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 25px 30px 21px;
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  color: #fff;
+  background: linear-gradient(135deg, #102f41 0%, #173d50 100%);
+}
+.reimbursement-adjust-header h2 {
+  margin: 5px 0 7px;
+  color: #fff;
+  font-size: clamp(22px, 3vw, 29px);
+  letter-spacing: -0.025em;
+}
+.reimbursement-adjust-header p {
+  max-width: 560px;
+  margin: 0;
+  color: rgb(255 255 255 / 68%);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.reimbursement-adjust-header .eyebrow {
+  color: #ffb6ba;
+}
+.reimbursement-adjust-close {
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid rgb(255 255 255 / 20%);
+  border-radius: 50%;
+  color: #fff;
+  background: rgb(255 255 255 / 8%);
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+.reimbursement-adjust-form {
+  padding: 7px 30px 32px;
+}
+.reimbursement-adjust-form > section {
+  padding: 24px 0;
+  border-bottom: 1px solid #e4eaec;
+}
+.reimbursement-adjust-section-title {
+  margin-bottom: 17px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.reimbursement-adjust-section-title > span {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 30px;
+  border-radius: 9px;
+  color: #a62a32;
+  background: #fbeaec;
+  font-size: 10px;
+  font-weight: 800;
+}
+.reimbursement-adjust-section-title h3 {
+  margin: 0 0 3px;
+  color: #17313e;
+  font-size: 15px;
+}
+.reimbursement-adjust-section-title p {
+  margin: 0;
+  color: #71818a;
+  font-size: 11px;
+}
+.reimbursement-adjust-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.reimbursement-adjust-grid label,
+.reimbursement-adjust-reason > label {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  color: #435a66;
+  font-size: 11px;
+  font-weight: 700;
+}
+.reimbursement-adjust-grid label.full {
+  grid-column: 1 / -1;
+}
+.reimbursement-adjust-grid input,
+.reimbursement-adjust-grid select,
+.reimbursement-adjust-reason textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #d7e1e4;
+  border-radius: 10px;
+  color: #17313e;
+  background: #fff;
+  outline: none;
+  transition: 150ms ease;
+}
+.reimbursement-adjust-grid input,
+.reimbursement-adjust-grid select {
+  min-height: 43px;
+  padding: 9px 11px;
+}
+.reimbursement-adjust-reason textarea {
+  padding: 12px;
+  resize: vertical;
+  line-height: 1.5;
+}
+.reimbursement-adjust-grid input:focus,
+.reimbursement-adjust-grid select:focus,
+.reimbursement-adjust-reason textarea:focus {
+  border-color: #809ba7;
+  box-shadow: 0 0 0 3px rgb(39 88 108 / 8%);
+}
+.reimbursement-adjust-grid label > small {
+  color: #839199;
+  font-size: 10px;
+  font-weight: 500;
+}
+.reimbursement-money-input {
+  position: relative;
+}
+.reimbursement-money-input i {
+  position: absolute;
+  left: 11px;
+  top: 50%;
+  z-index: 1;
+  transform: translateY(-50%);
+  color: #839199;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 800;
+}
+.reimbursement-money-input input {
+  padding-left: 34px;
+}
+.reimbursement-adjust-reason {
+  border-bottom: 0 !important;
+}
+.reimbursement-adjust-audit-note {
+  margin-top: 13px;
+  padding: 11px 13px;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  border: 1px solid #dceae5;
+  border-radius: 10px;
+  color: #42685b;
+  background: #f2f8f5;
+}
+.reimbursement-adjust-audit-note span {
+  font-weight: 900;
+}
+.reimbursement-adjust-audit-note p {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.reimbursement-adjust-footer {
+  position: sticky;
+  bottom: 0;
+  margin: 0 -30px -32px;
+  padding: 16px 30px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  border-top: 1px solid #dfe6e8;
+  background: rgb(251 252 252 / 94%);
+  backdrop-filter: blur(8px);
+}
+@keyframes reimbursement-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes reimbursement-slide-in {
+  from { transform: translateX(24px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@media (max-width: 760px) {
+  .reimbursement-decision-actions {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .reimbursement-line-action {
+    padding-inline: 7px;
+  }
+  .reimbursement-adjust-drawer {
+    width: 100%;
+  }
+  .reimbursement-adjust-header,
+  .reimbursement-adjust-form {
+    padding-left: 19px;
+    padding-right: 19px;
+  }
+  .reimbursement-adjust-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .reimbursement-adjust-grid label.full {
+    grid-column: auto;
+  }
+  .reimbursement-adjust-footer {
+    margin-left: -19px;
+    margin-right: -19px;
+    padding-left: 19px;
+    padding-right: 19px;
+  }
+}
+
 .leads-view-tabs {
   margin-top: 12px;
   display: inline-flex;

@@ -65,6 +65,7 @@ const STATUS_VALUES = [
   "Pendente Justificativa",
   "Aprovação Manual - Base de Cálculo",
   "Devolvida para correção",
+  "Rejeitada",
 ] as const;
 type SaleStatus = (typeof STATUS_VALUES)[number];
 type ReimbursementSegment = "N2" | "N3" | "normal";
@@ -617,6 +618,14 @@ function lineIndicators(row: typeof reimbursementSales.$inferSelect) {
   const negativeMargin = row.marginBps < 0;
   const needsNetReference =
     row.netPriceUsedCents === null && row.baseStatus === "MANUAL_REQUIRED";
+  if (row.status === "Rejeitada") {
+    return {
+      needsAnalysis: false,
+      negativeMargin,
+      needsNetReference: false,
+      analysisReason: "Linha rejeitada e documentada",
+    };
+  }
   const reasons: string[] = [];
   if (negativeMargin) reasons.push("Margem negativa");
   if (needsNetReference) reasons.push("Definir NET de referência");
@@ -636,6 +645,49 @@ function lineIndicators(row: typeof reimbursementSales.$inferSelect) {
 
 function serializeSale(row: typeof reimbursementSales.$inferSelect) {
   return { ...row, marginPercent: row.marginBps / 100, ...lineIndicators(row) };
+}
+
+async function refreshImportTotals(
+  db: Awaited<ReturnType<typeof getDb>>,
+  importId: number,
+) {
+  const lines = await db
+    .select()
+    .from(reimbursementSales)
+    .where(eq(reimbursementSales.importId, importId));
+  const activeLines = lines.filter((line) => line.status !== "Rejeitada");
+  await db
+    .update(reimbursementImports)
+    .set({
+      rowCount: lines.length,
+      totalQuantity: activeLines.reduce((sum, line) => sum + line.quantity, 0),
+      totalSalesCents: activeLines.reduce(
+        (sum, line) => sum + line.liquidTotalCents,
+        0,
+      ),
+      totalCostCents: activeLines.reduce(
+        (sum, line) => sum + line.costTotalCents,
+        0,
+      ),
+      totalReimbursementN2Cents: activeLines.reduce(
+        (sum, line) =>
+          sum +
+          (line.reimbursementProgram === "N2" ? line.reimbursementCents : 0),
+        0,
+      ),
+      totalReimbursementN3Cents: activeLines.reduce(
+        (sum, line) =>
+          sum +
+          (line.reimbursementProgram === "N3" ? line.reimbursementCents : 0),
+        0,
+      ),
+      totalNegotiationCents: activeLines.reduce(
+        (sum, line) => sum + line.negotiationCents,
+        0,
+      ),
+      updatedAt: dateNow(),
+    })
+    .where(eq(reimbursementImports.id, importId));
 }
 
 export async function GET(request: Request) {
@@ -706,11 +758,15 @@ export async function GET(request: Request) {
         (!activeImportId || sale.importId === activeImportId) &&
         matchesFilters(sale),
     );
+    const analyticalSales = filtered.filter(
+      (sale) => sale.status !== "Rejeitada",
+    );
     const importIndicators = new Map<
       number,
       { analysisRows: number; negativeMarginRows: number; netReferenceRows: number }
     >();
     for (const sale of allSales) {
+      if (sale.status === "Rejeitada") continue;
       const indicators = lineIndicators(sale);
       const current = importIndicators.get(sale.importId) ?? {
         analysisRows: 0,
@@ -723,6 +779,7 @@ export async function GET(request: Request) {
       importIndicators.set(sale.importId, current);
     }
     const factoryHistorySales = allSales.filter((sale) => {
+      if (sale.status === "Rejeitada") return false;
       if (!matchesCommonFilters(sale)) return false;
       if (factoryDealershipFilter && sale.dealershipId !== factoryDealershipFilter)
         return false;
@@ -730,7 +787,7 @@ export async function GET(request: Request) {
       return (!factoryDateFrom || saleDate >= factoryDateFrom) &&
         (!factoryDateTo || saleDate <= factoryDateTo);
     });
-    const base = filtered.reduce(
+    const base = analyticalSales.reduce(
       (sum, sale) => ({
         quantity: sum.quantity + sale.quantity,
         sales: sum.sales + sale.liquidTotalCents,
@@ -768,7 +825,7 @@ export async function GET(request: Request) {
         rows: number;
       }
     >();
-    for (const sale of filtered) {
+    for (const sale of analyticalSales) {
       const dealer = sale.dealershipName || "Não identificado";
       const dealerEntry = rowsByDealer.get(dealer) ?? {
         label: dealer,
@@ -1678,6 +1735,20 @@ export async function PATCH(request: Request) {
       note?: string;
       netPriceCents?: number;
       tolerancePercent?: number;
+      adjustments?: {
+        partNumber?: string;
+        description?: string;
+        quantity?: number;
+        costAvgUnitCents?: number;
+        saleNetUnitCents?: number;
+        invoiceUnitCents?: number;
+        clientName?: string;
+        clientCnpj?: string;
+        invoiceNumber?: string;
+        state?: string;
+        dealershipId?: number;
+        netPriceCents?: number | null;
+      };
     };
     if (body.action === "update_n3_tolerance") {
       if (profile.role !== "general_admin")
@@ -1725,7 +1796,255 @@ export async function PATCH(request: Request) {
         return errorResponse("Linha fora do escopo.", 403);
       const action = String(body.action ?? "");
       const note = String(body.note ?? "").trim();
-      if (action === "submit_justification") {
+      if (action === "adjust_line") {
+        if (!managers)
+          return errorResponse(
+            "Somente ADM e Gestão Global podem ajustar uma linha.",
+            403,
+          );
+        if (note.length < 10)
+          return errorResponse(
+            "Documente o motivo do ajuste com pelo menos 10 caracteres.",
+          );
+        const adjustments = body.adjustments;
+        if (!adjustments)
+          return errorResponse("Informe os dados que serão ajustados.");
+        const partNumber = String(adjustments.partNumber ?? "").trim();
+        const description = String(adjustments.description ?? "").trim();
+        const clientName = String(adjustments.clientName ?? "").trim();
+        const clientCnpj = normalizeDocument(adjustments.clientCnpj);
+        const invoiceNumber = String(adjustments.invoiceNumber ?? "").trim();
+        const state = stateCode(adjustments.state);
+        const quantityValue = Math.trunc(Number(adjustments.quantity) || 0);
+        const costUnit = Math.trunc(Number(adjustments.costAvgUnitCents) || 0);
+        const saleNetUnit = Math.trunc(
+          Number(adjustments.saleNetUnitCents) || 0,
+        );
+        const invoiceUnit = Math.trunc(
+          Number(adjustments.invoiceUnitCents) || 0,
+        );
+        const dealershipId = Math.trunc(
+          Number(adjustments.dealershipId) || 0,
+        );
+        const manualNet =
+          adjustments.netPriceCents === null ||
+          adjustments.netPriceCents === undefined
+            ? null
+            : Math.trunc(Number(adjustments.netPriceCents) || 0);
+        if (!partNumber || !description || !clientName || !invoiceNumber)
+          return errorResponse(
+            "Preencha PN, descrição, cliente e nota fiscal.",
+          );
+        if (!isValidDocument(clientCnpj))
+          return errorResponse("Informe um CPF/CNPJ válido com 11 ou 14 dígitos.");
+        if (!state) return errorResponse("Selecione uma UF válida.");
+        if (
+          quantityValue <= 0 ||
+          costUnit <= 0 ||
+          saleNetUnit <= 0 ||
+          invoiceUnit <= 0
+        )
+          return errorResponse(
+            "Quantidade, custo e valores unitários devem ser maiores que zero.",
+          );
+        const dealer = dealerRows.find((item) => item.id === dealershipId);
+        if (!dealer)
+          return errorResponse("Selecione uma concessionária do seu escopo.");
+        if (!dealershipHandlesState(dealer, state))
+          return errorResponse(
+            `A concessionária ${dealer.name} não possui a UF ${state} em seu cadastro.`,
+          );
+
+        const clients = await lineDb
+          .select()
+          .from(reimbursementClients)
+          .where(eq(reimbursementClients.status, "active"));
+        const client = clients.find(
+          (item) =>
+            normalizeDocument(item.cnpj) === clientCnpj && item.state === state,
+        );
+        const [activePriceList] = await lineDb
+          .select()
+          .from(priceListImports)
+          .where(eq(priceListImports.isActive, true))
+          .orderBy(desc(priceListImports.importedAt))
+          .limit(1);
+        const priceListId = sale.priceListImportId ?? activePriceList?.id ?? null;
+        const priceItems = priceListId
+          ? await lineDb
+              .select()
+              .from(priceListItems)
+              .where(eq(priceListItems.importId, priceListId))
+          : [];
+        const priceItem = priceItems.find(
+          (item) =>
+            normalizePartNumber(item.partNumber) ===
+            normalizePartNumber(partNumber),
+        );
+        const referencePrice = priceItem
+          ? priceForState(priceItem, state)
+          : { net: null, n3: null };
+        const netPrice = manualNet && manualNet > 0 ? manualNet : referencePrice.net;
+        const costTotal = quantityValue * costUnit;
+        const liquidTotal = quantityValue * saleNetUnit;
+        const marginBps = calculatedMarginBps(liquidTotal, costTotal);
+        const calculationBase = (netPrice ?? costUnit) * quantityValue;
+        const duplicateKey = `${dealer.id}|${normalize(invoiceNumber)}|${normalizePartNumber(partNumber)}`;
+        const allImportSales = await lineDb
+          .select()
+          .from(reimbursementSales)
+          .where(eq(reimbursementSales.importId, sale.importId));
+        const duplicate = allImportSales.some(
+          (item) =>
+            item.id !== sale.id &&
+            `${item.dealershipId ?? 0}|${normalize(item.invoiceNumber)}|${normalizePartNumber(item.partNumber)}` ===
+              duplicateKey,
+        );
+        const program = client?.n3 ? "N3" : client?.n2 ? "N2" : "";
+        const difference =
+          referencePrice.n3 === null
+            ? null
+            : invoiceUnit - referencePrice.n3;
+        const toleranceBps = await getN3ToleranceBps(lineDb);
+        const toleranceCents =
+          referencePrice.n3 === null
+            ? 0
+            : Math.round((referencePrice.n3 * toleranceBps) / 10000);
+        let status: SaleStatus = "Não Elegível";
+        let reimbursement = 0;
+        let negotiation = 0;
+        let reasonCode = "";
+        if (duplicate) {
+          status = "NF Duplicada";
+          reasonCode = "NF_DUPLICADA";
+        } else if (!client || !priceItem) {
+          status = "Produto/Estado/Cliente sem Cadastro";
+          reasonCode = "CADASTRO_AUSENTE";
+        } else if (netPrice === null) {
+          status = "Aprovação Manual - Base de Cálculo";
+          reasonCode = "NET_PRICE_AUSENTE";
+        } else if (program === "N3") {
+          if (
+            referencePrice.n3 === null ||
+            Math.abs(invoiceUnit - referencePrice.n3) > toleranceCents
+          ) {
+            status = "Divergência de Preço";
+            reasonCode = "DIVERGENCIA_PRECO_N3";
+          } else {
+            status = marginBps < 0 ? "N3 com Negociação" : "N3 Elegível";
+            reimbursement =
+              marginBps < 0 ? 0 : Math.round(calculationBase * 0.07);
+            negotiation = marginBps < 0 ? costTotal - liquidTotal : 0;
+          }
+        } else if (program === "N2") {
+          if (marginBps < 0) {
+            reasonCode = "MARGEM_NEGATIVA_N2";
+          } else if (marginBps <= 2000) {
+            status = "N2 Elegível";
+            reimbursement = Math.round(calculationBase * 0.04);
+          }
+        }
+        const historicalRows = allImportSales.filter(
+          (item) =>
+            item.id !== sale.id &&
+            item.dealershipId === dealer.id &&
+            normalizePartNumber(item.partNumber) ===
+              normalizePartNumber(partNumber) &&
+            item.liquidTotalCents > 0,
+        );
+        const historicalMarginBps = historicalRows.length
+          ? Math.round(
+              historicalRows.reduce((sum, item) => sum + item.marginBps, 0) /
+                historicalRows.length,
+            )
+          : null;
+        const marginVariationBps =
+          historicalMarginBps === null
+            ? null
+            : marginBps - historicalMarginBps;
+        if (
+          status.endsWith("Elegível") &&
+          historicalMarginBps !== null &&
+          Math.abs(marginVariationBps ?? 0) > 1000
+        ) {
+          status = "Pendente Justificativa";
+          reasonCode = "VARIACAO_MARGEM";
+          reimbursement = 0;
+        }
+        const before = serializeSale(sale);
+        const [updated] = await lineDb
+          .update(reimbursementSales)
+          .set({
+            dealershipId: dealer.id,
+            dealershipName: dealer.name,
+            clientId: client?.id ?? null,
+            priceListImportId: priceListId,
+            partNumber,
+            description,
+            quantity: quantityValue,
+            costAvgUnitCents: costUnit,
+            saleNetUnitCents: saleNetUnit,
+            invoiceUnitCents: invoiceUnit,
+            clientName,
+            clientCnpj,
+            invoiceNumber,
+            state,
+            marginBps,
+            costTotalCents: costTotal,
+            liquidTotalCents: liquidTotal,
+            netPriceUsedCents: netPrice,
+            calculationBaseCents: calculationBase,
+            reimbursementCents: reimbursement,
+            reimbursementProgram: program,
+            status,
+            negotiationCents: Math.max(0, negotiation),
+            expectedN3Cents: referencePrice.n3,
+            priceDifferenceCents: difference,
+            duplicateKey,
+            baseSource:
+              manualNet && manualNet > 0
+                ? "NET_PRICE_MANUAL"
+                : netPrice
+                  ? "NET_PRICE_VIGENTE"
+                  : "CUSTO_MEDIO_EXCEPCIONAL",
+            baseStatus: netPrice ? "" : "MANUAL_REQUIRED",
+            reasonCode,
+            historicalMarginBps,
+            marginVariationBps,
+            justification: note,
+            justificationStatus: "adjusted",
+          })
+          .where(eq(reimbursementSales.id, lineId))
+          .returning();
+        await recordAudit(lineDb, {
+          actorEmail: profile.email,
+          actorName: profile.name,
+          action: "reimbursement_line_adjusted",
+          entity: "reimbursement_sale",
+          details: `Linha ${lineId} ajustada. Motivo: ${note}`,
+          before,
+          after: updated ? serializeSale(updated) : undefined,
+        });
+      } else if (action === "reject_line") {
+        if (!managers)
+          return errorResponse(
+            "Somente ADM e Gestão Global podem rejeitar uma linha.",
+            403,
+          );
+        if (note.length < 5)
+          return errorResponse("Documente o motivo da rejeição.");
+        await lineDb
+          .update(reimbursementSales)
+          .set({
+            status: "Rejeitada",
+            reimbursementCents: 0,
+            negotiationCents: 0,
+            justification: note,
+            justificationStatus: "rejected",
+            reasonCode: "REJEITADA_GESTOR",
+          })
+          .where(eq(reimbursementSales.id, lineId));
+      } else if (action === "submit_justification") {
         if (!isDealerScoped(profile) || note.length < 5)
           return errorResponse("Informe uma justificativa válida.");
         await lineDb
@@ -1739,8 +2058,6 @@ export async function PATCH(request: Request) {
         if ((action === "question_line" || action === "return_line") && note.length < 5)
           return errorResponse("Informe uma observação para esta decisão.");
         if (action === "accept_line") {
-          if (!sale.reimbursementProgram)
-            return errorResponse("A linha não possui programa N2/N3 para ser aceita.");
           if (sale.calculationBaseCents <= 0)
             return errorResponse("A linha não possui base de cálculo válida.");
         }
@@ -1749,10 +2066,18 @@ export async function PATCH(request: Request) {
           .update(reimbursementSales)
           .set({
             status: accepted
-              ? sale.reimbursementProgram === "N3" ? "N3 Elegível" : "N2 Elegível"
+              ? sale.reimbursementProgram === "N3"
+                ? "N3 Elegível"
+                : sale.reimbursementProgram === "N2"
+                  ? "N2 Elegível"
+                  : "Não Elegível"
               : action === "question_line" ? "Pendente Justificativa" : "Devolvida para correção",
             reimbursementCents: accepted
-              ? Math.round(sale.calculationBaseCents * (sale.reimbursementProgram === "N3" ? 0.07 : 0.04))
+              ? sale.reimbursementProgram === "N3"
+                ? Math.round(sale.calculationBaseCents * 0.07)
+                : sale.reimbursementProgram === "N2"
+                  ? Math.round(sale.calculationBaseCents * 0.04)
+                  : 0
               : 0,
             justification: note,
             justificationStatus: accepted ? "approved" : action === "question_line" ? "questioned" : "returned",
@@ -1833,6 +2158,23 @@ export async function PATCH(request: Request) {
         actorName: profile.name,
         createdAt: dateNow(),
       });
+      await refreshImportTotals(lineDb, sale.importId);
+      if (action !== "adjust_line") {
+        const [afterSale] = await lineDb
+          .select()
+          .from(reimbursementSales)
+          .where(eq(reimbursementSales.id, lineId))
+          .limit(1);
+        await recordAudit(lineDb, {
+          actorEmail: profile.email,
+          actorName: profile.name,
+          action: `reimbursement_line_${action}`,
+          entity: "reimbursement_sale",
+          details: `Decisão aplicada à linha ${lineId}${note ? `. Motivo: ${note}` : "."}`,
+          before: serializeSale(sale),
+          after: afterSale ? serializeSale(afterSale) : undefined,
+        });
+      }
       return Response.json({ ok: true });
     }
     const id = Math.trunc(Number(body.id) || 0);

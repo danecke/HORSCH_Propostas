@@ -29,6 +29,7 @@ type Batch = {
 };
 type Sale = {
   id: number;
+  dealershipId: number | null;
   partNumber: string;
   description: string;
   clientName: string;
@@ -76,6 +77,21 @@ type Summary = {
 };
 type Client = { id: number; legalName: string; cnpj: string; state: string; clientType: string; n2: boolean; n3: boolean; status: string };
 type ClientForm = { legalName: string; cnpj: string; state: string; clientType: string; n2: boolean; n3: boolean; status: string };
+type AdjustmentForm = {
+  partNumber: string;
+  description: string;
+  clientName: string;
+  clientCnpj: string;
+  invoiceNumber: string;
+  state: string;
+  dealershipId: string;
+  quantity: string;
+  costAvgUnit: string;
+  saleNetUnit: string;
+  invoiceUnit: string;
+  netPrice: string;
+  reason: string;
+};
 type StatusBreakdown = { status: string; count: number; liquidTotalCents: number; reimbursementCents: number };
 type FactoryDashboard = {
   summary: { salesCents: number; costCents: number; marginBps: number; reimbursementN2Cents: number; reimbursementN3Cents: number; negotiationCents: number; processedRows: number; totalQuantity: number };
@@ -107,6 +123,20 @@ type DashboardData = {
 const STATES = ["AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO", "PY"];
 const EMPTY_CLIENT: ClientForm = { legalName: "", cnpj: "", state: "", clientType: "", n2: true, n3: false, status: "active" };
 
+function moneyInput(cents: number | null | undefined) {
+  return cents === null || cents === undefined
+    ? ""
+    : (cents / 100).toFixed(2).replace(".", ",");
+}
+
+function inputToCents(value: string) {
+  const normalized = value.trim().includes(",")
+    ? value.trim().replace(/\./g, "").replace(",", ".")
+    : value.trim();
+  const number = Number(normalized);
+  return Number.isFinite(number) ? Math.round(number * 100) : 0;
+}
+
 function formatBRL(cents: number | null | undefined) {
   return (Number(cents ?? 0) / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
@@ -125,7 +155,7 @@ function formatPercent(basisPoints: number) {
 }
 
 function statusClass(status: string) {
-  if (status.includes("Negociação") || status.includes("Divergência") || status.includes("Duplicada")) return "danger";
+  if (status.includes("Negociação") || status.includes("Divergência") || status.includes("Duplicada") || status.includes("Rejeitada")) return "danger";
   if (status.includes("Elegível")) return "success";
   if (status.includes("Não Elegível") || status.includes("Encontrado") || status.includes("Cadastro") || status.includes("Pendente") || status.includes("Aprovação Manual") || status.includes("Devolvida")) return "warning";
   return "neutral";
@@ -177,6 +207,8 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
   const [uploadDealerIds, setUploadDealerIds] = useState<string[]>([]);
   const [editingClient, setEditingClient] = useState<number | null>(null);
   const [clientForm, setClientForm] = useState<ClientForm>(EMPTY_CLIENT);
+  const [adjustingSale, setAdjustingSale] = useState<Sale | null>(null);
+  const [adjustmentForm, setAdjustmentForm] = useState<AdjustmentForm | null>(null);
   const [busy, setBusy] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [toleranceDraft, setToleranceDraft] = useState("");
@@ -394,7 +426,8 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
     if (action === "submit_justification") note = window.prompt("Explique a variação de margem:") ?? "";
     if (action === "question_line") note = window.prompt("O que deve ser questionado nesta linha?") ?? "";
     if (action === "return_line") note = window.prompt("Informe o motivo da devolução:") ?? "";
-    if (["submit_justification", "question_line", "return_line"].includes(action) && note.trim().length < 5) {
+    if (action === "reject_line") note = window.prompt("Documente o motivo da rejeição desta linha:") ?? "";
+    if (["submit_justification", "question_line", "return_line", "reject_line"].includes(action) && note.trim().length < 5) {
       setError("Informe uma observação válida para esta decisão.");
       return;
     }
@@ -412,6 +445,83 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Não foi possível atualizar a linha.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openLineAdjustment(sale: Sale) {
+    const matchedDealer = visibleDealerships.find(
+      (dealer) => dealer.id === sale.dealershipId || dealer.name === sale.dealershipName,
+    );
+    setAdjustingSale(sale);
+    setAdjustmentForm({
+      partNumber: sale.partNumber,
+      description: sale.description,
+      clientName: sale.clientName,
+      clientCnpj: sale.clientCnpj,
+      invoiceNumber: sale.invoiceNumber,
+      state: sale.state,
+      dealershipId: matchedDealer ? String(matchedDealer.id) : "",
+      quantity: String(sale.quantity),
+      costAvgUnit: moneyInput(sale.costAvgUnitCents),
+      saleNetUnit: moneyInput(sale.saleNetUnitCents),
+      invoiceUnit: moneyInput(sale.invoiceUnitCents),
+      netPrice: moneyInput(sale.netPriceUsedCents),
+      reason: "",
+    });
+    setError("");
+  }
+
+  async function saveLineAdjustment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!adjustingSale || !adjustmentForm) return;
+    if (adjustmentForm.reason.trim().length < 10) {
+      setError("Documente o motivo do ajuste com pelo menos 10 caracteres.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch("/api/reimbursements", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lineId: adjustingSale.id,
+          action: "adjust_line",
+          note: adjustmentForm.reason.trim(),
+          adjustments: {
+            partNumber: adjustmentForm.partNumber,
+            description: adjustmentForm.description,
+            clientName: adjustmentForm.clientName,
+            clientCnpj: adjustmentForm.clientCnpj,
+            invoiceNumber: adjustmentForm.invoiceNumber,
+            state: adjustmentForm.state,
+            dealershipId: Number(adjustmentForm.dealershipId),
+            quantity: Number(adjustmentForm.quantity),
+            costAvgUnitCents: inputToCents(adjustmentForm.costAvgUnit),
+            saleNetUnitCents: inputToCents(adjustmentForm.saleNetUnit),
+            invoiceUnitCents: inputToCents(adjustmentForm.invoiceUnit),
+            netPriceCents: adjustmentForm.netPrice.trim()
+              ? inputToCents(adjustmentForm.netPrice)
+              : null,
+          },
+        }),
+      });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok)
+        throw new Error(payload.error || "Não foi possível salvar o ajuste.");
+      setAdjustingSale(null);
+      setAdjustmentForm(null);
+      setMessage("Linha ajustada, recalculada e documentada no histórico.");
+      await load();
+    } catch (adjustmentError) {
+      setError(
+        adjustmentError instanceof Error
+          ? adjustmentError.message
+          : "Não foi possível salvar o ajuste.",
+      );
     } finally {
       setBusy(false);
     }
@@ -770,7 +880,19 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
                     <td><strong>{formatBRL(sale.calculationBaseCents)}</strong><small>{sale.needsNetReference ? "NET de referência necessário" : sale.netPriceUsedCents === null ? "Custo médio (fallback)" : `Net Price: ${formatBRL(sale.netPriceUsedCents)}`}</small></td>
                     <td><strong>{formatBRL(sale.reimbursementCents)}</strong><small>{sale.reimbursementProgram || "Sem programa"}</small></td>
                     <td><span className={`reimbursement-status ${statusClass(sale.status)}`}>{sale.status}</span>{sale.expectedN3Cents !== null && <small>N3 ref.: {formatBRL(sale.expectedN3Cents)} · Δ {signedBRL(sale.priceDifferenceCents)}</small>}</td>
-                    <td><div className="reimbursement-row-actions">{sale.status === "Aprovação Manual - Base de Cálculo" && canManageClients && <><button className="outline-button compact" onClick={() => void runLineAction(sale, "manual_base_set_net_price")}>Definir NET</button><button className="outline-button compact" onClick={() => void runLineAction(sale, "manual_base_approve_cost")}>Aprovar custo</button></>}{sale.needsAnalysis && canManageClients && <><button className="primary-button compact" onClick={() => void runLineAction(sale, "accept_line")}>Aceitar</button><button className="outline-button compact" onClick={() => void runLineAction(sale, "question_line")}>Questionar</button><button className="danger-button compact" onClick={() => void runLineAction(sale, "return_line")}>Devolver</button></>}{sale.status === "Pendente Justificativa" && dealerScoped && <button className="outline-button compact" onClick={() => void runLineAction(sale, "submit_justification")}>Justificar</button>}{sale.status === "Pendente Justificativa" && canReview && <><button className="primary-button compact" onClick={() => void runLineAction(sale, "approve_justification")}>Aprovar</button><button className="danger-button compact" onClick={() => void runLineAction(sale, "reject_justification")}>Rejeitar</button></>}</div><small>{formatBRL(sale.negotiationCents)} em negociação</small></td>
+                    <td>
+                      <div className="reimbursement-decision-actions">
+                        {canManageClients && (
+                          <>
+                            <button className="reimbursement-line-action accept" disabled={busy} onClick={() => void runLineAction(sale, "accept_line")}><span>✓</span>Aceitar</button>
+                            <button className="reimbursement-line-action adjust" disabled={busy} onClick={() => openLineAdjustment(sale)}><span>✎</span>Ajustar</button>
+                            <button className="reimbursement-line-action reject" disabled={busy} onClick={() => void runLineAction(sale, "reject_line")}><span>×</span>Rejeitar</button>
+                          </>
+                        )}
+                        {sale.status === "Pendente Justificativa" && dealerScoped && <button className="outline-button compact" onClick={() => void runLineAction(sale, "submit_justification")}>Enviar justificativa</button>}
+                      </div>
+                      <small>{sale.justification ? `Último registro: ${sale.justification}` : `${formatBRL(sale.negotiationCents)} em negociação`}</small>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -830,6 +952,64 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
           </section>
         </section>
       )}
+
+      {adjustingSale && adjustmentForm && (
+        <div className="reimbursement-adjust-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target && !busy) { setAdjustingSale(null); setAdjustmentForm(null); } }}>
+          <aside className="reimbursement-adjust-drawer" role="dialog" aria-modal="true" aria-labelledby="adjust-line-title">
+            <div className="reimbursement-adjust-header">
+              <div>
+                <span className="eyebrow">Conferência por linha</span>
+                <h2 id="adjust-line-title">Ajustar linha #{adjustingSale.id}</h2>
+                <p>Edite os dados de origem. Margem, elegibilidade e reembolso serão recalculados ao salvar.</p>
+              </div>
+              <button type="button" className="reimbursement-adjust-close" aria-label="Fechar ajuste" disabled={busy} onClick={() => { setAdjustingSale(null); setAdjustmentForm(null); }}>×</button>
+            </div>
+
+            <form className="reimbursement-adjust-form" onSubmit={(event) => void saveLineAdjustment(event)}>
+              <section>
+                <div className="reimbursement-adjust-section-title"><span>01</span><div><h3>Produto e documento</h3><p>Identificação da venda importada.</p></div></div>
+                <div className="reimbursement-adjust-grid">
+                  <label><span>PN *</span><input value={adjustmentForm.partNumber} onChange={(event) => setAdjustmentForm({ ...adjustmentForm, partNumber: event.target.value })} required /></label>
+                  <label><span>Nota fiscal *</span><input value={adjustmentForm.invoiceNumber} onChange={(event) => setAdjustmentForm({ ...adjustmentForm, invoiceNumber: event.target.value })} required /></label>
+                  <label className="full"><span>Descrição *</span><input value={adjustmentForm.description} onChange={(event) => setAdjustmentForm({ ...adjustmentForm, description: event.target.value })} required /></label>
+                </div>
+              </section>
+
+              <section>
+                <div className="reimbursement-adjust-section-title"><span>02</span><div><h3>Cliente e operação</h3><p>O cliente será validado novamente por CPF/CNPJ e UF.</p></div></div>
+                <div className="reimbursement-adjust-grid">
+                  <label className="full"><span>Cliente *</span><input value={adjustmentForm.clientName} onChange={(event) => setAdjustmentForm({ ...adjustmentForm, clientName: event.target.value })} required /></label>
+                  <label><span>CPF/CNPJ *</span><input value={adjustmentForm.clientCnpj} onChange={(event) => setAdjustmentForm({ ...adjustmentForm, clientCnpj: event.target.value })} required /></label>
+                  <label><span>UF *</span><select value={adjustmentForm.state} onChange={(event) => setAdjustmentForm({ ...adjustmentForm, state: event.target.value })} required><option value="">Selecione</option>{STATES.map((state) => <option key={state}>{state}</option>)}</select></label>
+                  <label className="full"><span>Concessionária *</span><select value={adjustmentForm.dealershipId} onChange={(event) => setAdjustmentForm({ ...adjustmentForm, dealershipId: event.target.value })} required><option value="">Selecione</option>{visibleDealerships.map((dealer) => <option value={dealer.id} key={dealer.id}>{dealer.name}{dealer.state ? ` · ${dealer.state}` : ""}</option>)}</select></label>
+                </div>
+              </section>
+
+              <section>
+                <div className="reimbursement-adjust-section-title"><span>03</span><div><h3>Quantidade e valores</h3><p>Valores unitários em reais.</p></div></div>
+                <div className="reimbursement-adjust-grid values">
+                  <label><span>Quantidade *</span><input type="number" min="1" step="1" value={adjustmentForm.quantity} onChange={(event) => setAdjustmentForm({ ...adjustmentForm, quantity: event.target.value })} required /></label>
+                  <label><span>Custo médio líquido *</span><div className="reimbursement-money-input"><i>R$</i><input inputMode="decimal" value={adjustmentForm.costAvgUnit} onChange={(event) => setAdjustmentForm({ ...adjustmentForm, costAvgUnit: event.target.value })} required /></div></label>
+                  <label><span>Venda líquida unitária *</span><div className="reimbursement-money-input"><i>R$</i><input inputMode="decimal" value={adjustmentForm.saleNetUnit} onChange={(event) => setAdjustmentForm({ ...adjustmentForm, saleNetUnit: event.target.value })} required /></div></label>
+                  <label><span>Venda NF unitária *</span><div className="reimbursement-money-input"><i>R$</i><input inputMode="decimal" value={adjustmentForm.invoiceUnit} onChange={(event) => setAdjustmentForm({ ...adjustmentForm, invoiceUnit: event.target.value })} required /></div></label>
+                  <label className="full"><span>NET de referência</span><div className="reimbursement-money-input"><i>R$</i><input inputMode="decimal" value={adjustmentForm.netPrice} onChange={(event) => setAdjustmentForm({ ...adjustmentForm, netPrice: event.target.value })} placeholder="Deixe vazio para consultar a lista vigente" /></div><small>Quando informado, este NET manual ficará registrado como base do cálculo.</small></label>
+                </div>
+              </section>
+
+              <section className="reimbursement-adjust-reason">
+                <div className="reimbursement-adjust-section-title"><span>04</span><div><h3>Motivo do ajuste</h3><p>Obrigatório para manter a rastreabilidade da decisão.</p></div></div>
+                <label><span>Documente o que foi corrigido e por quê *</span><textarea rows={4} minLength={10} value={adjustmentForm.reason} onChange={(event) => setAdjustmentForm({ ...adjustmentForm, reason: event.target.value })} placeholder="Ex.: Valor líquido corrigido conforme a NF anexada pelo concessionário." required /></label>
+                <div className="reimbursement-adjust-audit-note"><span>✓</span><p>O sistema salvará o responsável, data, motivo e um comparativo completo entre os valores anteriores e os novos.</p></div>
+              </section>
+
+              <div className="reimbursement-adjust-footer">
+                <button type="button" className="outline-button" disabled={busy} onClick={() => { setAdjustingSale(null); setAdjustmentForm(null); }}>Cancelar</button>
+                <button className="primary-button" disabled={busy}>{busy ? "Salvando..." : "Salvar e recalcular"}</button>
+              </div>
+            </form>
+          </aside>
+        </div>
+      )}
     </div>
   );
 }
@@ -869,7 +1049,7 @@ function ExecutiveOverview({ data, isFactoryView, dealerships, factoryFilters, o
         { key: "N3", label: "Margem N3", description: "Clientes nível 3" },
         { key: "normal", label: "Cliente Normal", description: "Vendas sem programa" },
       ].map((segment) => {
-        const rows = data.sales.filter((sale) => (segment.key === "normal" ? !sale.reimbursementProgram : sale.reimbursementProgram === segment.key));
+        const rows = data.sales.filter((sale) => sale.status !== "Rejeitada" && (segment.key === "normal" ? !sale.reimbursementProgram : sale.reimbursementProgram === segment.key));
         const salesCents = rows.reduce((sum, sale) => sum + sale.liquidTotalCents, 0);
         const costCents = rows.reduce((sum, sale) => sum + sale.costTotalCents, 0);
         return { ...segment, rows: rows.length, salesCents, marginBps: salesCents ? Math.round(((salesCents - costCents) / salesCents) * 10000) : 0 };
