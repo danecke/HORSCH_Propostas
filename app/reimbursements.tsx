@@ -1,7 +1,7 @@
 "use client";
 
 import type { FormEvent } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 export type ReimbursementAccess = {
   role: string;
@@ -150,11 +150,13 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
   const [statusFilter, setStatusFilter] = useState("all");
   const [dealerFilter, setDealerFilter] = useState("");
   const [uploadDealerId, setUploadDealerId] = useState("");
+  const [uploadDealerIds, setUploadDealerIds] = useState<string[]>([]);
   const [editingClient, setEditingClient] = useState<number | null>(null);
   const [clientForm, setClientForm] = useState<ClientForm>(EMPTY_CLIENT);
   const [busy, setBusy] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [toleranceDraft, setToleranceDraft] = useState("");
+  const uploadSelectionInitialized = useRef(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -165,6 +167,11 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
   const visibleDealerships = data?.dealerships ?? (dealerScoped ? dealerships.filter((dealer) => dealer.id === me.dealershipId) : dealerships);
   const singleScopedDealership = dealerScoped && visibleDealerships.length === 1 ? visibleDealerships[0] : null;
   const effectiveUploadDealerId = dealerScoped ? uploadDealerId || String(singleScopedDealership?.id ?? "") : uploadDealerId;
+  const effectiveUploadDealerIds = dealerScoped
+    ? uploadDealerIds
+    : effectiveUploadDealerId
+      ? [effectiveUploadDealerId]
+      : [];
   const activeBatch = useMemo(() => data?.imports.find((item) => item.id === activeBatchId) ?? data?.imports[0], [activeBatchId, data?.imports]);
   const reimbursementTotal = (data?.summary.reimbursementN2Cents ?? 0) + (data?.summary.reimbursementN3Cents ?? 0);
 
@@ -195,6 +202,24 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
     if (isAdmin && typeof data?.n3TolerancePercent === "number")
       setToleranceDraft(String(data.n3TolerancePercent));
   }, [data?.n3TolerancePercent, isAdmin]);
+
+  useEffect(() => {
+    if (!dealerScoped) {
+      uploadSelectionInitialized.current = false;
+      return;
+    }
+    if (!data?.dealerships) return;
+    const visibleIds = visibleDealerships.map((dealer) => String(dealer.id));
+    if (!uploadSelectionInitialized.current) {
+      uploadSelectionInitialized.current = true;
+      setUploadDealerIds(visibleIds);
+      return;
+    }
+    setUploadDealerIds((current) => {
+      const kept = current.filter((id) => visibleIds.includes(id));
+      return kept.length ? kept : visibleIds;
+    });
+  }, [data?.dealerships, dealerScoped, visibleDealerships]);
 
   const loadClients = useCallback(async () => {
     if (!canManageClients) return;
@@ -255,9 +280,11 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
       setError("Use um arquivo Excel (.xlsx), CSV ou TSV.");
       return;
     }
-    const selectedDealership = visibleDealerships.find((dealer) => String(dealer.id) === effectiveUploadDealerId);
-    if (dealerScoped && !selectedDealership) {
-      setError("Selecione uma concessionária vinculada ao seu usuário antes de processar a planilha.");
+    const selectedDealerships = visibleDealerships.filter((dealer) =>
+      effectiveUploadDealerIds.includes(String(dealer.id)),
+    );
+    if (dealerScoped && !selectedDealerships.length) {
+      setError("Selecione ao menos uma concessionária vinculada ao seu usuário antes de processar a planilha.");
       return;
     }
 
@@ -289,7 +316,9 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
           fileName: file.name,
           contentType: file.type,
           totalChunks: init.totalChunks,
-          dealershipId: effectiveUploadDealerId ? Number(effectiveUploadDealerId) : undefined,
+          dealershipIds: effectiveUploadDealerIds.length
+            ? effectiveUploadDealerIds.map(Number)
+            : undefined,
         }),
       });
       const complete = await completeResponse.json() as { import?: { id: number }; error?: string };
@@ -476,7 +505,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
             <div className="reimbursement-template">
               <strong>Campos obrigatórios</strong>
               <span>PN · Descrição · Quantidade · Custo Médio Líquido Unitário · Valor Venda Líquido Unitário · Valor Venda NF Unitário · Cliente · CPF/CNPJ · NF · Estado</span>
-              <small>CPF/CNPJ deve ter 11 ou 14 dígitos. A primeira aba do Excel precisa ser <b>Vendas</b>. {dealerScoped ? "A concessionária do lote é definida pelo seu acesso; a coluna Concessionário do arquivo não altera esse vínculo." : "Concessionário pode ser informado no arquivo ou selecionado abaixo."}</small>
+              <small>PN aceita 00180123 ou 180123: os zeros à esquerda são desconsiderados na conferência. CPF/CNPJ deve ter 11 ou 14 dígitos. A primeira aba do Excel precisa ser <b>Vendas</b>. {dealerScoped ? "Selecione as lojas do lote abaixo; a UF de cada linha define qual cadastro e preço N3 serão consultados." : "Concessionário pode ser informado no arquivo ou selecionado abaixo."}</small>
             </div>
 
             <div className="form-grid">
@@ -485,20 +514,38 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
                 <input name="file" type="file" accept=".xlsx,.csv,.tsv" required />
                 <small>Formatos aceitos: Excel (.xlsx), CSV e TSV. Tamanho máximo: 120 MB.</small>
               </label>
-              {dealerScoped && singleScopedDealership ? (
-                <label className="field">
-                  <span>Concessionária vinculada</span>
-                  <input value={singleScopedDealership.name} readOnly aria-readonly="true" />
-                  <small>Definida automaticamente pelo seu acesso.</small>
-                </label>
+              {dealerScoped ? (
+                <fieldset className="field reimbursement-dealer-checklist">
+                  <legend>Concessionárias do lote *</legend>
+                  <small>Selecione todas as lojas que receberão os dados. Cada linha será encaminhada pela UF da planilha para a concessionária cadastrada naquele estado.</small>
+                  <div className="reimbursement-dealer-options">
+                    {visibleDealerships.map((dealer) => (
+                      <label key={dealer.id}>
+                        <input
+                          type="checkbox"
+                          checked={effectiveUploadDealerIds.includes(String(dealer.id))}
+                          onChange={(event) =>
+                            setUploadDealerIds((current) =>
+                              event.target.checked
+                                ? [...new Set([...current, String(dealer.id)])]
+                                : current.filter((id) => id !== String(dealer.id)),
+                            )
+                          }
+                        />
+                        <span>{dealer.name}{dealer.state ? " — " + dealer.state : ""}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <small>Exemplo: BA consulta o N3 do PN na UF BA; PI consulta o N3 do mesmo PN na UF PI.</small>
+                </fieldset>
               ) : (
                 <label className="field">
-                  <span>{dealerScoped ? "Concessionária vinculada *" : "Concessionária"}</span>
+                  <span>Concessionária</span>
                   <select value={effectiveUploadDealerId} onChange={(event) => setUploadDealerId(event.target.value)} required={dealerScoped}>
-                    <option value="">{dealerScoped ? "Selecione uma concessionária vinculada" : "Usar concessionária da planilha"}</option>
+                    <option value="">Usar concessionária da planilha</option>
                     {visibleDealerships.map((dealer) => <option value={dealer.id} key={dealer.id}>{dealer.name}</option>)}
                   </select>
-                  {dealerScoped && <small>Somente as concessionárias vinculadas ao seu usuário estão disponíveis.</small>}
+                  <small>Quando informado, o UF de cada linha também será conferido com o cadastro da concessionária.</small>
                 </label>
               )}
               {isAdmin && (
@@ -535,6 +582,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
             </div>
             <ul>
               <li>Não há processamento parcial: campos obrigatórios, CPF/CNPJ e UF são conferidos antes da criação do lote.</li>
+              <li>O PN é conferido sem considerar zeros à esquerda; 00180123 e 180123 consultam o mesmo cadastro.</li>
               <li>O cliente é localizado pelo CPF/CNPJ e UF na base de clientes N2/N3.</li>
               <li>N2: margem menor ou igual a 20% e reembolso de 4% sobre a base.</li>
               <li>{isAdmin ? "N3: NF unitária compatível com N3 do PN/UF, com tolerância configurada em " + (data?.n3TolerancePercent ?? (toleranceDraft || "—")) + "%, e reembolso de 7%." : "N3: NF unitária compatível com o valor N3 vigente do PN/UF e reembolso de 7%."}</li>

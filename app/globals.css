@@ -7930,6 +7930,46 @@ button {
   font-size: 10px;
   line-height: 1.4;
 }
+.reimbursement-dealer-checklist {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 13px 14px;
+  border: 1px solid #dfe6eb;
+  background: #fff;
+}
+.reimbursement-dealer-checklist legend {
+  padding: 0;
+  color: #182d49;
+  font-size: 11px;
+  font-weight: 800;
+}
+.reimbursement-dealer-checklist > small {
+  color: #77818a;
+  font-size: 10px;
+  line-height: 1.45;
+}
+.reimbursement-dealer-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.reimbursement-dealer-options label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid #e1e7eb;
+  background: #f8fafb;
+  color: #304452;
+  font-size: 11px;
+  cursor: pointer;
+}
+.reimbursement-dealer-options input {
+  accent-color: #d9252a;
+}
 .reimbursement-upload-card .form-grid {
   gap: 16px;
 }
@@ -8155,7 +8195,8 @@ button {
   .reimbursement-kpi-grid,
   .reimbursement-insight-grid,
   .reimbursement-import-steps,
-  .n2n3-explainer-grid {
+  .n2n3-explainer-grid,
+  .reimbursement-dealer-options {
     grid-template-columns: 1fr;
   }
   .reimbursement-batch-bar {

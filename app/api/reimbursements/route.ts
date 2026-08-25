@@ -131,6 +131,13 @@ function normalize(value: unknown) {
     .replace(/\s+/g, " ")
     .toLocaleLowerCase("pt-BR");
 }
+function normalizePartNumber(value: unknown) {
+  const normalized = normalize(value).replace(/\s+/g, "");
+  if (!normalized) return "";
+  return /^\d+$/.test(normalized)
+    ? normalized.replace(/^0+(?=\d)/, "")
+    : normalized;
+}
 function normalizeDocument(value: unknown) {
   return String(value ?? "").replace(/\D/g, "");
 }
@@ -322,6 +329,16 @@ function stateCode(value: unknown) {
     ? cleaned
     : (names[cleaned.replace(/\s/g, "")] ?? "");
 }
+function dealershipHandlesState(
+  dealer: typeof dealerships.$inferSelect,
+  state: string,
+) {
+  const registeredStates = String(dealer.state ?? "")
+    .split(/[\s,;/|+-]+/)
+    .map(stateCode)
+    .filter(Boolean);
+  return registeredStates.includes(state);
+}
 function parseSales(bytes: Uint8Array, fileName: string): ParsedSale[] {
   const rows = fileName.toLowerCase().endsWith(".xlsx")
     ? parseXlsx(bytes)
@@ -466,7 +483,9 @@ function priceForState(
   const statePrices = parseJson<
     Record<string, { netPriceCents?: number; n3?: number }>
   >(item.statePricesJson, {});
-  const selected = statePrices[state] ?? {};
+  const stateKey =
+    Object.keys(statePrices).find((key) => stateCode(key) === state) ?? state;
+  const selected = statePrices[stateKey] ?? {};
   const net = selected.netPriceCents ?? item.netPriceCents ?? null;
   const n3 = selected.n3 ?? null;
   return {
@@ -644,11 +663,12 @@ export async function GET(request: Request) {
           )
       : [];
     const pnFilter = normalize(params.get("pn"));
+    const normalizedPnFilter = normalizePartNumber(params.get("pn"));
     const statusFilter = params.get("status")?.trim() ?? "all";
     const dealershipFilter = Number(params.get("dealershipId") ?? 0);
     const matchesFilters = (sale: typeof reimbursementSales.$inferSelect) =>
       (!pnFilter ||
-        normalize(sale.partNumber).includes(pnFilter) ||
+        normalizePartNumber(sale.partNumber).includes(normalizedPnFilter) ||
         normalize(sale.description).includes(pnFilter)) &&
       (statusFilter === "all" || sale.status === statusFilter) &&
       (!dealershipFilter || sale.dealershipId === dealershipFilter);
@@ -1035,6 +1055,7 @@ export async function POST(request: Request) {
       contentType?: string;
       totalChunks?: number;
       dealershipId?: number;
+      dealershipIds?: number[];
     };
     uploadId = String(body.uploadId ?? "");
     totalChunks = Math.trunc(Number(body.totalChunks) || 0);
@@ -1063,36 +1084,40 @@ export async function POST(request: Request) {
     const n3ToleranceBps = await getN3ToleranceBps(db);
     const allDealers = await visibleDealers(db, profile);
     const dealerScoped = isDealerScoped(profile);
-    const requestedDealerId = Math.trunc(Number(body.dealershipId) || 0);
-    const requestedDealer = requestedDealerId
-      ? (allDealers.find((dealer) => dealer.id === requestedDealerId) ?? null)
-      : null;
-    if (requestedDealerId && !requestedDealer)
+    const requestedDealerIds = [
+      ...(Array.isArray(body.dealershipIds) ? body.dealershipIds : []),
+      ...(body.dealershipId ? [body.dealershipId] : []),
+    ]
+      .map((value) => Math.trunc(Number(value)))
+      .filter((value) => value > 0);
+    const uniqueRequestedDealerIds = [...new Set(requestedDealerIds)];
+    const selectedDealers = allDealers.filter((dealer) =>
+      uniqueRequestedDealerIds.includes(dealer.id),
+    );
+    if (
+      uniqueRequestedDealerIds.length &&
+      selectedDealers.length !== uniqueRequestedDealerIds.length
+    )
       return errorResponse(
-        "A concessionária selecionada não está vinculada ao seu acesso.",
+        "Uma das concessionárias selecionadas não está vinculada ao seu acesso.",
         403,
       );
-    if (dealerScoped && !allDealers.length)
+    if (dealerScoped && !selectedDealers.length)
       return errorResponse(
-        "Seu usuário não possui uma concessionária vinculada para importar vendas.",
+        "Selecione ao menos uma concessionária vinculada ao seu usuário para importar vendas.",
         403,
       );
-    let fallbackDealer = requestedDealer;
-    if (dealerScoped) {
-      if (!fallbackDealer && allDealers.length === 1)
-        fallbackDealer = allDealers[0];
-      if (!fallbackDealer)
-        return errorResponse(
-          "Selecione uma das concessionárias vinculadas ao seu usuário para processar a planilha.",
-        );
-    } else if (!fallbackDealer && profile.dealershipId) {
-      fallbackDealer =
-        allDealers.find((dealer) => dealer.id === profile.dealershipId) ?? null;
-    }
+    const fallbackDealer =
+      selectedDealers.length === 1
+        ? selectedDealers[0]
+        : !selectedDealers.length && profile.dealershipId
+          ? (allDealers.find((dealer) => dealer.id === profile.dealershipId) ??
+            null)
+          : null;
     const parsed = parseSales(bytes, String(body.fileName ?? "vendas.xlsx"));
     if (!parsed.length)
       return errorResponse("Nenhuma venda válida foi encontrada na planilha.");
-    if (!fallbackDealer) {
+    if (!fallbackDealer && !selectedDealers.length) {
       const unknownDealerships = [
         ...new Set(
           parsed
@@ -1125,7 +1150,7 @@ export async function POST(request: Request) {
           .where(eq(priceListItems.importId, activePriceList.id))
       : [];
     const priceByPn = new Map(
-      priceItems.map((item) => [normalize(item.partNumber), item]),
+      priceItems.map((item) => [normalizePartNumber(item.partNumber), item]),
     );
     const clients = await db
       .select()
@@ -1146,19 +1171,19 @@ export async function POST(request: Request) {
     for (const row of parsed) {
       const dealer =
         fallbackDealer ??
+        selectedDealers.find((item) => dealershipHandlesState(item, row.state)) ??
         allDealers.find(
           (item) => normalize(item.name) === normalize(row.dealershipName),
         );
-      const key = `${row.dealershipCnpj || String(dealer?.id ?? 0)}|${normalize(row.invoiceNumber)}|${normalize(row.partNumber)}`;
+      const key = `${dealer?.id ?? 0}|${normalize(row.invoiceNumber)}|${normalizePartNumber(row.partNumber)}`;
       seen.set(key, (seen.get(key) ?? 0) + 1);
     }
-    const existing = new Set(
-      oldSales.map(
-        (row) =>
-          row.duplicateKey ||
-          `${row.dealershipId ?? 0}|${normalize(row.invoiceNumber)}|${normalize(row.partNumber)}`,
-      ),
-    );
+   const existing = new Set(
+      oldSales.flatMap((row) => [
+        row.duplicateKey,
+        `${row.dealershipId ?? 0}|${normalize(row.invoiceNumber)}|${normalizePartNumber(row.partNumber)}`,
+      ]).filter(Boolean),
+   );
     const allowedDealerIds = new Set(allDealers.map((dealer) => dealer.id));
     const now = dateNow();
     const rowsToInsert: Array<typeof reimbursementSales.$inferInsert> = [];
@@ -1171,7 +1196,9 @@ export async function POST(request: Request) {
       negotiation: 0,
     };
     let importDealerId = fallbackDealer?.id ?? null;
-    if (!fallbackDealer) {
+    if (!fallbackDealer && selectedDealers.length === 1)
+      importDealerId = selectedDealers[0].id;
+    if (!fallbackDealer && !selectedDealers.length) {
       const dealerNames = [
         ...new Set(
           parsed.map((row) => normalize(row.dealershipName)).filter(Boolean),
@@ -1182,22 +1209,50 @@ export async function POST(request: Request) {
           allDealers.find((dealer) => normalize(dealer.name) === dealerNames[0])
             ?.id ?? null;
     }
+    const routingErrors: string[] = [];
     for (const row of parsed) {
+      const candidates = selectedDealers.length
+        ? selectedDealers.filter((item) => dealershipHandlesState(item, row.state))
+        : fallbackDealer
+          ? dealershipHandlesState(fallbackDealer, row.state)
+            ? [fallbackDealer]
+            : []
+          : allDealers.filter(
+              (item) =>
+                normalize(item.name) === normalize(row.dealershipName) &&
+                dealershipHandlesState(item, row.state),
+            );
+      const namedCandidate = candidates.find(
+        (item) => normalize(item.name) === normalize(row.dealershipName),
+      );
       const dealer =
-        fallbackDealer ??
-        allDealers.find(
-          (item) => normalize(item.name) === normalize(row.dealershipName),
+        namedCandidate ??
+        (candidates.length === 1 ? candidates[0] : null);
+      if (!dealer) {
+        const available = selectedDealers.length
+          ? selectedDealers
+              .map((item) => item.name + " (" + (item.state || "UF não cadastrada") + ")")
+              .join(", ")
+          : "a concessionária informada";
+        routingErrors.push(
+          "linha " + row.sourceRow + ": a UF " + row.state + " não está cadastrada para " + available,
         );
-      const dealerId = dealer?.id ?? null;
-      if (dealerScoped && (!dealerId || !allowedDealerIds.has(dealerId)))
         continue;
+      }
+      const dealerId = dealer?.id ?? null;
+      if (dealerScoped && (!dealerId || !allowedDealerIds.has(dealerId))) {
+        routingErrors.push(
+          "linha " + row.sourceRow + ": a concessionária da UF " + row.state + " não pertence à sua carteira",
+        );
+        continue;
+      }
       importDealerId = importDealerId ?? dealerId;
       const client = clients.find(
         (item) =>
           normalizeDocument(item.cnpj) === row.clientCnpj &&
           item.state === row.state,
       );
-      const priceItem = priceByPn.get(normalize(row.partNumber));
+      const priceItem = priceByPn.get(normalizePartNumber(row.partNumber));
       const price =
         priceItem && row.state
           ? priceForState(priceItem, row.state)
@@ -1209,7 +1264,7 @@ export async function POST(request: Request) {
         : costTotal > 0
           ? -10000
           : 0;
-      const key = `${row.dealershipCnpj || String(dealerId ?? 0)}|${normalize(row.invoiceNumber)}|${normalize(row.partNumber)}`;
+      const key = `${dealerId ?? 0}|${normalize(row.invoiceNumber)}|${normalizePartNumber(row.partNumber)}`;
       const duplicate = Boolean(
         row.invoiceNumber && ((seen.get(key) ?? 0) > 1 || existing.has(key)),
       );
@@ -1230,7 +1285,7 @@ export async function POST(request: Request) {
       const history = oldSales.filter(
         (item) =>
           item.dealershipId === dealerId &&
-          normalize(item.partNumber) === normalize(row.partNumber) &&
+          normalizePartNumber(item.partNumber) === normalizePartNumber(row.partNumber) &&
           item.liquidTotalCents > 0,
       );
       const historicalMarginBps = history.length
@@ -1324,6 +1379,23 @@ export async function POST(request: Request) {
         createdAt: now,
       });
     }
+    const importedDealerIds = [
+      ...new Set(
+        rowsToInsert
+          .map((row) => row.dealershipId)
+          .filter((dealerId): dealerId is number => typeof dealerId === "number"),
+      ),
+    ];
+    importDealerId = importedDealerIds.length === 1 ? importedDealerIds[0] : null;
+    if (routingErrors.length)
+      return errorResponse(
+        "Corrija o vínculo entre UF e concessionária antes de importar: " +
+          routingErrors.slice(0, 8).join("; ") +
+          (routingErrors.length > 8
+            ? "; e mais " + (routingErrors.length - 8) + " linha(s)"
+            : "") +
+          ".",
+      );
     if (!rowsToInsert.length)
       return errorResponse(
         "Nenhuma venda pertence ao escopo da concessionária selecionada.",
