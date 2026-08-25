@@ -1,6 +1,6 @@
 "use client";
 
-import type { FormEvent, ReactNode } from "react";
+import type { ChangeEvent, FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AppUser } from "../lib/auth";
 import { HorschLeadsView, type LeadModuleData } from "./horsch-leads";
@@ -2407,9 +2407,9 @@ function QuotesView({
   me: CurrentAccess;
   onChanged: () => Promise<void>;
 }) {
-  const [section, setSection] = useState<"flow" | "history" | "analysis">(
-    "flow",
-  );
+  const [section, setSection] = useState<
+    "flow" | "history" | "analysis" | "import"
+  >("flow");
   const [pn, setPn] = useState("");
   const [quantity, setQuantity] = useState("1");
   const [priority, setPriority] = useState<QuotePriority>("normal");
@@ -2541,9 +2541,27 @@ function QuotesView({
               360º
             </button>
           )}
+          {canImportResponses && (
+            <button
+              type="button"
+              className={section === "import" ? "active" : ""}
+              onClick={() => setSection("import")}
+            >
+              Importação <span className="quotes-tab-badge">ADM</span>
+            </button>
+          )}
         </div>
       </header>
-      {section === "analysis" ? (
+      {section === "import" ? (
+        <QuoteImportPanel
+          importFile={importFile}
+          importSaving={importSaving}
+          importMessage={importMessage}
+          setImportFile={setImportFile}
+          onImport={importResponses}
+          onDownloadTemplate={downloadQuoteImportTemplate}
+        />
+      ) : section === "analysis" ? (
         <QuoteAnalysisView quotes={quotes} me={me} onChanged={onChanged} />
       ) : section === "history" ? (
         <QuoteHistoryView
@@ -2554,7 +2572,7 @@ function QuotesView({
       ) : (
         <>
           {globalView && <QuoteMetrics quotes={quotes} />}
-          {canImportResponses && (
+          {false && canImportResponses && (
             <section className="panel quote-import-panel">
               <header>
                 <div>
@@ -2710,6 +2728,82 @@ function QuotesView({
         </>
       )}
     </div>
+  );
+}
+
+function QuoteImportPanel({
+  importFile,
+  importSaving,
+  importMessage,
+  setImportFile,
+  onImport,
+  onDownloadTemplate,
+}: {
+  importFile: File | null;
+  importSaving: boolean;
+  importMessage: string;
+  setImportFile: (file: File | null) => void;
+  onImport: (event: FormEvent) => void;
+  onDownloadTemplate: () => void;
+}) {
+  return (
+    <section className="panel quote-import-panel quote-import-page">
+      <header>
+        <div>
+          <span className="eyebrow">Área exclusiva do ADM</span>
+          <h2>Importar banco de respostas</h2>
+          <p>
+            Carregue uma base já respondida e o sistema marcará as cotações
+            abertas como respondidas hoje, encaminhando-as para aprovação do
+            Gestor do Concessionário. O layout PN, Descrição, VT, Origem, NCM e
+            Netprice é aceito diretamente.
+          </p>
+        </div>
+        <div className="quote-import-actions">
+          <span className="quote-import-badge">ADM</span>
+          <button
+            type="button"
+            className="outline-button compact"
+            onClick={onDownloadTemplate}
+          >
+            Baixar modelo
+          </button>
+        </div>
+      </header>
+      <form
+        className="quote-import-form"
+        onSubmit={(event) => void onImport(event)}
+      >
+        <label className="field">
+          <span>Base de respostas</span>
+          <input
+            type="file"
+            accept=".xlsx,.csv,.tsv"
+            onChange={(event: ChangeEvent<HTMLInputElement>) =>
+              setImportFile(event.target.files?.[0] ?? null)
+            }
+            required
+          />
+          <small>
+            Colunas: PN, Descrição, VT, Origem, NCM e Netprice. A Origem é
+            conferida pelo 3º caractere do VT. Para vincular por uma cotação
+            específica, a planilha também pode conter ID da Cotação.
+          </small>
+        </label>
+        <button
+          type="submit"
+          className="primary-button"
+          disabled={importSaving || !importFile}
+        >
+          {importSaving ? "Importando..." : "Importar base em massa"}
+        </button>
+      </form>
+      {importMessage && (
+        <p className="quote-import-result" role="status">
+          {importMessage}
+        </p>
+      )}
+    </section>
   );
 }
 
