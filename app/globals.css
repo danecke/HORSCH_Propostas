@@ -11212,3 +11212,83 @@ body {
     font-size: 6px;
   }
 }
+
+/* Visão gerencial — distribuição segura dos indicadores */
+.reimbursement-kpi-grid,
+.reimbursement-dashboard-grid,
+.reimbursement-margin-segments,
+.factory-reimbursement-kpis,
+.factory-margin-grid,
+.factory-reimbursement-grid {
+  width: 100%;
+  min-width: 0;
+}
+.reimbursement-kpi,
+.reimbursement-dashboard-grid > .panel,
+.reimbursement-margin-segment,
+.factory-reimbursement-kpi,
+.factory-margin-card,
+.factory-reimbursement-chart,
+.factory-reimbursement-summary,
+.factory-monthly-panel {
+  min-width: 0;
+}
+.reimbursement-kpi strong,
+.factory-reimbursement-kpi strong,
+.reimbursement-margin-segment strong,
+.factory-margin-card > strong,
+.factory-margin-card dd,
+.factory-reimbursement-summary-list strong {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+.reimbursement-kpi strong {
+  font-size: clamp(21px, 2.25vw, 32px);
+}
+.factory-margin-card dl,
+.factory-margin-card dl div,
+.factory-reimbursement-summary-list > div {
+  min-width: 0;
+}
+.factory-margin-card dd {
+  font-size: clamp(10px, 1vw, 12px);
+}
+.reimbursement-dashboard-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.reimbursement-dashboard-grid .reimbursement-table-wrap,
+.factory-monthly-panel .reimbursement-table-wrap {
+  max-width: 100%;
+}
+.factory-reimbursement-bar-row {
+  min-width: 0;
+}
+.factory-reimbursement-bar-row > div:first-child,
+.factory-reimbursement-bar-row b {
+  min-width: 0;
+}
+.factory-reimbursement-bar-row b {
+  overflow-wrap: anywhere;
+  white-space: normal;
+  text-align: right;
+}
+
+@media (max-width: 1040px) {
+  .reimbursement-kpi-grid,
+  .reimbursement-margin-segments,
+  .factory-reimbursement-kpis,
+  .factory-margin-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 720px) {
+  .reimbursement-dashboard-grid,
+  .reimbursement-kpi-grid,
+  .reimbursement-margin-segments,
+  .factory-reimbursement-kpis,
+  .factory-margin-grid,
+  .factory-reimbursement-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

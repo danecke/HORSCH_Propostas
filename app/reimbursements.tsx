@@ -495,7 +495,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
           <p>Uma operação única para importar vendas, conferir exceções e acompanhar o retorno financeiro da rede.</p>
           <div className="reimbursement-command-stats" aria-label="Resumo rápido do módulo">
             <span><small>Perfil</small><strong>{data?.canViewFactoryDashboard ? "Fábrica" : "Concessionária"}</strong></span>
-            <span><small>Solicitações</small><strong>{data?.imports.length ?? 0}</strong></span>
+            <span><small>Registros analisados</small><strong>{data?.summary.processedRows ?? 0}</strong></span>
             <span><small>Linhas críticas</small><strong>{data?.summary.attentionRecords ?? 0}</strong></span>
           </div>
         </div>
@@ -515,7 +515,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
       {message && <div className="form-success reimbursement-notice">{message}</div>}
       {error && <div className="form-error reimbursement-notice">{error}</div>}
 
-      {(tab === "overview" || tab === "sales") && data?.imports.length ? (
+      {tab === "sales" && data?.imports.length ? (
         <section className="reimbursement-toolbar reimbursement-batch-bar" aria-label="Solicitação ativa">
           <label>
             Solicitação / importação
@@ -580,7 +580,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
             </div>
           </div>
         </section>
-      ) : (tab === "overview" || tab === "sales") && (
+      ) : tab === "sales" && (
         <section className="empty-state reimbursement-empty">
           <strong>Nenhuma venda processada ainda.</strong>
           <span>Baixe o modelo, cadastre o CPF/CNPJ do cliente e importe a primeira planilha de vendas.</span>
@@ -718,7 +718,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
         </section>
       )}
 
-      {tab === "overview" && data && <ExecutiveOverview data={data} activeBatch={activeBatch} isFactoryView={data.canViewFactoryDashboard} dealerships={visibleDealerships} factoryFilters={factoryFilters} onFactoryFiltersChange={setFactoryFilters} />}
+      {tab === "overview" && data && <ExecutiveOverview data={data} isFactoryView={data.canViewFactoryDashboard} dealerships={visibleDealerships} factoryFilters={factoryFilters} onFactoryFiltersChange={setFactoryFilters} />}
 
       {tab === "sales" && data && (
         <section className="panel reimbursement-detail-panel">
@@ -834,8 +834,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
   );
 }
 
-function ExecutiveOverview({ data, activeBatch, isFactoryView, dealerships, factoryFilters, onFactoryFiltersChange }: { data: DashboardData; activeBatch?: Batch; isFactoryView: boolean; dealerships: Dealer[]; factoryFilters: FactoryFilters; onFactoryFiltersChange: Dispatch<SetStateAction<FactoryFilters>> }) {
-  const maxStatus = Math.max(1, ...data.statusBreakdown.map((item) => item.count));
+function ExecutiveOverview({ data, isFactoryView, dealerships, factoryFilters, onFactoryFiltersChange }: { data: DashboardData; isFactoryView: boolean; dealerships: Dealer[]; factoryFilters: FactoryFilters; onFactoryFiltersChange: Dispatch<SetStateAction<FactoryFilters>> }) {
   const overviewSummary = isFactoryView && data.factoryDashboard
     ? data.factoryDashboard.summary
     : data.summary;
@@ -881,7 +880,7 @@ function ExecutiveOverview({ data, activeBatch, isFactoryView, dealerships, fact
         <div>
           <span className="eyebrow">{isFactoryView ? "Visão da fábrica" : "Visão da concessionária"}</span>
           <h2>{isFactoryView ? "Controle consolidado da carteira" : "Acompanhamento da sua operação"}</h2>
-          <p>{isFactoryView ? "Acompanhe a solicitação atual e o histórico de vendas processadas por concessionária, mês e tipo de operação." : "Todos os indicadores operacionais permanecem disponíveis, sem a exibição da margem consolidada."}</p>
+          <p>{isFactoryView ? "Acompanhe indicadores consolidados por concessionária, período, PN e classificação de cliente." : "Acompanhe os indicadores comerciais e financeiros da operação da concessionária."}</p>
         </div>
         <span className="reimbursement-view-badge">{isFactoryView ? "Análise ampliada" : "Escopo da concessionária"}</span>
       </section>
@@ -906,35 +905,6 @@ function ExecutiveOverview({ data, activeBatch, isFactoryView, dealerships, fact
         <article className="reimbursement-kpi n2"><div className="reimbursement-kpi-top"><span>Reembolso Nível 2</span><i>N2</i></div><strong>{formatBRL(overviewSummary.reimbursementN2Cents)}</strong><small>Programa N2 · 4%</small></article>
         <article className="reimbursement-kpi n3"><div className="reimbursement-kpi-top"><span>Reembolso Nível 3</span><i>N3</i></div><strong>{formatBRL(overviewSummary.reimbursementN3Cents)}</strong><small>Programa N3 · 7%</small></article>
         <article className="reimbursement-kpi danger"><div className="reimbursement-kpi-top"><span>Negociação fábrica</span><i>!</i></div><strong>{formatBRL(overviewSummary.negotiationCents)}</strong><small>Margem negativa em Nível 3</small></article>
-      </section>
-
-      <section className="reimbursement-insight-grid">
-        <article className="panel reimbursement-insight-card">
-          <span className="eyebrow">{isFactoryView ? "Cobertura do período" : "Cobertura da solicitação"}</span>
-          <h2>{overviewSummary.totalQuantity.toLocaleString("pt-BR")} unidades vendidas</h2>
-          <p>{isFactoryView ? `${overviewSummary.processedRows} registros considerados pelos filtros da fábrica.` : `${data.summary.eligibleN2Records + data.summary.eligibleN3Records} vendas elegíveis entre ${data.summary.processedRows} registros analisados.`}</p>
-        </article>
-        <article className="panel reimbursement-insight-card">
-          <span className="eyebrow">Base de cálculo</span>
-          <h2>{data.summary.fallbackBaseRecords} linhas com fallback</h2>
-          <p>Quando o Net Price não está disponível, o cálculo usa o custo médio líquido unitário do arquivo.</p>
-        </article>
-        <article className="panel reimbursement-insight-card danger">
-          <span className="eyebrow">Atenção necessária</span>
-          <h2>{data.summary.attentionRecords} ocorrências</h2>
-          <p>{data.summary.attentionRecords ? "Revise divergências, NFs duplicadas, clientes sem cadastro e negociações antes de aprovar." : "Nenhuma pendência financeira no filtro atual."}</p>
-        </article>
-      </section>
-
-      <section className="reimbursement-dashboard-grid">
-        <article className="panel reimbursement-status-panel">
-          <div className="panel-heading"><div><span className="eyebrow">Elegibilidade e alertas</span><h2>Distribuição da solicitação</h2><p>Leitura rápida dos estados das vendas processadas.</p></div></div>
-          {data.statusBreakdown.length ? <div className="reimbursement-breakdown">{data.statusBreakdown.map((item) => <div className="reimbursement-breakdown-row" key={item.status}><div><span className={`reimbursement-status ${statusClass(item.status)}`}>{item.status}</span><small>{formatBRL(item.reimbursementCents)} projetados</small></div><div className="reimbursement-bar"><span className={statusClass(item.status)} style={{ width: `${(item.count / maxStatus) * 100}%` }} /></div><strong>{item.count}</strong></div>)}</div> : <div className="empty-mini">Sem registros para a solicitação atual.</div>}
-        </article>
-        <article className="panel reimbursement-workflow-panel">
-          <div className="panel-heading"><div><span className="eyebrow">Auditoria e aprovação</span><h2>Decisões da solicitação</h2><p>{activeBatch?.decisionNote || "O histórico registra cada etapa para conferência financeira."}</p></div></div>
-          {data.approvals.length ? <div className="approval-timeline">{data.approvals.map((approval, index) => <div key={`${approval.createdAt}-${index}`}><strong>{statusLabel(approval.action)}</strong><span>{approval.actorName} · {formatDate(approval.createdAt)}</span>{approval.note && <small>{approval.note}</small>}</div>)}</div> : <div className="empty-mini">Nenhuma decisão registrada. Envie a solicitação para iniciar a aprovação.</div>}
-        </article>
       </section>
 
       <section className="reimbursement-dashboard-grid">
@@ -964,7 +934,6 @@ function ExecutiveOverview({ data, activeBatch, isFactoryView, dealerships, fact
 
       {isFactoryView && data.factoryDashboard && <FactoryPerformanceDashboard dashboard={data.factoryDashboard} />}
 
-      <ReimbursementVariationPanel sales={data.sales} />
     </>
   );
 }
@@ -1070,31 +1039,6 @@ function FactoryPerformanceDashboard({ dashboard }: { dashboard: FactoryDashboar
           {!dashboard.salesByMonthAndDealership.length && <div className="empty-mini">Ainda não há vendas processadas na carteira para montar o histórico mensal.</div>}
         </div>
       </article>
-    </section>
-  );
-}
-
-function ReimbursementVariationPanel({ sales }: { sales: Sale[] }) {
-  const grouped = new Map<string, { partNumber: string; description: string; quantity: number; prices: number[]; costs: number[]; netPrices: number[] }>();
-  for (const sale of sales) {
-    const entry = grouped.get(sale.partNumber) ?? { partNumber: sale.partNumber, description: sale.description, quantity: 0, prices: [], costs: [], netPrices: [] };
-    entry.quantity += sale.quantity;
-    entry.prices.push(sale.saleNetUnitCents);
-    entry.costs.push(sale.costAvgUnitCents);
-    if (sale.netPriceUsedCents !== null) entry.netPrices.push(sale.netPriceUsedCents);
-    grouped.set(sale.partNumber, entry);
-  }
-  const rows = [...grouped.values()].map((entry) => {
-    const average = (values: number[]) => values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : null;
-    const price = average(entry.prices);
-    const netPrice = average(entry.netPrices);
-    return { ...entry, priceDeltaCents: price !== null && netPrice !== null ? price - netPrice : null, costRangeCents: entry.costs.length ? Math.max(...entry.costs) - Math.min(...entry.costs) : 0 };
-  }).sort((left, right) => Math.abs(right.priceDeltaCents ?? 0) + right.costRangeCents - (Math.abs(left.priceDeltaCents ?? 0) + left.costRangeCents)).slice(0, 12);
-
-  return (
-    <section className="panel reimbursement-variation-panel">
-      <div className="panel-heading"><div><span className="eyebrow">Análise comparativa</span><h2>Variação de preços e custos</h2><p>Preço médio líquido versus Net Price da tabela e amplitude do custo médio unitário dentro do lote.</p></div></div>
-      <div className="reimbursement-table-wrap"><table className="reimbursement-table"><thead><tr><th>PN</th><th>Qtd.</th><th>Preço venda × Net Price</th><th>Variação de custo unitário</th></tr></thead><tbody>{rows.map((row) => <tr key={row.partNumber}><td><strong>{row.partNumber}</strong><small>{row.description}</small></td><td>{row.quantity}</td><td className={row.priceDeltaCents !== null && row.priceDeltaCents !== 0 ? "variation-value" : ""}>{signedBRL(row.priceDeltaCents)}</td><td>{formatBRL(row.costRangeCents)}</td></tr>)}</tbody></table>{!rows.length && <div className="empty-mini">Sem dados comparáveis no lote atual.</div>}</div>
     </section>
   );
 }
