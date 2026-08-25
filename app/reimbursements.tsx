@@ -78,6 +78,8 @@ type Client = { id: number; legalName: string; cnpj: string; state: string; clie
 type ClientForm = { legalName: string; cnpj: string; state: string; clientType: string; n2: boolean; n3: boolean; status: string };
 type StatusBreakdown = { status: string; count: number; liquidTotalCents: number; reimbursementCents: number };
 type FactoryDashboard = {
+  summary: { salesCents: number; costCents: number; marginBps: number; reimbursementN2Cents: number; reimbursementN3Cents: number; negotiationCents: number; processedRows: number; totalQuantity: number };
+  byPartNumber: Array<{ partNumber: string; description: string; rows: number; quantity: number; salesCents: number; reimbursementCents: number; marginBps: number }>;
   marginByProgram: Array<{ key: "N2" | "N3" | "normal"; label: string; rows: number; quantity: number; salesCents: number; costCents: number; reimbursementCents: number; marginBps: number }>;
   salesByMonthAndDealership: Array<{ month: string; dealershipName: string; rows: number; quantity: number; salesCents: number; costCents: number; n2SalesCents: number; n2CostCents: number; n3SalesCents: number; n3CostCents: number; normalSalesCents: number; normalCostCents: number; reimbursementCents: number; n2ReimbursementCents: number; n3ReimbursementCents: number; negotiationCents: number; totalMarginBps: number; n2MarginBps: number; n3MarginBps: number; normalMarginBps: number }>;
   reimbursementByMonth: Array<{ month: string; reimbursementCents: number; n2Cents: number; n3Cents: number; negotiationCents: number; rows: number }>;
@@ -187,8 +189,6 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
       ? [effectiveUploadDealerId]
       : [];
   const activeBatch = useMemo(() => data?.imports.find((item) => item.id === activeBatchId) ?? data?.imports[0], [activeBatchId, data?.imports]);
-  const reimbursementTotal = (data?.summary.reimbursementN2Cents ?? 0) + (data?.summary.reimbursementN3Cents ?? 0);
-
   const load = useCallback(async () => {
     setError("");
     try {
@@ -205,21 +205,18 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
       const payload = await response.json() as DashboardData & { error?: string };
       if (!response.ok) throw new Error(payload.error || "Não foi possível carregar os reembolsos.");
       setData(payload);
+      if (isAdmin && typeof payload.n3TolerancePercent === "number")
+        setToleranceDraft(String(payload.n3TolerancePercent));
       if (!activeBatchId && payload.activeImportId) setActiveBatchId(payload.activeImportId);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Não foi possível carregar os reembolsos.");
     }
-  }, [activeBatchId, attentionOnly, dealerFilter, factoryFilters, pnFilter, statusFilter]);
+  }, [activeBatchId, attentionOnly, dealerFilter, factoryFilters, isAdmin, pnFilter, statusFilter]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void load(); }, 250);
     return () => window.clearTimeout(timer);
   }, [load]);
-
-  useEffect(() => {
-    if (isAdmin && typeof data?.n3TolerancePercent === "number")
-      setToleranceDraft(String(data.n3TolerancePercent));
-  }, [data?.n3TolerancePercent, isAdmin]);
 
   useEffect(() => {
     if (!canSelectMultipleDealerships) {
@@ -255,8 +252,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
     return () => window.clearTimeout(timer);
   }, [loadClients, tab]);
 
-  async function updateN3Tolerance(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function updateN3Tolerance() {
     const tolerancePercent = Number(toleranceDraft.replace(",", "."));
     if (!Number.isFinite(tolerancePercent) || tolerancePercent < 0 || tolerancePercent > 100) {
       setError("Informe uma tolerância entre 0% e 100%.");
@@ -492,15 +488,15 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
 
       <nav className="reimbursement-tabs" aria-label="Seções de reembolsos">
         <button className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>Visão gerencial</button>
-        <button className={tab === "sales" ? "active" : ""} onClick={() => setTab("sales")}>Conferência de venda</button>
         <button className={tab === "import" ? "active" : ""} onClick={() => setTab("import")}>Importação de dados</button>
+        <button className={tab === "sales" ? "active" : ""} onClick={() => setTab("sales")}>Conferência de venda</button>
         {canManageClients && <button className={tab === "clients" ? "active" : ""} onClick={() => setTab("clients")}>Clientes N2/N3</button>}
       </nav>
 
       {message && <div className="form-success reimbursement-notice">{message}</div>}
       {error && <div className="form-error reimbursement-notice">{error}</div>}
 
-      {data?.imports.length ? (
+      {(tab === "overview" || tab === "sales") && data?.imports.length ? (
         <section className="reimbursement-toolbar reimbursement-batch-bar" aria-label="Solicitação ativa">
           <label>
             Solicitação / importação
@@ -545,7 +541,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
             </div>
           </div>
         </section>
-      ) : (
+      ) : (tab === "overview" || tab === "sales") && (
         <section className="empty-state reimbursement-empty">
           <strong>Nenhuma venda processada ainda.</strong>
           <span>Baixe o modelo, cadastre o CPF/CNPJ do cliente e importe a primeira planilha de vendas.</span>
@@ -639,15 +635,15 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
                 </label>
               )}
               {isAdmin && (
-                <form className="field n3-tolerance-form" onSubmit={(event) => void updateN3Tolerance(event)}>
+                <section className="field n3-tolerance-form" aria-label="Configuração administrativa da tolerância N3">
                   <span>Tolerância N3 — ADM</span>
                   <div className="n3-tolerance-input">
                     <input value={toleranceDraft} onChange={(event) => setToleranceDraft(event.target.value)} inputMode="decimal" min="0" max="100" step="0.1" type="number" aria-label="Tolerância N3 em porcentagem" />
                     <span>%</span>
-                    <button className="outline-button compact" disabled={busy}>Salvar</button>
+                    <button type="button" className="outline-button compact" disabled={busy} onClick={() => void updateN3Tolerance()}>Salvar</button>
                   </div>
                   <small>Parâmetro administrativo aplicado às próximas solicitações. Não é exibido para outros perfis.</small>
-                </form>
+                </section>
               )}
             </div>
 
@@ -683,7 +679,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
         </section>
       )}
 
-      {tab === "overview" && data && <ExecutiveOverview data={data} reimbursementTotal={reimbursementTotal} activeBatch={activeBatch} isFactoryView={data.canViewFactoryDashboard} dealerships={visibleDealerships} factoryFilters={factoryFilters} onFactoryFiltersChange={setFactoryFilters} />}
+      {tab === "overview" && data && <ExecutiveOverview data={data} activeBatch={activeBatch} isFactoryView={data.canViewFactoryDashboard} dealerships={visibleDealerships} factoryFilters={factoryFilters} onFactoryFiltersChange={setFactoryFilters} />}
 
       {tab === "sales" && data && (
         <section className="panel reimbursement-detail-panel">
@@ -799,18 +795,47 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
   );
 }
 
-function ExecutiveOverview({ data, reimbursementTotal, activeBatch, isFactoryView, dealerships, factoryFilters, onFactoryFiltersChange }: { data: DashboardData; reimbursementTotal: number; activeBatch?: Batch; isFactoryView: boolean; dealerships: Dealer[]; factoryFilters: FactoryFilters; onFactoryFiltersChange: Dispatch<SetStateAction<FactoryFilters>> }) {
+function ExecutiveOverview({ data, activeBatch, isFactoryView, dealerships, factoryFilters, onFactoryFiltersChange }: { data: DashboardData; activeBatch?: Batch; isFactoryView: boolean; dealerships: Dealer[]; factoryFilters: FactoryFilters; onFactoryFiltersChange: Dispatch<SetStateAction<FactoryFilters>> }) {
   const maxStatus = Math.max(1, ...data.statusBreakdown.map((item) => item.count));
-  const marginSegments = [
-    { key: "N2", label: "Margem N2", description: "Clientes nível 2" },
-    { key: "N3", label: "Margem N3", description: "Clientes nível 3" },
-    { key: "normal", label: "Cliente Normal", description: "Vendas sem programa" },
-  ].map((segment) => {
-    const rows = data.sales.filter((sale) => (segment.key === "normal" ? !sale.reimbursementProgram : sale.reimbursementProgram === segment.key));
-    const salesCents = rows.reduce((sum, sale) => sum + sale.liquidTotalCents, 0);
-    const costCents = rows.reduce((sum, sale) => sum + sale.costTotalCents, 0);
-    return { ...segment, rows: rows.length, salesCents, marginBps: salesCents ? Math.round(((salesCents - costCents) / salesCents) * 10000) : 0 };
-  });
+  const overviewSummary = isFactoryView && data.factoryDashboard
+    ? data.factoryDashboard.summary
+    : data.summary;
+  const rankingByPart = isFactoryView && data.factoryDashboard
+    ? data.factoryDashboard.byPartNumber
+    : data.byPartNumber;
+  const overviewByDealership = isFactoryView && data.factoryDashboard
+    ? [...data.factoryDashboard.salesByMonthAndDealership.reduce((grouped, row) => {
+        const current = grouped.get(row.dealershipName) ?? { label: row.dealershipName, rows: 0, quantity: 0, salesCents: 0, reimbursementCents: 0, costCents: 0 };
+        current.rows += row.rows;
+        current.quantity += row.quantity;
+        current.salesCents += row.salesCents;
+        current.reimbursementCents += row.reimbursementCents;
+        current.costCents += row.costCents;
+        grouped.set(row.dealershipName, current);
+        return grouped;
+      }, new Map<string, { label: string; rows: number; quantity: number; salesCents: number; reimbursementCents: number; costCents: number }>()).values()]
+        .map((row) => ({ ...row, marginBps: row.salesCents ? Math.round(((row.salesCents - row.costCents) / row.salesCents) * 10000) : 0 }))
+        .sort((left, right) => right.salesCents - left.salesCents)
+    : data.byDealership;
+  const marginSegments = isFactoryView && data.factoryDashboard
+    ? data.factoryDashboard.marginByProgram.map((segment) => ({
+        key: segment.key,
+        label: segment.key === "normal" ? "Cliente Normal" : `Margem ${segment.key}`,
+        description: segment.label,
+        rows: segment.rows,
+        salesCents: segment.salesCents,
+        marginBps: segment.marginBps,
+      }))
+    : [
+        { key: "N2", label: "Margem N2", description: "Clientes nível 2" },
+        { key: "N3", label: "Margem N3", description: "Clientes nível 3" },
+        { key: "normal", label: "Cliente Normal", description: "Vendas sem programa" },
+      ].map((segment) => {
+        const rows = data.sales.filter((sale) => (segment.key === "normal" ? !sale.reimbursementProgram : sale.reimbursementProgram === segment.key));
+        const salesCents = rows.reduce((sum, sale) => sum + sale.liquidTotalCents, 0);
+        const costCents = rows.reduce((sum, sale) => sum + sale.costTotalCents, 0);
+        return { ...segment, rows: rows.length, salesCents, marginBps: salesCents ? Math.round(((salesCents - costCents) / salesCents) * 10000) : 0 };
+      });
   return (
     <>
       <section className={`reimbursement-view-context ${isFactoryView ? "factory" : "dealership"}`}>
@@ -822,20 +847,28 @@ function ExecutiveOverview({ data, reimbursementTotal, activeBatch, isFactoryVie
         <span className="reimbursement-view-badge">{isFactoryView ? "Análise ampliada" : "Escopo da concessionária"}</span>
       </section>
 
+      {isFactoryView && (
+        <FactoryFilterBar
+          dealerships={dealerships}
+          filters={factoryFilters}
+          onFiltersChange={onFactoryFiltersChange}
+        />
+      )}
+
       <section className="reimbursement-kpi-grid">
-        <article className="reimbursement-kpi primary"><span>Valor líquido vendido</span><strong>{formatBRL(data.summary.salesCents)}</strong><small>{data.summary.processedRows} registros no filtro atual</small></article>
-        <article className="reimbursement-kpi accent"><span>Reembolso projetado</span><strong>{formatBRL(reimbursementTotal)}</strong><small>N2 + N3 elegíveis</small></article>
-        {isFactoryView && <article className="reimbursement-kpi"><span>Margem consolidada</span><strong>{formatPercent(data.summary.marginBps)}%</strong><small>Vendas líquidas versus custo</small></article>}
-        <article className="reimbursement-kpi"><span>Reembolso Nível 2</span><strong>{formatBRL(data.summary.reimbursementN2Cents)}</strong><small>{data.summary.eligibleN2Records} vendas elegíveis · 4%</small></article>
-        <article className="reimbursement-kpi"><span>Reembolso Nível 3</span><strong>{formatBRL(data.summary.reimbursementN3Cents)}</strong><small>{data.summary.eligibleN3Records} vendas elegíveis · 7%</small></article>
-        <article className="reimbursement-kpi danger"><span>Negociação fábrica</span><strong>{formatBRL(data.summary.negotiationCents)}</strong><small>Margem negativa em Nível 3</small></article>
+        <article className="reimbursement-kpi primary"><span>Valor líquido vendido</span><strong>{formatBRL(overviewSummary.salesCents)}</strong><small>{overviewSummary.processedRows} registros no filtro atual</small></article>
+        <article className="reimbursement-kpi accent"><span>Reembolso projetado</span><strong>{formatBRL(overviewSummary.reimbursementN2Cents + overviewSummary.reimbursementN3Cents)}</strong><small>N2 + N3 elegíveis</small></article>
+        {isFactoryView && <article className="reimbursement-kpi"><span>Margem consolidada</span><strong>{formatPercent(overviewSummary.marginBps)}%</strong><small>Vendas líquidas versus custo</small></article>}
+        <article className="reimbursement-kpi"><span>Reembolso Nível 2</span><strong>{formatBRL(overviewSummary.reimbursementN2Cents)}</strong><small>Programa N2 · 4%</small></article>
+        <article className="reimbursement-kpi"><span>Reembolso Nível 3</span><strong>{formatBRL(overviewSummary.reimbursementN3Cents)}</strong><small>Programa N3 · 7%</small></article>
+        <article className="reimbursement-kpi danger"><span>Negociação fábrica</span><strong>{formatBRL(overviewSummary.negotiationCents)}</strong><small>Margem negativa em Nível 3</small></article>
       </section>
 
       <section className="reimbursement-insight-grid">
         <article className="panel reimbursement-insight-card">
-          <span className="eyebrow">Cobertura da solicitação</span>
-          <h2>{data.summary.totalQuantity.toLocaleString("pt-BR")} unidades vendidas</h2>
-          <p>{data.summary.eligibleN2Records + data.summary.eligibleN3Records} vendas elegíveis entre {data.summary.processedRows} registros analisados.</p>
+          <span className="eyebrow">{isFactoryView ? "Cobertura do período" : "Cobertura da solicitação"}</span>
+          <h2>{overviewSummary.totalQuantity.toLocaleString("pt-BR")} unidades vendidas</h2>
+          <p>{isFactoryView ? `${overviewSummary.processedRows} registros considerados pelos filtros da fábrica.` : `${data.summary.eligibleN2Records + data.summary.eligibleN3Records} vendas elegíveis entre ${data.summary.processedRows} registros analisados.`}</p>
         </article>
         <article className="panel reimbursement-insight-card">
           <span className="eyebrow">Base de cálculo</span>
@@ -863,11 +896,11 @@ function ExecutiveOverview({ data, reimbursementTotal, activeBatch, isFactoryVie
       <section className="reimbursement-dashboard-grid">
         <article className="panel">
           <div className="panel-heading"><div><span className="eyebrow">Visão de rede</span><h2>Por concessionário</h2><p>Faturamento, margem e impacto do reembolso por operação.</p></div></div>
-          <div className="reimbursement-table-wrap"><table className="reimbursement-table"><thead><tr><th>Concessionário</th><th>Linhas</th><th>Qtd.</th><th>Faturamento</th><th>Reembolso</th><th>Margem</th></tr></thead><tbody>{data.byDealership.map((row) => <tr key={row.label}><td><strong>{row.label}</strong></td><td>{row.rows}</td><td>{row.quantity}</td><td>{formatBRL(row.salesCents)}</td><td>{formatBRL(row.reimbursementCents)}</td><td>{formatPercent(row.marginBps)}%</td></tr>)}</tbody></table>{!data.byDealership.length && <div className="empty-mini">Sem dados de concessionárias nesta solicitação.</div>}</div>
+          <div className="reimbursement-table-wrap"><table className="reimbursement-table"><thead><tr><th>Concessionário</th><th>Linhas</th><th>Qtd.</th><th>Faturamento</th><th>Reembolso</th><th>Margem</th></tr></thead><tbody>{overviewByDealership.map((row) => <tr key={row.label}><td><strong>{row.label}</strong></td><td>{row.rows}</td><td>{row.quantity}</td><td>{formatBRL(row.salesCents)}</td><td>{formatBRL(row.reimbursementCents)}</td><td>{formatPercent(row.marginBps)}%</td></tr>)}</tbody></table>{!overviewByDealership.length && <div className="empty-mini">Sem dados de concessionárias no período selecionado.</div>}</div>
         </article>
         <article className="panel">
-          <div className="panel-heading"><div><span className="eyebrow">Itens críticos</span><h2>Ranking por PN</h2><p>Priorize os itens com maior impacto de reembolso.</p></div></div>
-          <div className="reimbursement-table-wrap"><table className="reimbursement-table"><thead><tr><th>PN</th><th>Qtd.</th><th>Faturamento</th><th>Reembolso</th><th>Margem</th></tr></thead><tbody>{data.byPartNumber.map((row) => <tr key={row.partNumber}><td><strong>{row.partNumber}</strong><small>{row.description}</small></td><td>{row.quantity}</td><td>{formatBRL(row.salesCents)}</td><td>{formatBRL(row.reimbursementCents)}</td><td>{formatPercent(row.marginBps)}%</td></tr>)}</tbody></table>{!data.byPartNumber.length && <div className="empty-mini">Sem itens na solicitação atual.</div>}</div>
+          <div className="panel-heading"><div><span className="eyebrow">Desempenho por item</span><h2>Ranking de vendas por PN</h2><p>Ordenado pelo maior valor líquido vendido no período selecionado.</p></div></div>
+          <div className="reimbursement-table-wrap"><table className="reimbursement-table"><thead><tr><th>PN</th><th>Qtd.</th><th>Valor líquido</th><th>Reembolso</th><th>Margem</th></tr></thead><tbody>{rankingByPart.map((row) => <tr key={row.partNumber}><td><strong>{row.partNumber}</strong><small>{row.description}</small></td><td>{row.quantity}</td><td>{formatBRL(row.salesCents)}</td><td>{formatBRL(row.reimbursementCents)}</td><td>{formatPercent(row.marginBps)}%</td></tr>)}</tbody></table>{!rankingByPart.length && <div className="empty-mini">Sem itens no período selecionado.</div>}</div>
         </article>
       </section>
 
@@ -882,14 +915,25 @@ function ExecutiveOverview({ data, reimbursementTotal, activeBatch, isFactoryVie
         ))}
       </section>
 
-      {isFactoryView && data.factoryDashboard && <FactoryPerformanceDashboard dashboard={data.factoryDashboard} dealerships={dealerships} filters={factoryFilters} onFiltersChange={onFactoryFiltersChange} />}
+      {isFactoryView && data.factoryDashboard && <FactoryPerformanceDashboard dashboard={data.factoryDashboard} />}
 
       <ReimbursementVariationPanel sales={data.sales} />
     </>
   );
 }
 
-function FactoryPerformanceDashboard({ dashboard, dealerships, filters, onFiltersChange }: { dashboard: FactoryDashboard; dealerships: Dealer[]; filters: FactoryFilters; onFiltersChange: Dispatch<SetStateAction<FactoryFilters>> }) {
+function FactoryFilterBar({ dealerships, filters, onFiltersChange }: { dealerships: Dealer[]; filters: FactoryFilters; onFiltersChange: Dispatch<SetStateAction<FactoryFilters>> }) {
+  return (
+    <div className="factory-filter-bar" aria-label="Filtros exclusivos da visão da fábrica">
+      <label>Concessionária<select value={filters.dealershipId} onChange={(event) => onFiltersChange((current) => ({ ...current, dealershipId: event.target.value }))}><option value="">Todas as concessionárias</option>{dealerships.map((dealer) => <option value={dealer.id} key={dealer.id}>{dealer.name}</option>)}</select></label>
+      <label>Data inicial<input type="date" value={filters.dateFrom} onChange={(event) => onFiltersChange((current) => ({ ...current, dateFrom: event.target.value }))} /></label>
+      <label>Data final<input type="date" value={filters.dateTo} onChange={(event) => onFiltersChange((current) => ({ ...current, dateTo: event.target.value }))} /></label>
+      <button className="outline-button compact" type="button" onClick={() => onFiltersChange({ dealershipId: "", dateFrom: "", dateTo: "" })}>Limpar filtros</button>
+    </div>
+  );
+}
+
+function FactoryPerformanceDashboard({ dashboard }: { dashboard: FactoryDashboard }) {
   const calendarMonth = new Date().toISOString().slice(0, 7);
   const currentMonth = dashboard.reimbursementByMonth.find((item) => item.month === calendarMonth) ?? dashboard.reimbursementByMonth[0];
   const historyTotal = dashboard.reimbursementByMonth.reduce((sum, item) => sum + item.reimbursementCents, 0);
@@ -904,13 +948,6 @@ function FactoryPerformanceDashboard({ dashboard, dealerships, filters, onFilter
           <h2>Carteira, margem e reembolso</h2>
           <p>Use os filtros para analisar uma concessionária, um período específico ou toda a carteira histórica.</p>
         </div>
-      </div>
-
-      <div className="factory-filter-bar">
-        <label>Concessionária<select value={filters.dealershipId} onChange={(event) => onFiltersChange((current) => ({ ...current, dealershipId: event.target.value }))}><option value="">Todas as concessionárias</option>{dealerships.map((dealer) => <option value={dealer.id} key={dealer.id}>{dealer.name}</option>)}</select></label>
-        <label>Data inicial<input type="date" value={filters.dateFrom} onChange={(event) => onFiltersChange((current) => ({ ...current, dateFrom: event.target.value }))} /></label>
-        <label>Data final<input type="date" value={filters.dateTo} onChange={(event) => onFiltersChange((current) => ({ ...current, dateTo: event.target.value }))} /></label>
-        <button className="outline-button compact" type="button" onClick={() => onFiltersChange({ dealershipId: "", dateFrom: "", dateTo: "" })}>Limpar filtros</button>
       </div>
 
       <div className="factory-reimbursement-kpis">

@@ -930,6 +930,51 @@ export async function GET(request: Request) {
       current.rows += row.rows;
       factoryReimbursementByMonth.set(row.month, current);
     }
+    const factoryBase = factoryHistorySales.reduce(
+      (sum, sale) => ({
+        quantity: sum.quantity + sale.quantity,
+        sales: sum.sales + sale.liquidTotalCents,
+        cost: sum.cost + sale.costTotalCents,
+        n2:
+          sum.n2 +
+          (sale.reimbursementProgram === "N2" ? sale.reimbursementCents : 0),
+        n3:
+          sum.n3 +
+          (sale.reimbursementProgram === "N3" ? sale.reimbursementCents : 0),
+        negotiation: sum.negotiation + sale.negotiationCents,
+      }),
+      { quantity: 0, sales: 0, cost: 0, n2: 0, n3: 0, negotiation: 0 },
+    );
+    const factoryRowsByPart = new Map<
+      string,
+      {
+        partNumber: string;
+        description: string;
+        rows: number;
+        quantity: number;
+        salesCents: number;
+        reimbursementCents: number;
+        costCents: number;
+      }
+    >();
+    for (const sale of factoryHistorySales) {
+      const normalizedPart = normalizePartNumber(sale.partNumber);
+      const current = factoryRowsByPart.get(normalizedPart) ?? {
+        partNumber: sale.partNumber,
+        description: sale.description,
+        rows: 0,
+        quantity: 0,
+        salesCents: 0,
+        reimbursementCents: 0,
+        costCents: 0,
+      };
+      current.rows += 1;
+      current.quantity += sale.quantity;
+      current.salesCents += sale.liquidTotalCents;
+      current.reimbursementCents += sale.reimbursementCents;
+      current.costCents += sale.costTotalCents;
+      factoryRowsByPart.set(normalizedPart, current);
+    }
     const statusBreakdown = STATUS_VALUES.map((status) => {
       const rows = filtered.filter((sale) => sale.status === status);
       return {
@@ -1029,9 +1074,7 @@ export async function GET(request: Request) {
           ...item,
           marginBps: calculatedMarginBps(item.salesCents, item.costCents),
         }))
-        .sort(
-          (left, right) => right.reimbursementCents - left.reimbursementCents,
-        )
+        .sort((left, right) => right.salesCents - left.salesCents)
         .slice(0, 30),
       alerts,
       statusBreakdown,
@@ -1047,6 +1090,23 @@ export async function GET(request: Request) {
       canViewFactoryDashboard: isManager(profile),
       factoryDashboard: isManager(profile)
         ? {
+            summary: {
+              salesCents: factoryBase.sales,
+              costCents: factoryBase.cost,
+              marginBps: calculatedMarginBps(factoryBase.sales, factoryBase.cost),
+              reimbursementN2Cents: factoryBase.n2,
+              reimbursementN3Cents: factoryBase.n3,
+              negotiationCents: factoryBase.negotiation,
+              processedRows: factoryHistorySales.length,
+              totalQuantity: factoryBase.quantity,
+            },
+            byPartNumber: [...factoryRowsByPart.values()]
+              .map((item) => ({
+                ...item,
+                marginBps: calculatedMarginBps(item.salesCents, item.costCents),
+              }))
+              .sort((left, right) => right.salesCents - left.salesCents)
+              .slice(0, 30),
             marginByProgram: Object.values(factoryMarginByProgram).map(
               (item) => ({
                 ...item,
