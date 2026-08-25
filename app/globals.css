@@ -10021,6 +10021,702 @@ body {
   }
 }
 
+/* Reembolsos N2/N3 — redesign visual 2026 */
+.reimbursement-shell {
+  --reim-navy: #0d2638;
+  --reim-blue: #183f57;
+  --reim-red: #e1262f;
+  --reim-green: #14785b;
+  --reim-ice: #f3f7f6;
+  gap: 28px;
+  padding-top: 28px;
+}
+.reimbursement-command-header {
+  position: relative;
+  min-height: 236px;
+  padding: 34px 38px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 28px;
+  overflow: hidden;
+  border-radius: 20px;
+  color: #fff;
+  background:
+    radial-gradient(circle at 88% 15%, rgb(255 255 255 / 13%) 0 2px, transparent 3px),
+    linear-gradient(125deg, #0a1e2c 0%, #123449 62%, #1b5366 100%);
+  box-shadow: 0 24px 54px rgb(8 27 40 / 20%);
+}
+.reimbursement-command-header::before {
+  position: absolute;
+  top: -112px;
+  right: -70px;
+  width: 330px;
+  height: 330px;
+  border: 58px solid rgb(255 255 255 / 5%);
+  border-radius: 50%;
+  content: "";
+}
+.reimbursement-command-header::after {
+  position: absolute;
+  inset: auto 0 0;
+  height: 7px;
+  background: linear-gradient(90deg, var(--reim-red) 0 34%, #b81e26 34% 36%, transparent 36%);
+  content: "";
+}
+.reimbursement-command-copy {
+  position: relative;
+  z-index: 1;
+  max-width: 760px;
+}
+.reimbursement-command-title {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.reimbursement-command-mark {
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 58px;
+  border: 1px solid rgb(255 255 255 / 24%);
+  border-radius: 16px;
+  color: #fff;
+  background: var(--reim-red);
+  box-shadow: 0 12px 24px rgb(0 0 0 / 22%);
+  font-size: 25px;
+  font-weight: 900;
+}
+.reimbursement-command-header .eyebrow {
+  margin-bottom: 5px;
+  color: #ffb3b7;
+}
+.reimbursement-command-header h1 {
+  margin: 0;
+  color: #fff;
+  font-size: clamp(32px, 4vw, 52px);
+  line-height: 1;
+  letter-spacing: -0.055em;
+}
+.reimbursement-command-copy > p {
+  max-width: 660px;
+  margin: 19px 0 0;
+  color: #d0dee2;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.reimbursement-command-stats {
+  margin-top: 25px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.reimbursement-command-stats > span {
+  min-width: 112px;
+  padding: 10px 13px;
+  display: grid;
+  gap: 3px;
+  border: 1px solid rgb(255 255 255 / 15%);
+  border-radius: 9px;
+  background: rgb(5 18 27 / 28%);
+}
+.reimbursement-command-stats small {
+  color: #9fb5bd;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+.reimbursement-command-stats strong {
+  color: #fff;
+  font-size: 13px;
+}
+.reimbursement-command-header .reimbursement-heading-actions {
+  position: relative;
+  z-index: 1;
+  align-self: flex-start;
+}
+.reimbursement-command-header .outline-button {
+  border-color: rgb(255 255 255 / 30%);
+  color: #fff;
+  background: rgb(255 255 255 / 8%);
+  box-shadow: none;
+}
+.reimbursement-command-header .outline-button:hover {
+  border-color: #fff;
+  color: #fff;
+  background: rgb(255 255 255 / 16%);
+}
+.reimbursement-tabs {
+  width: 100%;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  border: 0;
+  background: transparent;
+}
+.reimbursement-tabs button {
+  position: relative;
+  min-height: 76px;
+  padding: 14px 16px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  overflow: hidden;
+  border: 1px solid #dfe7e4;
+  border-radius: 14px;
+  color: #62737a;
+  background: #fff;
+  box-shadow: 0 10px 24px rgb(15 38 53 / 5%);
+  text-align: left;
+  transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+.reimbursement-tabs button::after {
+  position: absolute;
+  inset: auto 0 0;
+  height: 3px;
+  background: transparent;
+  content: "";
+}
+.reimbursement-tabs button:hover {
+  transform: translateY(-2px);
+  border-color: #b7c7c2;
+  box-shadow: 0 15px 30px rgb(15 38 53 / 9%);
+}
+.reimbursement-tabs button.active {
+  transform: translateY(-2px);
+  border-color: var(--reim-navy);
+  color: #fff;
+  background: linear-gradient(135deg, var(--reim-navy), var(--reim-blue));
+  box-shadow: 0 16px 30px rgb(13 38 56 / 18%);
+}
+.reimbursement-tabs button.active::after {
+  background: var(--reim-red);
+}
+.reimbursement-tabs button > b {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  color: var(--reim-red);
+  background: #fff2f3;
+  font-size: 10px;
+}
+.reimbursement-tabs button.active > b {
+  color: #fff;
+  background: var(--reim-red);
+}
+.reimbursement-tabs button > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.reimbursement-tabs button > span strong {
+  color: var(--reim-navy);
+  font-size: 12px;
+}
+.reimbursement-tabs button > span small {
+  color: #87969a;
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.reimbursement-tabs button.active > span strong,
+.reimbursement-tabs button.active > span small {
+  color: #fff;
+}
+.reimbursement-tabs button > em {
+  min-width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  color: #fff;
+  background: var(--reim-red);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 900;
+}
+.reimbursement-batch-bar {
+  padding: 20px;
+  border: 1px solid #dce6e2;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 14px 34px rgb(14 37 52 / 6%);
+}
+.reimbursement-batch-bar > label select {
+  min-height: 44px;
+  border-color: #cbd8d3;
+  border-radius: 8px;
+  background: #f9fbfa;
+}
+.reimbursement-request-card {
+  padding: 13px;
+  border-radius: 10px;
+  background: #f8faf9;
+}
+.reimbursement-request-card.active {
+  border-color: #f1b0b4;
+  background: #fff7f7;
+  box-shadow: inset 3px 0 0 var(--reim-red);
+}
+.reimbursement-request-open {
+  border-radius: 7px;
+}
+.reimbursement-view-context {
+  padding: 22px 24px;
+  border: 0;
+  border-radius: 14px;
+  background: linear-gradient(120deg, #eaf1ef, #f8faf9);
+  box-shadow: inset 4px 0 0 var(--reim-navy);
+}
+.reimbursement-view-context.dealership {
+  box-shadow: inset 4px 0 0 var(--reim-red);
+}
+.reimbursement-view-badge {
+  border-radius: 20px;
+}
+.factory-filter-bar {
+  grid-template-columns: minmax(155px, .75fr) minmax(220px, 1.35fr) repeat(2, minmax(150px, .8fr)) auto;
+  padding: 18px;
+  border: 0;
+  border-radius: 14px;
+  background: linear-gradient(125deg, var(--reim-navy), #17475c);
+  box-shadow: 0 16px 32px rgb(12 37 54 / 14%);
+}
+.factory-filter-intro {
+  display: grid;
+  gap: 4px;
+  align-self: center;
+}
+.factory-filter-intro span {
+  color: #fff;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.factory-filter-intro small {
+  color: #aec3c9;
+  font-size: 9px;
+}
+.factory-filter-bar label {
+  color: #b9cbd0;
+}
+.factory-filter-bar input,
+.factory-filter-bar select {
+  height: 42px;
+  border: 1px solid rgb(255 255 255 / 18%);
+  border-radius: 7px;
+  color: #fff;
+  background: rgb(255 255 255 / 9%);
+}
+.factory-filter-bar select option {
+  color: #1c3342;
+  background: #fff;
+}
+.factory-filter-bar button {
+  height: 42px;
+  border-color: rgb(255 255 255 / 28%);
+  color: #fff;
+  background: transparent;
+}
+.reimbursement-section-heading {
+  margin-bottom: -12px;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 18px;
+}
+.reimbursement-section-heading.compact {
+  margin-top: 3px;
+}
+.reimbursement-section-heading h2 {
+  margin: 2px 0 0;
+  color: var(--reim-navy);
+  font-size: 22px;
+  letter-spacing: -0.035em;
+}
+.reimbursement-section-heading > small {
+  color: #829096;
+  font-size: 9px;
+}
+.reimbursement-kpi-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.reimbursement-kpi {
+  position: relative;
+  min-height: 155px;
+  padding: 21px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 14px 34px rgb(14 37 52 / 7%);
+  transition: transform .18s ease, box-shadow .18s ease;
+}
+.reimbursement-kpi::after {
+  position: absolute;
+  right: -38px;
+  bottom: -55px;
+  width: 126px;
+  height: 126px;
+  border: 20px solid rgb(20 50 68 / 4%);
+  border-radius: 50%;
+  content: "";
+}
+.reimbursement-kpi:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 20px 42px rgb(14 37 52 / 11%);
+}
+.reimbursement-kpi.primary {
+  border-top: 0;
+  color: #fff;
+  background: linear-gradient(135deg, var(--reim-navy), #1a5064);
+}
+.reimbursement-kpi.accent {
+  border-top: 0;
+  background: linear-gradient(135deg, #fff3f3, #fff);
+  box-shadow: inset 0 0 0 1px #f6d6d8, 0 14px 34px rgb(14 37 52 / 7%);
+}
+.reimbursement-kpi.n2 {
+  box-shadow: inset 0 3px 0 var(--reim-green), 0 14px 34px rgb(14 37 52 / 7%);
+}
+.reimbursement-kpi.n3,
+.reimbursement-kpi.danger {
+  box-shadow: inset 0 3px 0 var(--reim-red), 0 14px 34px rgb(14 37 52 / 7%);
+}
+.reimbursement-kpi.margin {
+  box-shadow: inset 0 3px 0 #3e7fa0, 0 14px 34px rgb(14 37 52 / 7%);
+}
+.reimbursement-kpi-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.reimbursement-kpi-top i {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  color: var(--reim-navy);
+  background: #edf3f1;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 900;
+}
+.reimbursement-kpi.primary .reimbursement-kpi-top i {
+  color: #fff;
+  background: rgb(255 255 255 / 13%);
+}
+.reimbursement-kpi.primary span,
+.reimbursement-kpi.primary small,
+.reimbursement-kpi.primary strong {
+  color: #fff;
+}
+.reimbursement-kpi strong {
+  position: relative;
+  z-index: 1;
+  font-size: clamp(24px, 2.5vw, 34px);
+}
+.reimbursement-insight-grid {
+  gap: 16px;
+}
+.reimbursement-insight-card {
+  min-height: 168px;
+  border: 0;
+  border-radius: 14px;
+  box-shadow: 0 12px 30px rgb(14 37 52 / 6%);
+}
+.reimbursement-dashboard-grid > .panel,
+.reimbursement-variation-panel,
+.factory-monthly-panel,
+.reimbursement-detail-panel {
+  border: 0;
+  border-radius: 16px;
+  box-shadow: 0 14px 34px rgb(14 37 52 / 7%);
+}
+.reimbursement-margin-segment {
+  min-height: 164px;
+  border: 0;
+  border-radius: 15px;
+  background: linear-gradient(145deg, #fff, #f8faf9);
+  box-shadow: 0 14px 34px rgb(14 37 52 / 7%);
+}
+.reimbursement-margin-segment.N2 {
+  box-shadow: inset 0 4px 0 var(--reim-green), 0 14px 34px rgb(14 37 52 / 7%);
+}
+.reimbursement-margin-segment.N3 {
+  box-shadow: inset 0 4px 0 var(--reim-red), 0 14px 34px rgb(14 37 52 / 7%);
+}
+.reimbursement-margin-segment.normal {
+  box-shadow: inset 0 4px 0 #53758a, 0 14px 34px rgb(14 37 52 / 7%);
+}
+.reimbursement-import-layout {
+  gap: 22px;
+  align-items: start;
+}
+.reimbursement-upload-card {
+  padding: 28px;
+  border: 0;
+  border-radius: 18px;
+  box-shadow: 0 16px 38px rgb(14 37 52 / 8%);
+}
+.reimbursement-import-steps > div {
+  min-height: 62px;
+  border: 0;
+  border-radius: 12px;
+  background: #f2f6f4;
+}
+.reimbursement-import-steps strong {
+  width: 28px;
+  height: 28px;
+  flex-basis: 28px;
+  border-radius: 8px;
+  background: var(--reim-navy);
+}
+.reimbursement-template {
+  padding: 17px 18px;
+  border: 0;
+  border-radius: 12px;
+  background: #f4f7f6;
+  box-shadow: inset 4px 0 0 var(--reim-red);
+}
+.reimbursement-upload-card .field.full:first-of-type {
+  padding: 22px;
+  border: 2px dashed #b7c8c2;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #fbfdfc, #f1f6f3);
+}
+.reimbursement-upload-card input[type="file"] {
+  min-height: 54px;
+  padding: 6px;
+  border: 0;
+  background: transparent;
+}
+.reimbursement-upload-card input[type="file"]::file-selector-button {
+  min-height: 42px;
+  margin-right: 14px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 8px;
+  color: #fff;
+  background: var(--reim-navy);
+  font-size: 10px;
+  font-weight: 900;
+  cursor: pointer;
+}
+.reimbursement-dealer-checklist {
+  padding: 18px;
+  border: 0;
+  border-radius: 13px;
+  background: #f5f8f7;
+}
+.reimbursement-dealer-options label {
+  border: 1px solid #d8e3de;
+  border-radius: 9px;
+  background: #fff;
+}
+.n3-tolerance-form {
+  margin: 0;
+  border: 0;
+  border-radius: 12px;
+  background: #fff3f3;
+  box-shadow: inset 4px 0 0 var(--reim-red);
+}
+.reimbursement-rules {
+  position: sticky;
+  top: 18px;
+  padding: 26px;
+  border: 0;
+  border-radius: 18px;
+  color: #d7e3e5;
+  background: linear-gradient(155deg, var(--reim-navy), #16465a);
+  box-shadow: 0 18px 40px rgb(10 31 45 / 16%);
+}
+.reimbursement-rules .eyebrow {
+  color: #ff9ea3;
+}
+.reimbursement-rules h2 {
+  color: #fff;
+}
+.reimbursement-rules li {
+  color: #ccdade;
+}
+.n2n3-explainer-card {
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-left: 4px solid #4eb894;
+  border-radius: 10px;
+  background: rgb(255 255 255 / 8%);
+}
+.n2n3-explainer-card.n3 {
+  border-left-color: #ff6f76;
+}
+.n2n3-explainer-card span,
+.n2n3-explainer-card strong,
+.n2n3-explainer-card p {
+  color: #fff;
+}
+.reimbursement-detail-panel {
+  padding: 26px;
+}
+.reimbursement-filter-grid {
+  margin: 18px -26px 0;
+  padding: 18px 26px;
+  border-top: 1px solid #e1e9e5;
+  border-bottom: 1px solid #e1e9e5;
+  background: #f5f8f7;
+}
+.reimbursement-filter-grid input,
+.reimbursement-filter-grid select {
+  min-height: 42px;
+  border-radius: 8px;
+}
+.reimbursement-line-analysis-summary {
+  margin: 18px 0;
+  padding: 12px;
+  gap: 10px;
+  border-radius: 12px;
+  background: #eef3f1;
+}
+.reimbursement-line-analysis-summary span {
+  border: 0;
+  border-radius: 9px;
+  background: #fff;
+}
+.reimbursement-table-wrap {
+  border-radius: 10px;
+  border: 1px solid #e0e8e4;
+}
+.reimbursement-table th {
+  height: 44px;
+  background: var(--reim-navy);
+}
+.reimbursement-table tbody tr:nth-child(even) td {
+  background: #fafcfb;
+}
+.reimbursement-table tbody tr:hover td {
+  background: #f2f7f4;
+}
+.reimbursement-analysis-flag {
+  border-radius: 12px;
+}
+.reimbursement-client-layout {
+  gap: 22px;
+  align-items: start;
+}
+.reimbursement-client-form,
+.reimbursement-client-layout > .panel {
+  border: 0;
+  border-radius: 18px;
+  box-shadow: 0 16px 38px rgb(14 37 52 / 8%);
+}
+.reimbursement-client-form {
+  position: sticky;
+  top: 18px;
+  padding: 26px;
+  background: linear-gradient(180deg, #fff, #f7faf8);
+}
+.factory-dashboard {
+  padding-top: 8px;
+}
+.factory-reimbursement-kpi,
+.factory-margin-card {
+  border: 0;
+  border-radius: 16px;
+  box-shadow: 0 14px 34px rgb(14 37 52 / 7%);
+}
+.factory-reimbursement-kpi.current {
+  box-shadow: inset 0 4px 0 var(--reim-red), 0 14px 34px rgb(14 37 52 / 7%);
+}
+.factory-reimbursement-kpi.history {
+  box-shadow: inset 0 4px 0 var(--reim-green), 0 14px 34px rgb(14 37 52 / 7%);
+}
+.factory-reimbursement-kpi.negotiation {
+  box-shadow: inset 0 4px 0 #d59a2e, 0 14px 34px rgb(14 37 52 / 7%);
+}
+.factory-margin-card.N2 {
+  box-shadow: inset 0 4px 0 var(--reim-green), 0 14px 34px rgb(14 37 52 / 7%);
+}
+.factory-margin-card.N3 {
+  box-shadow: inset 0 4px 0 var(--reim-red), 0 14px 34px rgb(14 37 52 / 7%);
+}
+.factory-margin-card.normal {
+  box-shadow: inset 0 4px 0 #53758a, 0 14px 34px rgb(14 37 52 / 7%);
+}
+
+@media (max-width: 1180px) {
+  .reimbursement-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .factory-filter-bar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .factory-filter-intro {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 760px) {
+  .reimbursement-command-header {
+    min-height: 0;
+    padding: 25px 21px 28px;
+    align-items: stretch;
+    flex-direction: column;
+    border-radius: 14px;
+  }
+  .reimbursement-command-header .reimbursement-heading-actions {
+    align-self: stretch;
+  }
+  .reimbursement-command-title {
+    align-items: flex-start;
+  }
+  .reimbursement-command-mark {
+    width: 46px;
+    height: 46px;
+    flex-basis: 46px;
+    border-radius: 12px;
+  }
+  .reimbursement-command-stats > span {
+    min-width: calc(50% - 5px);
+  }
+  .reimbursement-tabs {
+    grid-template-columns: 1fr;
+    overflow: visible;
+  }
+  .reimbursement-tabs button {
+    min-width: 0;
+  }
+  .reimbursement-section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .reimbursement-kpi-grid,
+  .reimbursement-insight-grid,
+  .reimbursement-margin-segments,
+  .factory-reimbursement-kpis,
+  .factory-margin-grid,
+  .factory-reimbursement-grid {
+    grid-template-columns: 1fr;
+  }
+  .factory-filter-bar {
+    grid-template-columns: 1fr;
+  }
+  .factory-filter-intro {
+    grid-column: auto;
+  }
+  .reimbursement-rules,
+  .reimbursement-client-form {
+    position: static;
+  }
+}
+
 .proposal-module-tabs {
   width: 100%;
   margin: 4px auto 0;

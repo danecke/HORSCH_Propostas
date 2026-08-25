@@ -474,11 +474,21 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
 
   return (
     <div className="content-frame reimbursement-shell">
-      <header className="page-heading reimbursement-heading">
-        <div>
-          <span className="eyebrow">Controle financeiro</span>
-          <h1>Reembolsos N2/N3</h1>
-          <p>Importe as vendas, valide CPF/CNPJ, acompanhe elegibilidade e conduza o fluxo financeiro com rastreabilidade.</p>
+      <header className="reimbursement-command-header">
+        <div className="reimbursement-command-copy">
+          <div className="reimbursement-command-title">
+            <span className="reimbursement-command-mark" aria-hidden="true">R</span>
+            <div>
+              <span className="eyebrow">Central de performance comercial</span>
+              <h1>Reembolsos N2/N3</h1>
+            </div>
+          </div>
+          <p>Uma operação única para importar vendas, conferir exceções e acompanhar o retorno financeiro da rede.</p>
+          <div className="reimbursement-command-stats" aria-label="Resumo rápido do módulo">
+            <span><small>Perfil</small><strong>{data?.canViewFactoryDashboard ? "Fábrica" : "Concessionária"}</strong></span>
+            <span><small>Solicitações</small><strong>{data?.imports.length ?? 0}</strong></span>
+            <span><small>Linhas críticas</small><strong>{data?.summary.attentionRecords ?? 0}</strong></span>
+          </div>
         </div>
         <div className="reimbursement-heading-actions">
           <button className="outline-button compact" onClick={() => window.print()}>Exportar PDF</button>
@@ -487,10 +497,10 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
       </header>
 
       <nav className="reimbursement-tabs" aria-label="Seções de reembolsos">
-        <button className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>Visão gerencial</button>
-        <button className={tab === "import" ? "active" : ""} onClick={() => setTab("import")}>Importação de dados</button>
-        <button className={tab === "sales" ? "active" : ""} onClick={() => setTab("sales")}>Conferência de venda</button>
-        {canManageClients && <button className={tab === "clients" ? "active" : ""} onClick={() => setTab("clients")}>Clientes N2/N3</button>}
+        <button className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}><b>01</b><span><strong>Visão gerencial</strong><small>Indicadores e reembolsos</small></span></button>
+        <button className={tab === "import" ? "active" : ""} onClick={() => setTab("import")}><b>02</b><span><strong>Importação</strong><small>Nova solicitação</small></span></button>
+        <button className={tab === "sales" ? "active" : ""} onClick={() => setTab("sales")}><b>03</b><span><strong>Conferência</strong><small>Análise linha a linha</small></span>{Boolean(data?.summary.attentionRecords) && <em>{data?.summary.attentionRecords}</em>}</button>
+        {canManageClients && <button className={tab === "clients" ? "active" : ""} onClick={() => setTab("clients")}><b>04</b><span><strong>Clientes N2/N3</strong><small>Base de elegibilidade</small></span></button>}
       </nav>
 
       {message && <div className="form-success reimbursement-notice">{message}</div>}
@@ -855,13 +865,18 @@ function ExecutiveOverview({ data, activeBatch, isFactoryView, dealerships, fact
         />
       )}
 
+      <section className="reimbursement-section-heading">
+        <div><span className="eyebrow">Resultado do período</span><h2>Indicadores essenciais</h2></div>
+        <small>Valores atualizados conforme os filtros selecionados</small>
+      </section>
+
       <section className="reimbursement-kpi-grid">
-        <article className="reimbursement-kpi primary"><span>Valor líquido vendido</span><strong>{formatBRL(overviewSummary.salesCents)}</strong><small>{overviewSummary.processedRows} registros no filtro atual</small></article>
-        <article className="reimbursement-kpi accent"><span>Reembolso projetado</span><strong>{formatBRL(overviewSummary.reimbursementN2Cents + overviewSummary.reimbursementN3Cents)}</strong><small>N2 + N3 elegíveis</small></article>
-        {isFactoryView && <article className="reimbursement-kpi"><span>Margem consolidada</span><strong>{formatPercent(overviewSummary.marginBps)}%</strong><small>Vendas líquidas versus custo</small></article>}
-        <article className="reimbursement-kpi"><span>Reembolso Nível 2</span><strong>{formatBRL(overviewSummary.reimbursementN2Cents)}</strong><small>Programa N2 · 4%</small></article>
-        <article className="reimbursement-kpi"><span>Reembolso Nível 3</span><strong>{formatBRL(overviewSummary.reimbursementN3Cents)}</strong><small>Programa N3 · 7%</small></article>
-        <article className="reimbursement-kpi danger"><span>Negociação fábrica</span><strong>{formatBRL(overviewSummary.negotiationCents)}</strong><small>Margem negativa em Nível 3</small></article>
+        <article className="reimbursement-kpi primary"><div className="reimbursement-kpi-top"><span>Valor líquido vendido</span><i>R$</i></div><strong>{formatBRL(overviewSummary.salesCents)}</strong><small>{overviewSummary.processedRows} registros no filtro atual</small></article>
+        <article className="reimbursement-kpi accent"><div className="reimbursement-kpi-top"><span>Reembolso projetado</span><i>↗</i></div><strong>{formatBRL(overviewSummary.reimbursementN2Cents + overviewSummary.reimbursementN3Cents)}</strong><small>N2 + N3 elegíveis</small></article>
+        {isFactoryView && <article className="reimbursement-kpi margin"><div className="reimbursement-kpi-top"><span>Margem consolidada</span><i>%</i></div><strong>{formatPercent(overviewSummary.marginBps)}%</strong><small>Vendas líquidas versus custo</small></article>}
+        <article className="reimbursement-kpi n2"><div className="reimbursement-kpi-top"><span>Reembolso Nível 2</span><i>N2</i></div><strong>{formatBRL(overviewSummary.reimbursementN2Cents)}</strong><small>Programa N2 · 4%</small></article>
+        <article className="reimbursement-kpi n3"><div className="reimbursement-kpi-top"><span>Reembolso Nível 3</span><i>N3</i></div><strong>{formatBRL(overviewSummary.reimbursementN3Cents)}</strong><small>Programa N3 · 7%</small></article>
+        <article className="reimbursement-kpi danger"><div className="reimbursement-kpi-top"><span>Negociação fábrica</span><i>!</i></div><strong>{formatBRL(overviewSummary.negotiationCents)}</strong><small>Margem negativa em Nível 3</small></article>
       </section>
 
       <section className="reimbursement-insight-grid">
@@ -904,6 +919,9 @@ function ExecutiveOverview({ data, activeBatch, isFactoryView, dealerships, fact
         </article>
       </section>
 
+      <section className="reimbursement-section-heading compact">
+        <div><span className="eyebrow">Rentabilidade</span><h2>Margem por classificação de cliente</h2></div>
+      </section>
       <section className="reimbursement-margin-segments">
         {marginSegments.map((segment) => (
           <article className={`panel reimbursement-margin-segment ${segment.key}`} key={segment.key}>
@@ -925,6 +943,7 @@ function ExecutiveOverview({ data, activeBatch, isFactoryView, dealerships, fact
 function FactoryFilterBar({ dealerships, filters, onFiltersChange }: { dealerships: Dealer[]; filters: FactoryFilters; onFiltersChange: Dispatch<SetStateAction<FactoryFilters>> }) {
   return (
     <div className="factory-filter-bar" aria-label="Filtros exclusivos da visão da fábrica">
+      <div className="factory-filter-intro"><span>Filtros da fábrica</span><small>Refine toda a visão gerencial</small></div>
       <label>Concessionária<select value={filters.dealershipId} onChange={(event) => onFiltersChange((current) => ({ ...current, dealershipId: event.target.value }))}><option value="">Todas as concessionárias</option>{dealerships.map((dealer) => <option value={dealer.id} key={dealer.id}>{dealer.name}</option>)}</select></label>
       <label>Data inicial<input type="date" value={filters.dateFrom} onChange={(event) => onFiltersChange((current) => ({ ...current, dateFrom: event.target.value }))} /></label>
       <label>Data final<input type="date" value={filters.dateTo} onChange={(event) => onFiltersChange((current) => ({ ...current, dateTo: event.target.value }))} /></label>
