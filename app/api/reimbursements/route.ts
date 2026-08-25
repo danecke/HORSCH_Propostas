@@ -850,11 +850,18 @@ export async function GET(request: Request) {
           .orderBy(desc(reimbursementApprovals.createdAt))
       : [];
     return Response.json({
-      imports: imports.map((item) => ({
-        ...item,
-        createdAt: item.createdAt,
-        totalSalesCents: item.totalSalesCents,
-      })),
+      imports: imports.map((item) => {
+        const serialized = {
+          ...item,
+          createdAt: item.createdAt,
+          totalSalesCents: item.totalSalesCents,
+        };
+        if (profile.role !== "general_admin") {
+          const { toleranceBps: _toleranceBps, ...withoutTolerance } = serialized;
+          return withoutTolerance;
+        }
+        return serialized;
+      }),
       sales: filtered.slice(0, 1000).map(serializeSale),
       summary: {
         salesCents: base.sales,

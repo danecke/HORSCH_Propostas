@@ -158,6 +158,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
 
   const canReview = Boolean(data?.canReview) || ["general_admin", "global_management", "factory_manager"].includes(me.role);
   const canManageClients = Boolean(data?.canManageClients) || ["general_admin", "global_management"].includes(me.role);
+  const isAdmin = me.role === "general_admin";
   const dealerScoped = ["dealer_manager", "concession"].includes(me.role);
   const visibleDealerships = data?.dealerships ?? (dealerScoped ? dealerships.filter((dealer) => dealer.id === me.dealershipId) : dealerships);
   const singleScopedDealership = dealerScoped && visibleDealerships.length === 1 ? visibleDealerships[0] : null;
@@ -458,11 +459,13 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
                   {dealerScoped && <small>Somente as concessionárias vinculadas ao seu usuário estão disponíveis.</small>}
                 </label>
               )}
-              <label className="field">
-                <span>Tolerância N3</span>
-                <input value="5% do valor N3" readOnly aria-readonly="true" />
-                <small>Aplicada automaticamente entre a NF unitária e o valor N3 do PN/UF.</small>
-              </label>
+              {isAdmin && (
+                <label className="field">
+                  <span>Tolerância N3</span>
+                  <input value="5% do valor N3" readOnly aria-readonly="true" />
+                  <small>Aplicada automaticamente entre a NF unitária e o valor N3 do PN/UF.</small>
+                </label>
+              )}
             </div>
 
             {uploadProgress > 0 && <div className="upload-progress" aria-label={`Upload ${uploadProgress}%`}><span style={{ width: `${uploadProgress}%` }} /><small>{uploadProgress}%</small></div>}
@@ -476,7 +479,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
               <li>Não há processamento parcial: campos obrigatórios, CPF/CNPJ e UF são conferidos antes da criação do lote.</li>
               <li>O cliente é localizado pelo CPF/CNPJ e UF na base de clientes N2/N3.</li>
               <li>N2: margem menor ou igual a 20% e reembolso de 4% sobre a base.</li>
-              <li>N3: NF unitária compatível com N3 do PN/UF, com tolerância fixa de 5%, e reembolso de 7%.</li>
+              <li>{isAdmin ? "N3: NF unitária compatível com N3 do PN/UF, com tolerância fixa de 5%, e reembolso de 7%." : "N3: NF unitária compatível com o valor N3 vigente do PN/UF e reembolso de 7%."}</li>
               <li>Base: Net Price vigente × quantidade; sem Net Price, custo médio líquido × quantidade.</li>
               <li>Margem negativa em N3 gera valor para negociação com a fábrica.</li>
             </ul>
