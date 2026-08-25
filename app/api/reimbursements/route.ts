@@ -612,8 +612,28 @@ async function visibleDealers(
   return all.filter((dealer) => isAllowedDealer(profile, dealer));
 }
 
+function lineIndicators(row: typeof reimbursementSales.$inferSelect) {
+  const negativeMargin = row.marginBps < 0;
+  const needsNetReference =
+    row.netPriceUsedCents === null && row.baseStatus === "MANUAL_REQUIRED";
+  const reasons: string[] = [];
+  if (negativeMargin) reasons.push("Margem negativa");
+  if (needsNetReference) reasons.push("Definir NET de referência");
+  if (row.status === "Divergência de Preço") reasons.push("Conferir preço N3");
+  if (row.status === "Pendente Justificativa") reasons.push("Justificar variação");
+  if (row.reasonCode === "NF_DUPLICADA") reasons.push("NF duplicada");
+  if (row.reasonCode === "CADASTRO_AUSENTE") reasons.push("Cadastro incompleto");
+  const needsAnalysis = reasons.length > 0;
+  return {
+    needsAnalysis,
+    negativeMargin,
+    needsNetReference,
+    analysisReason: reasons.join(" · "),
+  };
+}
+
 function serializeSale(row: typeof reimbursementSales.$inferSelect) {
-  return { ...row, marginPercent: row.marginBps / 100 };
+  return { ...row, marginPercent: row.marginBps / 100, ...lineIndicators(row) };
 }
 
 export async function GET(request: Request) {
@@ -666,17 +686,35 @@ export async function GET(request: Request) {
     const normalizedPnFilter = normalizePartNumber(params.get("pn"));
     const statusFilter = params.get("status")?.trim() ?? "all";
     const dealershipFilter = Number(params.get("dealershipId") ?? 0);
+    const attentionOnly = params.get("attention") === "1";
     const matchesFilters = (sale: typeof reimbursementSales.$inferSelect) =>
       (!pnFilter ||
         normalizePartNumber(sale.partNumber).includes(normalizedPnFilter) ||
         normalize(sale.description).includes(pnFilter)) &&
       (statusFilter === "all" || sale.status === statusFilter) &&
-      (!dealershipFilter || sale.dealershipId === dealershipFilter);
+      (!dealershipFilter || sale.dealershipId === dealershipFilter) &&
+      (!attentionOnly || lineIndicators(sale).needsAnalysis);
     const filtered = allSales.filter(
       (sale) =>
         (!activeImportId || sale.importId === activeImportId) &&
         matchesFilters(sale),
     );
+    const importIndicators = new Map<
+      number,
+      { analysisRows: number; negativeMarginRows: number; netReferenceRows: number }
+    >();
+    for (const sale of allSales) {
+      const indicators = lineIndicators(sale);
+      const current = importIndicators.get(sale.importId) ?? {
+        analysisRows: 0,
+        negativeMarginRows: 0,
+        netReferenceRows: 0,
+      };
+      if (indicators.needsAnalysis) current.analysisRows += 1;
+      if (indicators.negativeMargin) current.negativeMarginRows += 1;
+      if (indicators.needsNetReference) current.netReferenceRows += 1;
+      importIndicators.set(sale.importId, current);
+    }
     const factoryHistorySales = allSales.filter(matchesFilters);
     const base = filtered.reduce(
       (sum, sale) => ({
@@ -873,6 +911,7 @@ export async function GET(request: Request) {
       (sale) =>
         sale.status === "N3 Elegível" || sale.status === "N3 com Negociação",
     ).length;
+    const activeIndicators = filtered.map(lineIndicators);
     const fallbackBaseRecords = filtered.filter(
       (sale) =>
         sale.netPriceUsedCents === null && sale.calculationBaseCents > 0,
@@ -895,9 +934,23 @@ export async function GET(request: Request) {
         };
         if (profile.role !== "general_admin") {
           const { toleranceBps: _toleranceBps, ...withoutTolerance } = serialized;
-          return withoutTolerance;
+          return {
+            ...withoutTolerance,
+            ...(importIndicators.get(item.id) ?? {
+              analysisRows: 0,
+              negativeMarginRows: 0,
+              netReferenceRows: 0,
+            }),
+          };
         }
-        return serialized;
+        return {
+          ...serialized,
+          ...(importIndicators.get(item.id) ?? {
+            analysisRows: 0,
+            negativeMarginRows: 0,
+            netReferenceRows: 0,
+          }),
+        };
       }),
       sales: filtered.slice(0, 1000).map(serializeSale),
       summary: {
@@ -911,8 +964,10 @@ export async function GET(request: Request) {
         totalQuantity: base.quantity,
         eligibleN2Records,
         eligibleN3Records,
-        attentionRecords: alerts.reduce((sum, item) => sum + item.count, 0),
+        attentionRecords: activeIndicators.filter((item) => item.needsAnalysis).length,
         fallbackBaseRecords,
+        negativeMarginRecords: activeIndicators.filter((item) => item.negativeMargin).length,
+        netReferenceRecords: activeIndicators.filter((item) => item.needsNetReference).length,
       },
       ...(profile.role === "general_admin"
         ? { n3TolerancePercent: n3ToleranceBps / 100 }

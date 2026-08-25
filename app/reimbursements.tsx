@@ -23,6 +23,9 @@ type Batch = {
   totalNegotiationCents: number;
   createdAt: string;
   decisionNote: string;
+  analysisRows: number;
+  negativeMarginRows: number;
+  netReferenceRows: number;
 };
 type Sale = {
   id: number;
@@ -50,6 +53,10 @@ type Sale = {
   expectedN3Cents: number | null;
   priceDifferenceCents: number | null;
   duplicateKey: string; baseSource: string; baseStatus: string; reasonCode: string; historicalMarginBps: number | null; marginVariationBps: number | null; justification: string; justificationStatus: string;
+  needsAnalysis: boolean;
+  negativeMargin: boolean;
+  needsNetReference: boolean;
+  analysisReason: string;
 };
 type Summary = {
   salesCents: number;
@@ -64,6 +71,8 @@ type Summary = {
   eligibleN3Records: number;
   attentionRecords: number;
   fallbackBaseRecords: number;
+  negativeMarginRecords: number;
+  netReferenceRecords: number;
 };
 type Client = { id: number; legalName: string; cnpj: string; state: string; clientType: string; n2: boolean; n3: boolean; status: string };
 type ClientForm = { legalName: string; cnpj: string; state: string; clientType: string; n2: boolean; n3: boolean; status: string };
@@ -149,6 +158,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
   const [pnFilter, setPnFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [dealerFilter, setDealerFilter] = useState("");
+  const [attentionOnly, setAttentionOnly] = useState(false);
   const [uploadDealerId, setUploadDealerId] = useState("");
   const [uploadDealerIds, setUploadDealerIds] = useState<string[]>([]);
   const [editingClient, setEditingClient] = useState<number | null>(null);
@@ -184,6 +194,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
       if (pnFilter.trim()) params.set("pn", pnFilter.trim());
       if (statusFilter !== "all") params.set("status", statusFilter);
       if (dealerFilter) params.set("dealershipId", dealerFilter);
+      if (attentionOnly) params.set("attention", "1");
       const response = await fetch(`/api/reimbursements?${params.toString()}`, { cache: "no-store" });
       const payload = await response.json() as DashboardData & { error?: string };
       if (!response.ok) throw new Error(payload.error || "Não foi possível carregar os reembolsos.");
@@ -192,7 +203,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Não foi possível carregar os reembolsos.");
     }
-  }, [activeBatchId, dealerFilter, pnFilter, statusFilter]);
+  }, [activeBatchId, attentionOnly, dealerFilter, pnFilter, statusFilter]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void load(); }, 250);
@@ -418,6 +429,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
     if (pnFilter) params.set("pn", pnFilter);
     if (statusFilter !== "all") params.set("status", statusFilter);
     if (dealerFilter) params.set("dealershipId", dealerFilter);
+    if (attentionOnly) params.set("attention", "1");
     window.location.assign(`/api/reimbursements?${params.toString()}`);
   }
 
@@ -456,9 +468,9 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
       {error && <div className="form-error reimbursement-notice">{error}</div>}
 
       {data?.imports.length ? (
-        <section className="reimbursement-toolbar reimbursement-batch-bar" aria-label="Lote ativo">
+        <section className="reimbursement-toolbar reimbursement-batch-bar" aria-label="Solicitação ativa">
           <label>
-            Lote processado
+            Solicitação / importação
             <select value={activeBatchId || data.activeImportId} onChange={(event) => setActiveBatchId(Number(event.target.value))}>
               {data.imports.map((item) => <option key={item.id} value={item.id}>{item.fileName} · {formatDate(item.createdAt)} · {statusLabel(item.status)}</option>)}
             </select>
@@ -467,10 +479,31 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
             <span>{activeBatch?.rowCount ?? 0} linhas</span>
             <span>{(activeBatch?.totalQuantity ?? 0).toLocaleString("pt-BR")} unidades</span>
             <span>Snapshot da lista vigente</span>
+            <span className="request-indicator attention">{activeBatch?.analysisRows ?? 0} para analisar</span>
+            <span className="request-indicator negative">{activeBatch?.negativeMarginRows ?? 0} margem negativa</span>
+            <span className="request-indicator net">{activeBatch?.netReferenceRows ?? 0} NET necessário</span>
           </div>
           <div className="reimbursement-workflow">
             <span className={`reimbursement-status ${statusClass(activeBatch?.status ?? "")}`}>{statusLabel(activeBatch?.status ?? "")}</span>
+            <button className="outline-button compact" disabled={!data.sales.length} onClick={() => setTab("sales")}>Abrir análise linha a linha</button>
             {workflowButtons}
+          </div>
+          <div className="reimbursement-request-list">
+            <span className="reimbursement-request-list-label">Solicitações recentes — clique em uma para abrir o detalhamento</span>
+            <div className="reimbursement-request-cards">
+              {data.imports.slice(0, 8).map((item) => (
+                <button
+                  type="button"
+                  key={item.id}
+                  className={`reimbursement-request-card ${item.id === activeBatch?.id ? "active" : ""}`}
+                  onClick={() => { setActiveBatchId(item.id); setTab("sales"); }}
+                >
+                  <strong>{item.fileName}</strong>
+                  <small>{formatDate(item.createdAt)} · {item.rowCount} linhas</small>
+                  <span>{item.analysisRows} para analisar · {item.negativeMarginRows} margem negativa · {item.netReferenceRows} NET</span>
+                </button>
+              ))}
+            </div>
           </div>
         </section>
       ) : (
@@ -635,11 +668,18 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
             ) : (
               <label>Concessionária<select value={dealerFilter} onChange={(event) => setDealerFilter(event.target.value)}><option value="">{dealerScoped ? "Todas as vinculadas" : "Todas"}</option>{visibleDealerships.map((dealer) => <option value={dealer.id} key={dealer.id}>{dealer.name}</option>)}</select></label>
             )}
+            <label className="reimbursement-filter-check"><input type="checkbox" checked={attentionOnly} onChange={(event) => setAttentionOnly(event.target.checked)} />Mostrar apenas linhas que exigem análise</label>
+          </div>
+
+          <div className="reimbursement-line-analysis-summary" aria-label="Resumo da análise da solicitação">
+            <span><strong>{data.summary.attentionRecords}</strong> linhas precisam de análise</span>
+            <span><strong>{data.summary.negativeMarginRecords}</strong> com margem negativa</span>
+            <span><strong>{data.summary.netReferenceRecords}</strong> precisam de NET de referência</span>
           </div>
 
           <div className="reimbursement-table-wrap wide">
             <table className="reimbursement-table reimbursement-detail-table">
-              <thead><tr><th>PN</th><th>Descrição</th><th>Cliente / CPF-CNPJ</th><th>NF / UF</th><th>Concessionário</th><th>Qtd.</th><th>Custo total</th><th>Valor líquido</th><th>Margem</th><th>Base usada</th><th>Reembolso</th><th>Status / validação</th><th>Ações</th></tr></thead>
+              <thead><tr><th>PN</th><th>Descrição</th><th>Cliente / CPF-CNPJ</th><th>NF / UF</th><th>Concessionário</th><th>Qtd.</th><th>Custo total</th><th>Valor líquido</th><th>Margem</th><th>Análise da linha</th><th>Base usada</th><th>Reembolso</th><th>Status / validação</th><th>Ações</th></tr></thead>
               <tbody>
                 {data.sales.map((sale) => (
                   <tr key={sale.id}>
@@ -651,8 +691,9 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
                     <td>{sale.quantity}</td>
                     <td>{formatBRL(sale.costTotalCents)}</td>
                     <td>{formatBRL(sale.liquidTotalCents)}</td>
-                    <td>{formatPercent(sale.marginBps)}%</td>
-                    <td><strong>{formatBRL(sale.calculationBaseCents)}</strong><small>{sale.netPriceUsedCents === null ? "Custo médio (fallback)" : `Net Price: ${formatBRL(sale.netPriceUsedCents)}`}</small></td>
+                    <td><strong className={sale.negativeMargin ? "negative-value" : ""}>{formatPercent(sale.marginBps)}%</strong>{sale.negativeMargin && <small>Margem negativa</small>}</td>
+                    <td><span className={`reimbursement-analysis-flag ${sale.needsAnalysis ? "attention" : "clear"}`}>{sale.needsAnalysis ? "Analisar" : "Sem ação"}</span><small>{sale.analysisReason || "Linha validada"}</small></td>
+                    <td><strong>{formatBRL(sale.calculationBaseCents)}</strong><small>{sale.needsNetReference ? "NET de referência necessário" : sale.netPriceUsedCents === null ? "Custo médio (fallback)" : `Net Price: ${formatBRL(sale.netPriceUsedCents)}`}</small></td>
                     <td><strong>{formatBRL(sale.reimbursementCents)}</strong><small>{sale.reimbursementProgram || "Sem programa"}</small></td>
                     <td><span className={`reimbursement-status ${statusClass(sale.status)}`}>{sale.status}</span>{sale.expectedN3Cents !== null && <small>N3 ref.: {formatBRL(sale.expectedN3Cents)} · Δ {signedBRL(sale.priceDifferenceCents)}</small>}</td>
                     <td><div className="reimbursement-row-actions">{sale.status === "Aprovação Manual - Base de Cálculo" && canManageClients && <><button className="outline-button compact" onClick={() => void runLineAction(sale, "manual_base_set_net_price")}>Definir Net Price</button><button className="outline-button compact" onClick={() => void runLineAction(sale, "manual_base_approve_cost")}>Aprovar custo</button></>}{sale.status === "Pendente Justificativa" && dealerScoped && <button className="outline-button compact" onClick={() => void runLineAction(sale, "submit_justification")}>Justificar</button>}{sale.status === "Pendente Justificativa" && canReview && <><button className="primary-button compact" onClick={() => void runLineAction(sale, "approve_justification")}>Aprovar</button><button className="danger-button compact" onClick={() => void runLineAction(sale, "reject_justification")}>Rejeitar</button></>}</div><small>{formatBRL(sale.negotiationCents)} em negociação</small></td>
