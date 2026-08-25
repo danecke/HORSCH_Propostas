@@ -88,6 +88,7 @@ type DashboardData = {
   canViewFactoryDashboard: boolean;
   factoryDashboard: FactoryDashboard | null;
   statuses: string[];
+  n3TolerancePercent?: number;
 };
 
 const STATES = ["AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO", "PY"];
@@ -153,6 +154,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
   const [clientForm, setClientForm] = useState<ClientForm>(EMPTY_CLIENT);
   const [busy, setBusy] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [toleranceDraft, setToleranceDraft] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -185,9 +187,14 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
   }, [activeBatchId, dealerFilter, pnFilter, statusFilter]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => { void load(); }, 0);
+    const timer = window.setTimeout(() => { void load(); }, 250);
     return () => window.clearTimeout(timer);
   }, [load]);
+
+  useEffect(() => {
+    if (isAdmin && typeof data?.n3TolerancePercent === "number")
+      setToleranceDraft(String(data.n3TolerancePercent));
+  }, [data?.n3TolerancePercent, isAdmin]);
 
   const loadClients = useCallback(async () => {
     if (!canManageClients) return;
@@ -205,12 +212,47 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
     return () => window.clearTimeout(timer);
   }, [loadClients, tab]);
 
+  async function updateN3Tolerance(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const tolerancePercent = Number(toleranceDraft.replace(",", "."));
+    if (!Number.isFinite(tolerancePercent) || tolerancePercent < 0 || tolerancePercent > 100) {
+      setError("Informe uma tolerância entre 0% e 100%.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch("/api/reimbursements", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update_n3_tolerance", tolerancePercent }),
+      });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Não foi possível salvar a tolerância.");
+      setMessage("Tolerância N3 atualizada para o ADM.");
+      await load();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Não foi possível salvar a tolerância.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function uploadSales(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const file = form.get("file");
     if (!(file instanceof File) || !file.size) {
       setError("Selecione a planilha de vendas.");
+      return;
+    }
+    if (file.size > 120 * 1024 * 1024) {
+      setError("A planilha deve ter no máximo 120 MB.");
+      return;
+    }
+    if (!/\.(xlsx|csv|tsv)$/i.test(file.name)) {
+      setError("Use um arquivo Excel (.xlsx), CSV ou TSV.");
       return;
     }
     const selectedDealership = visibleDealerships.find((dealer) => String(dealer.id) === effectiveUploadDealerId);
@@ -460,11 +502,15 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
                 </label>
               )}
               {isAdmin && (
-                <label className="field">
-                  <span>Tolerância N3</span>
-                  <input value="5% do valor N3" readOnly aria-readonly="true" />
-                  <small>Aplicada automaticamente entre a NF unitária e o valor N3 do PN/UF.</small>
-                </label>
+                <form className="field n3-tolerance-form" onSubmit={(event) => void updateN3Tolerance(event)}>
+                  <span>Tolerância N3 — ADM</span>
+                  <div className="n3-tolerance-input">
+                    <input value={toleranceDraft} onChange={(event) => setToleranceDraft(event.target.value)} inputMode="decimal" min="0" max="100" step="0.1" type="number" aria-label="Tolerância N3 em porcentagem" />
+                    <span>%</span>
+                    <button className="outline-button compact" disabled={busy}>Salvar</button>
+                  </div>
+                  <small>Parâmetro administrativo aplicado aos próximos lotes. Não é exibido para outros perfis.</small>
+                </form>
               )}
             </div>
 
@@ -475,11 +521,23 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
           <aside className="panel reimbursement-rules">
             <span className="eyebrow">Validações aplicadas</span>
             <h2>Antes de criar o lote</h2>
+            <div className="n2n3-explainer-grid">
+              <article className="n2n3-explainer-card n2">
+                <span>N2</span>
+                <strong>Análise de margem</strong>
+                <p>Compara venda líquida e custo médio líquido. Até 20% de margem entra no programa N2.</p>
+              </article>
+              <article className="n2n3-explainer-card n3">
+                <span>N3</span>
+                <strong>Conferência por PN e UF</strong>
+                <p>Compara o valor da NF com o N3 vigente da lista de preços para o mesmo PN e Estado.</p>
+              </article>
+            </div>
             <ul>
               <li>Não há processamento parcial: campos obrigatórios, CPF/CNPJ e UF são conferidos antes da criação do lote.</li>
               <li>O cliente é localizado pelo CPF/CNPJ e UF na base de clientes N2/N3.</li>
               <li>N2: margem menor ou igual a 20% e reembolso de 4% sobre a base.</li>
-              <li>{isAdmin ? "N3: NF unitária compatível com N3 do PN/UF, com tolerância fixa de 5%, e reembolso de 7%." : "N3: NF unitária compatível com o valor N3 vigente do PN/UF e reembolso de 7%."}</li>
+              <li>{isAdmin ? "N3: NF unitária compatível com N3 do PN/UF, com tolerância configurada em " + (data?.n3TolerancePercent ?? (toleranceDraft || "—")) + "%, e reembolso de 7%." : "N3: NF unitária compatível com o valor N3 vigente do PN/UF e reembolso de 7%."}</li>
               <li>Base: Net Price vigente × quantidade; sem Net Price, custo médio líquido × quantidade.</li>
               <li>Margem negativa em N3 gera valor para negociação com a fábrica.</li>
             </ul>

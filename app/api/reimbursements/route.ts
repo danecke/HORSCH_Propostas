@@ -8,6 +8,7 @@ import {
   reimbursementApprovals,
   reimbursementClients,
   reimbursementImports,
+  reimbursementSettings,
   reimbursementSales,
 } from "../../../db/schema";
 import {
@@ -22,7 +23,7 @@ export const dynamic = "force-dynamic";
 
 const MAX_FILE_SIZE = 120 * 1024 * 1024;
 const CHUNK_SIZE = 1 * 1024 * 1024;
-const N3_PRICE_TOLERANCE_RATE = 0.05;
+const DEFAULT_N3_TOLERANCE_BPS = 500;
 const STATES = [
   "AC",
   "AL",
@@ -92,6 +93,21 @@ function isManager(profile: AccessProfile) {
 }
 function isClientManager(profile: AccessProfile) {
   return ["general_admin", "global_management"].includes(profile.role);
+}
+async function getN3ToleranceBps(db: Awaited<ReturnType<typeof getDb>>) {
+  const [setting] = await db
+    .select()
+    .from(reimbursementSettings)
+    .where(eq(reimbursementSettings.settingKey, "n3_tolerance_bps"))
+    .limit(1);
+  if (setting) return Math.max(0, Math.min(10000, setting.numericValue));
+  await db.insert(reimbursementSettings).values({
+    settingKey: "n3_tolerance_bps",
+    numericValue: DEFAULT_N3_TOLERANCE_BPS,
+    updatedByEmail: "system",
+    updatedAt: dateNow(),
+  }).onConflictDoNothing();
+  return DEFAULT_N3_TOLERANCE_BPS;
 }
 function isDealerScoped(profile: AccessProfile) {
   return ["dealer_manager", "concession"].includes(profile.role);
@@ -586,6 +602,7 @@ export async function GET(request: Request) {
   if (!profile) return errorResponse("Acesso não autorizado.", 403);
   try {
     const db = await ensureReimbursementStorage();
+    const n3ToleranceBps = await getN3ToleranceBps(db);
     const dealers = await visibleDealers(db, profile);
     const dealerIds = dealers.map((dealer) => dealer.id);
     const imports = dealerIds.length
@@ -877,6 +894,9 @@ export async function GET(request: Request) {
         attentionRecords: alerts.reduce((sum, item) => sum + item.count, 0),
         fallbackBaseRecords,
       },
+      ...(profile.role === "general_admin"
+        ? { n3TolerancePercent: n3ToleranceBps / 100 }
+        : {}),
       byDealership: [...rowsByDealer.values()]
         .map((item) => ({
           ...item,
@@ -1040,6 +1060,7 @@ export async function POST(request: Request) {
       offset += part.length;
     }
     const db = await ensureReimbursementStorage();
+    const n3ToleranceBps = await getN3ToleranceBps(db);
     const allDealers = await visibleDealers(db, profile);
     const dealerScoped = isDealerScoped(profile);
     const requestedDealerId = Math.trunc(Number(body.dealershipId) || 0);
@@ -1201,7 +1222,7 @@ export async function POST(request: Request) {
       const difference =
         price.n3 === null ? null : row.invoiceUnitCents - price.n3;
       const n3ToleranceCents =
-        price.n3 === null ? 0 : Math.round(price.n3 * N3_PRICE_TOLERANCE_RATE);
+        price.n3 === null ? 0 : Math.round(price.n3 * n3ToleranceBps / 10000);
       let status: SaleStatus = "Não Elegível";
       let reimbursement = 0;
       let negotiation = 0;
@@ -1329,7 +1350,7 @@ export async function POST(request: Request) {
         totalReimbursementN3Cents: summary.n3,
         totalNegotiationCents: summary.negotiation,
         toleranceCents: 0,
-        toleranceBps: Math.round(N3_PRICE_TOLERANCE_RATE * 10000),
+        toleranceBps: n3ToleranceBps,
         status: "processed",
         uploadedByEmail: profile.email,
         uploadedByName: profile.name,
@@ -1384,7 +1405,7 @@ export async function POST(request: Request) {
         status: created.status,
         reimbursementN2Cents: summary.n2,
         reimbursementN3Cents: summary.n3,
-        n3TolerancePercent: N3_PRICE_TOLERANCE_RATE * 100,
+        n3TolerancePercent: n3ToleranceBps / 100,
       },
     });
     await Promise.all(
@@ -1420,7 +1441,36 @@ export async function PATCH(request: Request) {
       action?: string;
       note?: string;
       netPriceCents?: number;
+      tolerancePercent?: number;
     };
+    if (body.action === "update_n3_tolerance") {
+      if (profile.role !== "general_admin")
+        return errorResponse("Somente o ADM pode alterar a tolerância N3.", 403);
+      const tolerancePercent = Number(body.tolerancePercent);
+      if (!Number.isFinite(tolerancePercent) || tolerancePercent < 0 || tolerancePercent > 100)
+        return errorResponse("Informe uma tolerância entre 0% e 100%.");
+      const db = await ensureReimbursementStorage();
+      const now = dateNow();
+      const numericValue = Math.round(tolerancePercent * 100);
+      await db.insert(reimbursementSettings).values({
+        settingKey: "n3_tolerance_bps",
+        numericValue,
+        updatedByEmail: profile.email,
+        updatedAt: now,
+      }).onConflictDoUpdate({
+        target: reimbursementSettings.settingKey,
+        set: { numericValue, updatedByEmail: profile.email, updatedAt: now },
+      });
+      await recordAudit(db, {
+        actorEmail: profile.email,
+        actorName: profile.name,
+        action: "reimbursement_n3_tolerance_updated",
+        entity: "reimbursement_settings",
+        details: "Tolerância N3 atualizada para " + tolerancePercent + "%.",
+        after: { settingKey: "n3_tolerance_bps", numericValue },
+      });
+      return Response.json({ ok: true, n3TolerancePercent: tolerancePercent });
+    }
     if (body.lineId) {
       const lineId = Math.trunc(Number(body.lineId));
       const lineDb = await ensureReimbursementStorage();

@@ -433,6 +433,13 @@ export const reimbursementClients = sqliteTable("reimbursement_clients", {
   index("reimbursement_clients_status_idx").on(table.status),
 ]);
 
+export const reimbursementSettings = sqliteTable("reimbursement_settings", {
+  settingKey: text("setting_key").primaryKey(),
+  numericValue: integer("numeric_value").notNull(),
+  updatedByEmail: text("updated_by_email").notNull().default("system"),
+  updatedAt: text("updated_at").notNull(),
+});
+
 export const reimbursementImports = sqliteTable("reimbursement_imports", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   fileName: text("file_name").notNull(),

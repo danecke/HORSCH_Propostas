@@ -7845,6 +7845,91 @@ button {
 .reimbursement-rules li::marker {
   color: #d9252a;
 }
+.n2n3-explainer-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 18px 0 20px;
+}
+.n2n3-explainer-card {
+  display: grid;
+  gap: 5px;
+  padding: 13px 14px;
+  border: 1px solid #dfe6eb;
+  border-left: 4px solid #17395f;
+  background: #fff;
+}
+.n2n3-explainer-card.n3 {
+  border-left-color: #d9252a;
+}
+.n2n3-explainer-card span {
+  color: #677681;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+.n2n3-explainer-card strong {
+  color: #182d49;
+  font-size: 12px;
+}
+.n2n3-explainer-card p {
+  margin: 0;
+  color: #687680;
+  font-size: 10px;
+  line-height: 1.45;
+}
+.n3-tolerance-form {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0 18px;
+  padding: 13px 14px;
+  border: 1px solid #dfe6eb;
+  border-left: 4px solid #d9252a;
+  background: #fff;
+}
+.n3-tolerance-form > span {
+  color: #182d49;
+  font-size: 11px;
+  font-weight: 800;
+}
+.n3-tolerance-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.n3-tolerance-input input {
+  width: 88px;
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 1px solid #cbd6dc;
+  color: #182d49;
+  font-size: 12px;
+  font-weight: 800;
+}
+.n3-tolerance-input > span {
+  color: #677681;
+  font-size: 12px;
+  font-weight: 800;
+}
+.n3-tolerance-input button {
+  min-height: 34px;
+  padding: 7px 12px;
+  border: 0;
+  background: #17395f;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.n3-tolerance-input button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.n3-tolerance-form small {
+  color: #77818a;
+  font-size: 10px;
+  line-height: 1.4;
+}
 .reimbursement-upload-card .form-grid {
   gap: 16px;
 }
@@ -8069,7 +8154,8 @@ button {
 @media (max-width: 720px) {
   .reimbursement-kpi-grid,
   .reimbursement-insight-grid,
-  .reimbursement-import-steps {
+  .reimbursement-import-steps,
+  .n2n3-explainer-grid {
     grid-template-columns: 1fr;
   }
   .reimbursement-batch-bar {
