@@ -7950,6 +7950,17 @@ button {
   font-size: 10px;
   line-height: 1.45;
 }
+.reimbursement-dealer-selection-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.reimbursement-dealer-selection-actions span {
+  color: #77818a;
+  font-size: 10px;
+  font-weight: 700;
+}
 .reimbursement-dealer-options {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

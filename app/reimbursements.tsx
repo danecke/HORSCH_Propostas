@@ -165,9 +165,10 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
   const isAdmin = me.role === "general_admin";
   const dealerScoped = ["dealer_manager", "concession"].includes(me.role);
   const visibleDealerships = data?.dealerships ?? (dealerScoped ? dealerships.filter((dealer) => dealer.id === me.dealershipId) : dealerships);
+  const canSelectMultipleDealerships = dealerScoped || visibleDealerships.length > 1;
   const singleScopedDealership = dealerScoped && visibleDealerships.length === 1 ? visibleDealerships[0] : null;
-  const effectiveUploadDealerId = dealerScoped ? uploadDealerId || String(singleScopedDealership?.id ?? "") : uploadDealerId;
-  const effectiveUploadDealerIds = dealerScoped
+  const effectiveUploadDealerId = canSelectMultipleDealerships ? "" : uploadDealerId;
+  const effectiveUploadDealerIds = canSelectMultipleDealerships
     ? uploadDealerIds
     : effectiveUploadDealerId
       ? [effectiveUploadDealerId]
@@ -204,7 +205,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
   }, [data?.n3TolerancePercent, isAdmin]);
 
   useEffect(() => {
-    if (!dealerScoped) {
+    if (!canSelectMultipleDealerships) {
       uploadSelectionInitialized.current = false;
       return;
     }
@@ -219,7 +220,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
       const kept = current.filter((id) => visibleIds.includes(id));
       return kept.length ? kept : visibleIds;
     });
-  }, [data?.dealerships, dealerScoped, visibleDealerships]);
+  }, [canSelectMultipleDealerships, data?.dealerships, visibleDealerships]);
 
   const loadClients = useCallback(async () => {
     if (!canManageClients) return;
@@ -283,7 +284,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
     const selectedDealerships = visibleDealerships.filter((dealer) =>
       effectiveUploadDealerIds.includes(String(dealer.id)),
     );
-    if (dealerScoped && !selectedDealerships.length) {
+    if (canSelectMultipleDealerships && !selectedDealerships.length) {
       setError("Selecione ao menos uma concessionária vinculada ao seu usuário antes de processar a planilha.");
       return;
     }
@@ -505,7 +506,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
             <div className="reimbursement-template">
               <strong>Campos obrigatórios</strong>
               <span>PN · Descrição · Quantidade · Custo Médio Líquido Unitário · Valor Venda Líquido Unitário · Valor Venda NF Unitário · Cliente · CPF/CNPJ · NF · Estado</span>
-              <small>PN aceita 00180123 ou 180123: os zeros à esquerda são desconsiderados na conferência. CPF/CNPJ deve ter 11 ou 14 dígitos. A primeira aba do Excel precisa ser <b>Vendas</b>. {dealerScoped ? "Selecione as lojas do lote abaixo; a UF de cada linha define qual cadastro e preço N3 serão consultados." : "Concessionário pode ser informado no arquivo ou selecionado abaixo."}</small>
+              <small>PN aceita 00180123 ou 180123: os zeros à esquerda são desconsiderados na conferência. CPF/CNPJ deve ter 11 ou 14 dígitos. A primeira aba do Excel precisa ser <b>Vendas</b>. {canSelectMultipleDealerships ? "Selecione as lojas do lote abaixo; a UF de cada linha define qual cadastro e preço N3 serão consultados." : "Concessionário pode ser informado no arquivo ou selecionado abaixo."}</small>
             </div>
 
             <div className="form-grid">
@@ -514,10 +515,27 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
                 <input name="file" type="file" accept=".xlsx,.csv,.tsv" required />
                 <small>Formatos aceitos: Excel (.xlsx), CSV e TSV. Tamanho máximo: 120 MB.</small>
               </label>
-              {dealerScoped ? (
+              {canSelectMultipleDealerships ? (
                 <fieldset className="field reimbursement-dealer-checklist">
                   <legend>Concessionárias do lote *</legend>
                   <small>Selecione todas as lojas que receberão os dados. Cada linha será encaminhada pela UF da planilha para a concessionária cadastrada naquele estado.</small>
+                  <div className="reimbursement-dealer-selection-actions">
+                    <button
+                      type="button"
+                      className="outline-button compact"
+                      onClick={() => setUploadDealerIds(visibleDealerships.map((dealer) => String(dealer.id)))}
+                    >
+                      Selecionar todas
+                    </button>
+                    <button
+                      type="button"
+                      className="outline-button compact"
+                      onClick={() => setUploadDealerIds([])}
+                    >
+                      Limpar seleção
+                    </button>
+                    <span>{effectiveUploadDealerIds.length} de {visibleDealerships.length} selecionadas</span>
+                  </div>
                   <div className="reimbursement-dealer-options">
                     {visibleDealerships.map((dealer) => (
                       <label key={dealer.id}>
