@@ -64,6 +64,7 @@ const STATUS_VALUES = [
   "Produto/Estado/Cliente sem Cadastro",
   "Pendente Justificativa",
   "Aprovação Manual - Base de Cálculo",
+  "Devolvida para correção",
 ] as const;
 type SaleStatus = (typeof STATUS_VALUES)[number];
 type ReimbursementSegment = "N2" | "N3" | "normal";
@@ -621,6 +622,7 @@ function lineIndicators(row: typeof reimbursementSales.$inferSelect) {
   if (needsNetReference) reasons.push("Definir NET de referência");
   if (row.status === "Divergência de Preço") reasons.push("Conferir preço N3");
   if (row.status === "Pendente Justificativa") reasons.push("Justificar variação");
+  if (row.status === "Devolvida para correção") reasons.push("Corrigir linha");
   if (row.reasonCode === "NF_DUPLICADA") reasons.push("NF duplicada");
   if (row.reasonCode === "CADASTRO_AUSENTE") reasons.push("Cadastro incompleto");
   const needsAnalysis = reasons.length > 0;
@@ -687,13 +689,18 @@ export async function GET(request: Request) {
     const statusFilter = params.get("status")?.trim() ?? "all";
     const dealershipFilter = Number(params.get("dealershipId") ?? 0);
     const attentionOnly = params.get("attention") === "1";
-    const matchesFilters = (sale: typeof reimbursementSales.$inferSelect) =>
+    const factoryDealershipFilter = Number(params.get("factoryDealershipId") ?? 0);
+    const factoryDateFrom = params.get("factoryDateFrom")?.trim() ?? "";
+    const factoryDateTo = params.get("factoryDateTo")?.trim() ?? "";
+    const matchesCommonFilters = (sale: typeof reimbursementSales.$inferSelect) =>
       (!pnFilter ||
         normalizePartNumber(sale.partNumber).includes(normalizedPnFilter) ||
         normalize(sale.description).includes(pnFilter)) &&
       (statusFilter === "all" || sale.status === statusFilter) &&
-      (!dealershipFilter || sale.dealershipId === dealershipFilter) &&
       (!attentionOnly || lineIndicators(sale).needsAnalysis);
+    const matchesFilters = (sale: typeof reimbursementSales.$inferSelect) =>
+      matchesCommonFilters(sale) &&
+      (!dealershipFilter || sale.dealershipId === dealershipFilter);
     const filtered = allSales.filter(
       (sale) =>
         (!activeImportId || sale.importId === activeImportId) &&
@@ -715,7 +722,14 @@ export async function GET(request: Request) {
       if (indicators.needsNetReference) current.netReferenceRows += 1;
       importIndicators.set(sale.importId, current);
     }
-    const factoryHistorySales = allSales.filter(matchesFilters);
+    const factoryHistorySales = allSales.filter((sale) => {
+      if (!matchesCommonFilters(sale)) return false;
+      if (factoryDealershipFilter && sale.dealershipId !== factoryDealershipFilter)
+        return false;
+      const saleDate = String(sale.createdAt ?? "").slice(0, 10);
+      return (!factoryDateFrom || saleDate >= factoryDateFrom) &&
+        (!factoryDateTo || saleDate <= factoryDateTo);
+    });
     const base = filtered.reduce(
       (sum, sale) => ({
         quantity: sum.quantity + sale.quantity,
@@ -841,6 +855,10 @@ export async function GET(request: Request) {
         n3CostCents: number;
         normalSalesCents: number;
         normalCostCents: number;
+        reimbursementCents: number;
+        n2ReimbursementCents: number;
+        n3ReimbursementCents: number;
+        negotiationCents: number;
       }
     >();
     for (const sale of factoryHistorySales) {
@@ -867,22 +885,50 @@ export async function GET(request: Request) {
         n3CostCents: 0,
         normalSalesCents: 0,
         normalCostCents: 0,
+        reimbursementCents: 0,
+        n2ReimbursementCents: 0,
+        n3ReimbursementCents: 0,
+        negotiationCents: 0,
       };
       monthlyEntry.rows += 1;
       monthlyEntry.quantity += sale.quantity;
       monthlyEntry.salesCents += sale.liquidTotalCents;
       monthlyEntry.costCents += sale.costTotalCents;
+      monthlyEntry.reimbursementCents += sale.reimbursementCents;
+      monthlyEntry.negotiationCents += sale.negotiationCents;
       if (segment === "N2") {
         monthlyEntry.n2SalesCents += sale.liquidTotalCents;
         monthlyEntry.n2CostCents += sale.costTotalCents;
+        monthlyEntry.n2ReimbursementCents += sale.reimbursementCents;
       } else if (segment === "N3") {
         monthlyEntry.n3SalesCents += sale.liquidTotalCents;
         monthlyEntry.n3CostCents += sale.costTotalCents;
+        monthlyEntry.n3ReimbursementCents += sale.reimbursementCents;
       } else {
         monthlyEntry.normalSalesCents += sale.liquidTotalCents;
         monthlyEntry.normalCostCents += sale.costTotalCents;
       }
       factorySalesByMonth.set(key, monthlyEntry);
+    }
+    const factoryReimbursementByMonth = new Map<
+      string,
+      { month: string; reimbursementCents: number; n2Cents: number; n3Cents: number; negotiationCents: number; rows: number }
+    >();
+    for (const row of factorySalesByMonth.values()) {
+      const current = factoryReimbursementByMonth.get(row.month) ?? {
+        month: row.month,
+        reimbursementCents: 0,
+        n2Cents: 0,
+        n3Cents: 0,
+        negotiationCents: 0,
+        rows: 0,
+      };
+      current.reimbursementCents += row.reimbursementCents;
+      current.n2Cents += row.n2ReimbursementCents;
+      current.n3Cents += row.n3ReimbursementCents;
+      current.negotiationCents += row.negotiationCents;
+      current.rows += row.rows;
+      factoryReimbursementByMonth.set(row.month, current);
     }
     const statusBreakdown = STATUS_VALUES.map((status) => {
       const rows = filtered.filter((sale) => sale.status === status);
@@ -1033,6 +1079,9 @@ export async function GET(request: Request) {
                   right.salesCents - left.salesCents,
               )
               .slice(0, 120),
+            reimbursementByMonth: [...factoryReimbursementByMonth.values()].sort(
+              (left, right) => right.month.localeCompare(left.month),
+            ),
           }
         : null,
       canSubmit: true,
@@ -1622,6 +1671,33 @@ export async function PATCH(request: Request) {
         await lineDb
           .update(reimbursementSales)
           .set({ justification: note, justificationStatus: "submitted" })
+          .where(eq(reimbursementSales.id, lineId));
+      } else if (
+        managers &&
+        (action === "accept_line" || action === "question_line" || action === "return_line")
+      ) {
+        if ((action === "question_line" || action === "return_line") && note.length < 5)
+          return errorResponse("Informe uma observação para esta decisão.");
+        if (action === "accept_line") {
+          if (!sale.reimbursementProgram)
+            return errorResponse("A linha não possui programa N2/N3 para ser aceita.");
+          if (sale.calculationBaseCents <= 0)
+            return errorResponse("A linha não possui base de cálculo válida.");
+        }
+        const accepted = action === "accept_line";
+        await lineDb
+          .update(reimbursementSales)
+          .set({
+            status: accepted
+              ? sale.reimbursementProgram === "N3" ? "N3 Elegível" : "N2 Elegível"
+              : action === "question_line" ? "Pendente Justificativa" : "Devolvida para correção",
+            reimbursementCents: accepted
+              ? Math.round(sale.calculationBaseCents * (sale.reimbursementProgram === "N3" ? 0.07 : 0.04))
+              : 0,
+            justification: note,
+            justificationStatus: accepted ? "approved" : action === "question_line" ? "questioned" : "returned",
+            reasonCode: accepted ? "" : action === "question_line" ? "ANALISE_SOLICITADA" : "DEVOLVIDA_CORRECAO",
+          })
           .where(eq(reimbursementSales.id, lineId));
       } else if (
         managers &&

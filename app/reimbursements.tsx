@@ -1,6 +1,6 @@
 "use client";
 
-import type { FormEvent } from "react";
+import type { Dispatch, FormEvent, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 export type ReimbursementAccess = {
@@ -79,8 +79,10 @@ type ClientForm = { legalName: string; cnpj: string; state: string; clientType: 
 type StatusBreakdown = { status: string; count: number; liquidTotalCents: number; reimbursementCents: number };
 type FactoryDashboard = {
   marginByProgram: Array<{ key: "N2" | "N3" | "normal"; label: string; rows: number; quantity: number; salesCents: number; costCents: number; reimbursementCents: number; marginBps: number }>;
-  salesByMonthAndDealership: Array<{ month: string; dealershipName: string; rows: number; quantity: number; salesCents: number; costCents: number; n2SalesCents: number; n2CostCents: number; n3SalesCents: number; n3CostCents: number; normalSalesCents: number; normalCostCents: number; totalMarginBps: number; n2MarginBps: number; n3MarginBps: number; normalMarginBps: number }>;
+  salesByMonthAndDealership: Array<{ month: string; dealershipName: string; rows: number; quantity: number; salesCents: number; costCents: number; n2SalesCents: number; n2CostCents: number; n3SalesCents: number; n3CostCents: number; normalSalesCents: number; normalCostCents: number; reimbursementCents: number; n2ReimbursementCents: number; n3ReimbursementCents: number; negotiationCents: number; totalMarginBps: number; n2MarginBps: number; n3MarginBps: number; normalMarginBps: number }>;
+  reimbursementByMonth: Array<{ month: string; reimbursementCents: number; n2Cents: number; n3Cents: number; negotiationCents: number; rows: number }>;
 };
+type FactoryFilters = { dealershipId: string; dateFrom: string; dateTo: string };
 type DashboardData = {
   imports: Batch[];
   sales: Sale[];
@@ -123,7 +125,7 @@ function formatPercent(basisPoints: number) {
 function statusClass(status: string) {
   if (status.includes("Negociação") || status.includes("Divergência") || status.includes("Duplicada")) return "danger";
   if (status.includes("Elegível")) return "success";
-  if (status.includes("Não Elegível") || status.includes("Encontrado") || status.includes("Cadastro") || status.includes("Pendente") || status.includes("Aprovação Manual")) return "warning";
+  if (status.includes("Não Elegível") || status.includes("Encontrado") || status.includes("Cadastro") || status.includes("Pendente") || status.includes("Aprovação Manual") || status.includes("Devolvida")) return "warning";
   return "neutral";
 }
 
@@ -159,6 +161,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
   const [statusFilter, setStatusFilter] = useState("all");
   const [dealerFilter, setDealerFilter] = useState("");
   const [attentionOnly, setAttentionOnly] = useState(false);
+  const [factoryFilters, setFactoryFilters] = useState<FactoryFilters>({ dealershipId: "", dateFrom: "", dateTo: "" });
   const [uploadDealerId, setUploadDealerId] = useState("");
   const [uploadDealerIds, setUploadDealerIds] = useState<string[]>([]);
   const [editingClient, setEditingClient] = useState<number | null>(null);
@@ -195,6 +198,9 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
       if (statusFilter !== "all") params.set("status", statusFilter);
       if (dealerFilter) params.set("dealershipId", dealerFilter);
       if (attentionOnly) params.set("attention", "1");
+      if (factoryFilters.dealershipId) params.set("factoryDealershipId", factoryFilters.dealershipId);
+      if (factoryFilters.dateFrom) params.set("factoryDateFrom", factoryFilters.dateFrom);
+      if (factoryFilters.dateTo) params.set("factoryDateTo", factoryFilters.dateTo);
       const response = await fetch(`/api/reimbursements?${params.toString()}`, { cache: "no-store" });
       const payload = await response.json() as DashboardData & { error?: string };
       if (!response.ok) throw new Error(payload.error || "Não foi possível carregar os reembolsos.");
@@ -203,7 +209,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Não foi possível carregar os reembolsos.");
     }
-  }, [activeBatchId, attentionOnly, dealerFilter, pnFilter, statusFilter]);
+  }, [activeBatchId, attentionOnly, dealerFilter, factoryFilters, pnFilter, statusFilter]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void load(); }, 250);
@@ -337,7 +343,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
       if (!completeResponse.ok) throw new Error(complete.error || "Não foi possível processar a planilha.");
 
       setUploadProgress(100);
-      setMessage("Planilha processada. O lote mantém o snapshot da lista de preços e do CPF/CNPJ informado pelo concessionário.");
+      setMessage("Planilha processada. A solicitação mantém o snapshot da lista de preços e do CPF/CNPJ informado pelo concessionário.");
       setTab("overview");
       if (complete.import?.id) setActiveBatchId(complete.import.id);
       await load();
@@ -377,7 +383,34 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
     }
   }
 
-  async function runLineAction(sale: Sale, action: string) { let note = ""; let netPriceCents: number | undefined; if (action === "submit_justification") { note = window.prompt("Explique a variação de margem:") ?? ""; if (note.trim().length < 5) { setError("Informe uma justificativa válida."); return; } } if (action === "manual_base_set_net_price") { const value = window.prompt("Net Price unitário correto:", ""); if (!value) return; netPriceCents = Math.round(Number(value.replace(",", ".")) * 100); } setBusy(true); try { const response = await fetch("/api/reimbursements", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lineId: sale.id, action, note, netPriceCents }) }); const payload = await response.json() as { error?: string }; if (!response.ok) throw new Error(payload.error || "Não foi possível atualizar a linha."); setMessage("Linha atualizada."); await load(); } catch (e) { setError(e instanceof Error ? e.message : "Não foi possível atualizar a linha."); } finally { setBusy(false); } }
+  async function runLineAction(sale: Sale, action: string) {
+    let note = "";
+    let netPriceCents: number | undefined;
+    if (action === "submit_justification") note = window.prompt("Explique a variação de margem:") ?? "";
+    if (action === "question_line") note = window.prompt("O que deve ser questionado nesta linha?") ?? "";
+    if (action === "return_line") note = window.prompt("Informe o motivo da devolução:") ?? "";
+    if (["submit_justification", "question_line", "return_line"].includes(action) && note.trim().length < 5) {
+      setError("Informe uma observação válida para esta decisão.");
+      return;
+    }
+    if (action === "manual_base_set_net_price") {
+      const value = window.prompt("Net Price unitário correto:", "");
+      if (!value) return;
+      netPriceCents = Math.round(Number(value.replace(",", ".")) * 100);
+    }
+    setBusy(true);
+    try {
+      const response = await fetch("/api/reimbursements", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lineId: sale.id, action, note, netPriceCents }) });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Não foi possível atualizar a linha.");
+      setMessage("Linha atualizada.");
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Não foi possível atualizar a linha.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function saveClient(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -459,8 +492,8 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
 
       <nav className="reimbursement-tabs" aria-label="Seções de reembolsos">
         <button className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>Visão gerencial</button>
-        <button className={tab === "sales" ? "active" : ""} onClick={() => setTab("sales")}>Conferência por venda</button>
-        <button className={tab === "import" ? "active" : ""} onClick={() => setTab("import")}>Importar dados</button>
+        <button className={tab === "sales" ? "active" : ""} onClick={() => setTab("sales")}>Conferência de venda</button>
+        <button className={tab === "import" ? "active" : ""} onClick={() => setTab("import")}>Importação de dados</button>
         {canManageClients && <button className={tab === "clients" ? "active" : ""} onClick={() => setTab("clients")}>Clientes N2/N3</button>}
       </nav>
 
@@ -526,15 +559,15 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
             <div className="panel-heading">
               <div>
                 <span className="eyebrow">Entrada controlada</span>
-                <h2>Importar vendas para reembolso</h2>
-                <p>Use o modelo abaixo para evitar divergências de coluna, CPF/CNPJ e identificação da concessionária.</p>
+                <h2>Importação de dados</h2>
+                <p>Envie a planilha no padrão HORSCH e transforme cada arquivo em uma solicitação rastreável.</p>
               </div>
             </div>
 
             <div className="reimbursement-import-steps" aria-label="Passos para importar">
               <div><strong>1</strong><span>Baixe o modelo Excel.</span></div>
               <div><strong>2</strong><span>Preencha as vendas unitárias.</span></div>
-              <div><strong>3</strong><span>Processe e confira o lote.</span></div>
+              <div><strong>3</strong><span>Crie a solicitação e confira por linha.</span></div>
             </div>
 
             <div className="reimbursement-template-actions">
@@ -545,7 +578,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
             <div className="reimbursement-template">
               <strong>Campos obrigatórios</strong>
               <span>PN · Descrição · Quantidade · Custo Médio Líquido Unitário · Valor Venda Líquido Unitário · Valor Venda NF Unitário · Cliente · CPF/CNPJ · NF · Estado</span>
-              <small>PN aceita 00180123 ou 180123: os zeros à esquerda são desconsiderados na conferência. CPF/CNPJ deve ter 11 ou 14 dígitos. A primeira aba do Excel precisa ser <b>Vendas</b>. {canSelectMultipleDealerships ? "Selecione as lojas do lote abaixo; a UF de cada linha define qual cadastro e preço N3 serão consultados." : "Concessionário pode ser informado no arquivo ou selecionado abaixo."}</small>
+              <small>PN aceita 00180123 ou 180123: os zeros à esquerda são desconsiderados na conferência. CPF/CNPJ deve ter 11 ou 14 dígitos. A primeira aba do Excel precisa ser <b>Vendas</b>. {canSelectMultipleDealerships ? "Selecione as lojas da solicitação; a UF de cada linha define qual cadastro e preço N3 serão consultados." : "Concessionário pode ser informado no arquivo ou selecionado abaixo."}</small>
             </div>
 
             <div className="form-grid">
@@ -556,7 +589,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
               </label>
               {canSelectMultipleDealerships ? (
                 <fieldset className="field reimbursement-dealer-checklist">
-                  <legend>Concessionárias do lote *</legend>
+                  <legend>Concessionárias da solicitação *</legend>
                   <small>Selecione todas as lojas que receberão os dados. Cada linha será encaminhada pela UF da planilha para a concessionária cadastrada naquele estado.</small>
                   <div className="reimbursement-dealer-selection-actions">
                     <button
@@ -613,18 +646,18 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
                     <span>%</span>
                     <button className="outline-button compact" disabled={busy}>Salvar</button>
                   </div>
-                  <small>Parâmetro administrativo aplicado aos próximos lotes. Não é exibido para outros perfis.</small>
+                  <small>Parâmetro administrativo aplicado às próximas solicitações. Não é exibido para outros perfis.</small>
                 </form>
               )}
             </div>
 
             {uploadProgress > 0 && <div className="upload-progress" aria-label={`Upload ${uploadProgress}%`}><span style={{ width: `${uploadProgress}%` }} /><small>{uploadProgress}%</small></div>}
-            <button className="primary-button" disabled={busy}>{busy ? "Processando planilha..." : "Processar e gerar lote"}</button>
+            <button className="primary-button" disabled={busy}>{busy ? "Processando planilha..." : "Processar e criar solicitação"}</button>
           </form>
 
           <aside className="panel reimbursement-rules">
             <span className="eyebrow">Validações aplicadas</span>
-            <h2>Antes de criar o lote</h2>
+            <h2>Antes de criar a solicitação</h2>
             <div className="n2n3-explainer-grid">
               <article className="n2n3-explainer-card n2">
                 <span>N2</span>
@@ -638,7 +671,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
               </article>
             </div>
             <ul>
-              <li>Não há processamento parcial: campos obrigatórios, CPF/CNPJ e UF são conferidos antes da criação do lote.</li>
+              <li>A análise é fragmentada por linha: uma pendência não bloqueia a conferência das demais linhas da solicitação.</li>
               <li>O PN é conferido sem considerar zeros à esquerda; 00180123 e 180123 consultam o mesmo cadastro.</li>
               <li>O cliente é localizado pelo CPF/CNPJ e UF na base de clientes N2/N3.</li>
               <li>N2: margem menor ou igual a 20% e reembolso de 4% sobre a base.</li>
@@ -650,7 +683,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
         </section>
       )}
 
-      {tab === "overview" && data && <ExecutiveOverview data={data} reimbursementTotal={reimbursementTotal} activeBatch={activeBatch} isFactoryView={data.canViewFactoryDashboard} />}
+      {tab === "overview" && data && <ExecutiveOverview data={data} reimbursementTotal={reimbursementTotal} activeBatch={activeBatch} isFactoryView={data.canViewFactoryDashboard} dealerships={visibleDealerships} factoryFilters={factoryFilters} onFactoryFiltersChange={setFactoryFilters} />}
 
       {tab === "sales" && data && (
         <section className="panel reimbursement-detail-panel">
@@ -702,7 +735,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
                     <td><strong>{formatBRL(sale.calculationBaseCents)}</strong><small>{sale.needsNetReference ? "NET de referência necessário" : sale.netPriceUsedCents === null ? "Custo médio (fallback)" : `Net Price: ${formatBRL(sale.netPriceUsedCents)}`}</small></td>
                     <td><strong>{formatBRL(sale.reimbursementCents)}</strong><small>{sale.reimbursementProgram || "Sem programa"}</small></td>
                     <td><span className={`reimbursement-status ${statusClass(sale.status)}`}>{sale.status}</span>{sale.expectedN3Cents !== null && <small>N3 ref.: {formatBRL(sale.expectedN3Cents)} · Δ {signedBRL(sale.priceDifferenceCents)}</small>}</td>
-                    <td><div className="reimbursement-row-actions">{sale.status === "Aprovação Manual - Base de Cálculo" && canManageClients && <><button className="outline-button compact" onClick={() => void runLineAction(sale, "manual_base_set_net_price")}>Definir Net Price</button><button className="outline-button compact" onClick={() => void runLineAction(sale, "manual_base_approve_cost")}>Aprovar custo</button></>}{sale.status === "Pendente Justificativa" && dealerScoped && <button className="outline-button compact" onClick={() => void runLineAction(sale, "submit_justification")}>Justificar</button>}{sale.status === "Pendente Justificativa" && canReview && <><button className="primary-button compact" onClick={() => void runLineAction(sale, "approve_justification")}>Aprovar</button><button className="danger-button compact" onClick={() => void runLineAction(sale, "reject_justification")}>Rejeitar</button></>}</div><small>{formatBRL(sale.negotiationCents)} em negociação</small></td>
+                    <td><div className="reimbursement-row-actions">{sale.status === "Aprovação Manual - Base de Cálculo" && canManageClients && <><button className="outline-button compact" onClick={() => void runLineAction(sale, "manual_base_set_net_price")}>Definir NET</button><button className="outline-button compact" onClick={() => void runLineAction(sale, "manual_base_approve_cost")}>Aprovar custo</button></>}{sale.needsAnalysis && canManageClients && <><button className="primary-button compact" onClick={() => void runLineAction(sale, "accept_line")}>Aceitar</button><button className="outline-button compact" onClick={() => void runLineAction(sale, "question_line")}>Questionar</button><button className="danger-button compact" onClick={() => void runLineAction(sale, "return_line")}>Devolver</button></>}{sale.status === "Pendente Justificativa" && dealerScoped && <button className="outline-button compact" onClick={() => void runLineAction(sale, "submit_justification")}>Justificar</button>}{sale.status === "Pendente Justificativa" && canReview && <><button className="primary-button compact" onClick={() => void runLineAction(sale, "approve_justification")}>Aprovar</button><button className="danger-button compact" onClick={() => void runLineAction(sale, "reject_justification")}>Rejeitar</button></>}</div><small>{formatBRL(sale.negotiationCents)} em negociação</small></td>
                   </tr>
                 ))}
               </tbody>
@@ -766,15 +799,25 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
   );
 }
 
-function ExecutiveOverview({ data, reimbursementTotal, activeBatch, isFactoryView }: { data: DashboardData; reimbursementTotal: number; activeBatch?: Batch; isFactoryView: boolean }) {
+function ExecutiveOverview({ data, reimbursementTotal, activeBatch, isFactoryView, dealerships, factoryFilters, onFactoryFiltersChange }: { data: DashboardData; reimbursementTotal: number; activeBatch?: Batch; isFactoryView: boolean; dealerships: Dealer[]; factoryFilters: FactoryFilters; onFactoryFiltersChange: Dispatch<SetStateAction<FactoryFilters>> }) {
   const maxStatus = Math.max(1, ...data.statusBreakdown.map((item) => item.count));
+  const marginSegments = [
+    { key: "N2", label: "Margem N2", description: "Clientes nível 2" },
+    { key: "N3", label: "Margem N3", description: "Clientes nível 3" },
+    { key: "normal", label: "Cliente Normal", description: "Vendas sem programa" },
+  ].map((segment) => {
+    const rows = data.sales.filter((sale) => (segment.key === "normal" ? !sale.reimbursementProgram : sale.reimbursementProgram === segment.key));
+    const salesCents = rows.reduce((sum, sale) => sum + sale.liquidTotalCents, 0);
+    const costCents = rows.reduce((sum, sale) => sum + sale.costTotalCents, 0);
+    return { ...segment, rows: rows.length, salesCents, marginBps: salesCents ? Math.round(((salesCents - costCents) / salesCents) * 10000) : 0 };
+  });
   return (
     <>
       <section className={`reimbursement-view-context ${isFactoryView ? "factory" : "dealership"}`}>
         <div>
           <span className="eyebrow">{isFactoryView ? "Visão da fábrica" : "Visão da concessionária"}</span>
           <h2>{isFactoryView ? "Controle consolidado da carteira" : "Acompanhamento da sua operação"}</h2>
-          <p>{isFactoryView ? "Acompanhe o lote atual e o histórico de vendas processadas por concessionária, mês e tipo de operação." : "Todos os indicadores operacionais permanecem disponíveis, sem a exibição da margem consolidada."}</p>
+          <p>{isFactoryView ? "Acompanhe a solicitação atual e o histórico de vendas processadas por concessionária, mês e tipo de operação." : "Todos os indicadores operacionais permanecem disponíveis, sem a exibição da margem consolidada."}</p>
         </div>
         <span className="reimbursement-view-badge">{isFactoryView ? "Análise ampliada" : "Escopo da concessionária"}</span>
       </section>
@@ -790,7 +833,7 @@ function ExecutiveOverview({ data, reimbursementTotal, activeBatch, isFactoryVie
 
       <section className="reimbursement-insight-grid">
         <article className="panel reimbursement-insight-card">
-          <span className="eyebrow">Cobertura do lote</span>
+          <span className="eyebrow">Cobertura da solicitação</span>
           <h2>{data.summary.totalQuantity.toLocaleString("pt-BR")} unidades vendidas</h2>
           <p>{data.summary.eligibleN2Records + data.summary.eligibleN3Records} vendas elegíveis entre {data.summary.processedRows} registros analisados.</p>
         </article>
@@ -808,42 +851,72 @@ function ExecutiveOverview({ data, reimbursementTotal, activeBatch, isFactoryVie
 
       <section className="reimbursement-dashboard-grid">
         <article className="panel reimbursement-status-panel">
-          <div className="panel-heading"><div><span className="eyebrow">Elegibilidade e alertas</span><h2>Distribuição do lote</h2><p>Leitura rápida dos estados das vendas processadas.</p></div></div>
-          {data.statusBreakdown.length ? <div className="reimbursement-breakdown">{data.statusBreakdown.map((item) => <div className="reimbursement-breakdown-row" key={item.status}><div><span className={`reimbursement-status ${statusClass(item.status)}`}>{item.status}</span><small>{formatBRL(item.reimbursementCents)} projetados</small></div><div className="reimbursement-bar"><span className={statusClass(item.status)} style={{ width: `${(item.count / maxStatus) * 100}%` }} /></div><strong>{item.count}</strong></div>)}</div> : <div className="empty-mini">Sem registros para o lote atual.</div>}
+          <div className="panel-heading"><div><span className="eyebrow">Elegibilidade e alertas</span><h2>Distribuição da solicitação</h2><p>Leitura rápida dos estados das vendas processadas.</p></div></div>
+          {data.statusBreakdown.length ? <div className="reimbursement-breakdown">{data.statusBreakdown.map((item) => <div className="reimbursement-breakdown-row" key={item.status}><div><span className={`reimbursement-status ${statusClass(item.status)}`}>{item.status}</span><small>{formatBRL(item.reimbursementCents)} projetados</small></div><div className="reimbursement-bar"><span className={statusClass(item.status)} style={{ width: `${(item.count / maxStatus) * 100}%` }} /></div><strong>{item.count}</strong></div>)}</div> : <div className="empty-mini">Sem registros para a solicitação atual.</div>}
         </article>
         <article className="panel reimbursement-workflow-panel">
-          <div className="panel-heading"><div><span className="eyebrow">Auditoria e aprovação</span><h2>Decisões do lote</h2><p>{activeBatch?.decisionNote || "O histórico registra cada etapa para conferência financeira."}</p></div></div>
-          {data.approvals.length ? <div className="approval-timeline">{data.approvals.map((approval, index) => <div key={`${approval.createdAt}-${index}`}><strong>{statusLabel(approval.action)}</strong><span>{approval.actorName} · {formatDate(approval.createdAt)}</span>{approval.note && <small>{approval.note}</small>}</div>)}</div> : <div className="empty-mini">Nenhuma decisão registrada. Envie o lote para iniciar a aprovação.</div>}
+          <div className="panel-heading"><div><span className="eyebrow">Auditoria e aprovação</span><h2>Decisões da solicitação</h2><p>{activeBatch?.decisionNote || "O histórico registra cada etapa para conferência financeira."}</p></div></div>
+          {data.approvals.length ? <div className="approval-timeline">{data.approvals.map((approval, index) => <div key={`${approval.createdAt}-${index}`}><strong>{statusLabel(approval.action)}</strong><span>{approval.actorName} · {formatDate(approval.createdAt)}</span>{approval.note && <small>{approval.note}</small>}</div>)}</div> : <div className="empty-mini">Nenhuma decisão registrada. Envie a solicitação para iniciar a aprovação.</div>}
         </article>
       </section>
 
       <section className="reimbursement-dashboard-grid">
         <article className="panel">
           <div className="panel-heading"><div><span className="eyebrow">Visão de rede</span><h2>Por concessionário</h2><p>Faturamento, margem e impacto do reembolso por operação.</p></div></div>
-          <div className="reimbursement-table-wrap"><table className="reimbursement-table"><thead><tr><th>Concessionário</th><th>Linhas</th><th>Qtd.</th><th>Faturamento</th><th>Reembolso</th><th>Margem</th></tr></thead><tbody>{data.byDealership.map((row) => <tr key={row.label}><td><strong>{row.label}</strong></td><td>{row.rows}</td><td>{row.quantity}</td><td>{formatBRL(row.salesCents)}</td><td>{formatBRL(row.reimbursementCents)}</td><td>{formatPercent(row.marginBps)}%</td></tr>)}</tbody></table>{!data.byDealership.length && <div className="empty-mini">Sem dados de concessionárias neste lote.</div>}</div>
+          <div className="reimbursement-table-wrap"><table className="reimbursement-table"><thead><tr><th>Concessionário</th><th>Linhas</th><th>Qtd.</th><th>Faturamento</th><th>Reembolso</th><th>Margem</th></tr></thead><tbody>{data.byDealership.map((row) => <tr key={row.label}><td><strong>{row.label}</strong></td><td>{row.rows}</td><td>{row.quantity}</td><td>{formatBRL(row.salesCents)}</td><td>{formatBRL(row.reimbursementCents)}</td><td>{formatPercent(row.marginBps)}%</td></tr>)}</tbody></table>{!data.byDealership.length && <div className="empty-mini">Sem dados de concessionárias nesta solicitação.</div>}</div>
         </article>
         <article className="panel">
           <div className="panel-heading"><div><span className="eyebrow">Itens críticos</span><h2>Ranking por PN</h2><p>Priorize os itens com maior impacto de reembolso.</p></div></div>
-          <div className="reimbursement-table-wrap"><table className="reimbursement-table"><thead><tr><th>PN</th><th>Qtd.</th><th>Faturamento</th><th>Reembolso</th><th>Margem</th></tr></thead><tbody>{data.byPartNumber.map((row) => <tr key={row.partNumber}><td><strong>{row.partNumber}</strong><small>{row.description}</small></td><td>{row.quantity}</td><td>{formatBRL(row.salesCents)}</td><td>{formatBRL(row.reimbursementCents)}</td><td>{formatPercent(row.marginBps)}%</td></tr>)}</tbody></table>{!data.byPartNumber.length && <div className="empty-mini">Sem itens no lote atual.</div>}</div>
+          <div className="reimbursement-table-wrap"><table className="reimbursement-table"><thead><tr><th>PN</th><th>Qtd.</th><th>Faturamento</th><th>Reembolso</th><th>Margem</th></tr></thead><tbody>{data.byPartNumber.map((row) => <tr key={row.partNumber}><td><strong>{row.partNumber}</strong><small>{row.description}</small></td><td>{row.quantity}</td><td>{formatBRL(row.salesCents)}</td><td>{formatBRL(row.reimbursementCents)}</td><td>{formatPercent(row.marginBps)}%</td></tr>)}</tbody></table>{!data.byPartNumber.length && <div className="empty-mini">Sem itens na solicitação atual.</div>}</div>
         </article>
       </section>
 
-      {isFactoryView && data.factoryDashboard && <FactoryPerformanceDashboard dashboard={data.factoryDashboard} />}
+      <section className="reimbursement-margin-segments">
+        {marginSegments.map((segment) => (
+          <article className={`panel reimbursement-margin-segment ${segment.key}`} key={segment.key}>
+            <span className="eyebrow">{segment.description}</span>
+            <h3>{segment.label}</h3>
+            <strong>{formatPercent(segment.marginBps)}%</strong>
+            <small>{segment.rows} linhas no recorte atual · margem sobre valor líquido</small>
+          </article>
+        ))}
+      </section>
+
+      {isFactoryView && data.factoryDashboard && <FactoryPerformanceDashboard dashboard={data.factoryDashboard} dealerships={dealerships} filters={factoryFilters} onFiltersChange={onFactoryFiltersChange} />}
 
       <ReimbursementVariationPanel sales={data.sales} />
     </>
   );
 }
 
-function FactoryPerformanceDashboard({ dashboard }: { dashboard: FactoryDashboard }) {
+function FactoryPerformanceDashboard({ dashboard, dealerships, filters, onFiltersChange }: { dashboard: FactoryDashboard; dealerships: Dealer[]; filters: FactoryFilters; onFiltersChange: Dispatch<SetStateAction<FactoryFilters>> }) {
+  const calendarMonth = new Date().toISOString().slice(0, 7);
+  const currentMonth = dashboard.reimbursementByMonth.find((item) => item.month === calendarMonth) ?? dashboard.reimbursementByMonth[0];
+  const historyTotal = dashboard.reimbursementByMonth.reduce((sum, item) => sum + item.reimbursementCents, 0);
+  const historyN2 = dashboard.reimbursementByMonth.reduce((sum, item) => sum + item.n2Cents, 0);
+  const historyN3 = dashboard.reimbursementByMonth.reduce((sum, item) => sum + item.n3Cents, 0);
+  const maxReimbursement = Math.max(1, ...dashboard.reimbursementByMonth.map((item) => item.reimbursementCents));
   return (
     <section className="factory-dashboard">
       <div className="factory-dashboard-heading">
         <div>
           <span className="eyebrow">Visão da fábrica</span>
-          <h2>Margem por tipo de venda</h2>
-          <p>O histórico acessível é separado entre Cliente Nível 2, Cliente Nível 3 e vendas normais para apoiar a decisão comercial.</p>
+          <h2>Carteira, margem e reembolso</h2>
+          <p>Use os filtros para analisar uma concessionária, um período específico ou toda a carteira histórica.</p>
         </div>
+      </div>
+
+      <div className="factory-filter-bar">
+        <label>Concessionária<select value={filters.dealershipId} onChange={(event) => onFiltersChange((current) => ({ ...current, dealershipId: event.target.value }))}><option value="">Todas as concessionárias</option>{dealerships.map((dealer) => <option value={dealer.id} key={dealer.id}>{dealer.name}</option>)}</select></label>
+        <label>Data inicial<input type="date" value={filters.dateFrom} onChange={(event) => onFiltersChange((current) => ({ ...current, dateFrom: event.target.value }))} /></label>
+        <label>Data final<input type="date" value={filters.dateTo} onChange={(event) => onFiltersChange((current) => ({ ...current, dateTo: event.target.value }))} /></label>
+        <button className="outline-button compact" type="button" onClick={() => onFiltersChange({ dealershipId: "", dateFrom: "", dateTo: "" })}>Limpar filtros</button>
+      </div>
+
+      <div className="factory-reimbursement-kpis">
+        <article className="panel factory-reimbursement-kpi current"><span>Reembolso no mês</span><strong>{formatBRL(currentMonth?.reimbursementCents ?? 0)}</strong><small>{currentMonth ? `${formatMonth(currentMonth.month)}${currentMonth.month === calendarMonth ? " · mês corrente" : " · último mês com dados"}` : "Sem dados no período"}</small></article>
+        <article className="panel factory-reimbursement-kpi history"><span>Reembolso histórico</span><strong>{formatBRL(historyTotal)}</strong><small>{dashboard.reimbursementByMonth.length} meses · N2 {formatBRL(historyN2)} · N3 {formatBRL(historyN3)}</small></article>
+        <article className="panel factory-reimbursement-kpi negotiation"><span>Negociação com fábrica</span><strong>{formatBRL(dashboard.reimbursementByMonth.reduce((sum, item) => sum + item.negotiationCents, 0))}</strong><small>Margem negativa no recorte</small></article>
       </div>
 
       <div className="factory-margin-grid">
@@ -862,18 +935,33 @@ function FactoryPerformanceDashboard({ dashboard }: { dashboard: FactoryDashboar
         ))}
       </div>
 
+      <div className="factory-reimbursement-grid">
+        <article className="panel factory-reimbursement-chart">
+          <div className="panel-heading"><div><span className="eyebrow">Histórico</span><h2>Reembolso por mês</h2><p>Comparativo mensal no período selecionado.</p></div></div>
+          {dashboard.reimbursementByMonth.length ? <div className="factory-reimbursement-bars">{dashboard.reimbursementByMonth.slice(0, 12).map((item) => <div className="factory-reimbursement-bar-row" key={item.month}><div><strong>{formatMonth(item.month)}</strong><small>{item.rows} linhas · N2 {formatBRL(item.n2Cents)} · N3 {formatBRL(item.n3Cents)}</small></div><div className="factory-reimbursement-bar"><span style={{ width: `${Math.max(3, (item.reimbursementCents / maxReimbursement) * 100)}%` }} /></div><b>{formatBRL(item.reimbursementCents)}</b></div>)}</div> : <div className="empty-mini">Sem dados de reembolso no período.</div>}
+        </article>
+        <article className="panel factory-reimbursement-summary">
+          <div className="panel-heading"><div><span className="eyebrow">Composição</span><h2>Como o reembolso se distribui</h2><p>Valores projetados por programa dentro do histórico filtrado.</p></div></div>
+          <div className="factory-reimbursement-summary-list">
+            <div><span>Nível 2</span><strong>{formatBRL(historyN2)}</strong><small>{historyTotal ? `${((historyN2 / historyTotal) * 100).toFixed(1)}% do histórico` : "Sem base"}</small></div>
+            <div><span>Nível 3</span><strong>{formatBRL(historyN3)}</strong><small>{historyTotal ? `${((historyN3 / historyTotal) * 100).toFixed(1)}% do histórico` : "Sem base"}</small></div>
+            <div><span>Negociação</span><strong>{formatBRL(dashboard.reimbursementByMonth.reduce((sum, item) => sum + item.negotiationCents, 0))}</strong><small>Valor a tratar com a fábrica</small></div>
+          </div>
+        </article>
+      </div>
+
       <article className="panel factory-monthly-panel">
         <div className="panel-heading">
           <div>
-            <span className="eyebrow">Histórico da carteira</span>
+            <span className="eyebrow">Detalhamento histórico</span>
             <h2>Vendas por mês e concessionária</h2>
-            <p>O mês usa a data de processamento do lote e respeita os filtros de PN, status e concessionária aplicados na conferência.</p>
+            <p>Margem e reembolso separados por tipo de cliente para apoiar a decisão comercial.</p>
           </div>
           <span className="section-count">{dashboard.salesByMonthAndDealership.length} agrupamentos</span>
         </div>
         <div className="reimbursement-table-wrap">
           <table className="reimbursement-table factory-monthly-table">
-            <thead><tr><th>Mês</th><th>Concessionária</th><th>Linhas</th><th>Qtd.</th><th>Faturamento</th><th>Margem total</th><th>Vendas N2</th><th>Margem N2</th><th>Vendas N3</th><th>Margem N3</th><th>Vendas normais</th><th>Margem normal</th></tr></thead>
+            <thead><tr><th>Mês</th><th>Concessionária</th><th>Linhas</th><th>Qtd.</th><th>Faturamento</th><th>Reembolso</th><th>Margem total</th><th>Vendas N2</th><th>Margem N2</th><th>Vendas N3</th><th>Margem N3</th><th>Vendas normais</th><th>Margem normal</th></tr></thead>
             <tbody>
               {dashboard.salesByMonthAndDealership.map((row) => (
                 <tr key={`${row.month}-${row.dealershipName}`}>
@@ -882,6 +970,7 @@ function FactoryPerformanceDashboard({ dashboard }: { dashboard: FactoryDashboar
                   <td>{row.rows}</td>
                   <td>{row.quantity.toLocaleString("pt-BR")}</td>
                   <td>{formatBRL(row.salesCents)}</td>
+                  <td>{formatBRL(row.reimbursementCents)}</td>
                   <td>{formatPercent(row.totalMarginBps)}%</td>
                   <td>{formatBRL(row.n2SalesCents)}</td>
                   <td>{formatPercent(row.n2MarginBps)}%</td>

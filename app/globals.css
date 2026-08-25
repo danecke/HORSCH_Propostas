@@ -8229,6 +8229,41 @@ button {
   display: grid;
   gap: 18px;
 }
+.reimbursement-margin-segments {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+.reimbursement-margin-segment {
+  display: grid;
+  gap: 5px;
+  min-height: 145px;
+  padding: 18px;
+  border-top: 3px solid #17395f;
+}
+.reimbursement-margin-segment.N2 {
+  border-top-color: #1e7860;
+}
+.reimbursement-margin-segment.N3 {
+  border-top-color: #d9252a;
+}
+.reimbursement-margin-segment.normal {
+  border-top-color: #71859a;
+}
+.reimbursement-margin-segment h3 {
+  margin: 0;
+  color: #243c53;
+  font-size: 15px;
+}
+.reimbursement-margin-segment strong {
+  color: #182d49;
+  font-size: 27px;
+  letter-spacing: -0.04em;
+}
+.reimbursement-margin-segment small {
+  color: #7d878e;
+  font-size: 9px;
+}
 .factory-dashboard-heading {
   display: flex;
   align-items: end;
@@ -8248,6 +8283,152 @@ button {
   color: #6d777f;
   font-size: 11px;
   line-height: 1.5;
+}
+.factory-filter-bar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.5fr) repeat(2, minmax(150px, 0.8fr)) auto;
+  align-items: end;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #e1e7eb;
+  background: #f8fafb;
+}
+.factory-filter-bar label {
+  display: grid;
+  gap: 5px;
+  color: #5f6b74;
+  font-size: 10px;
+  font-weight: 800;
+}
+.factory-filter-bar input,
+.factory-filter-bar select {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 9px;
+  border: 1px solid #dce3e8;
+  background: #fff;
+  color: #263b4d;
+  font-size: 11px;
+  font-weight: 500;
+}
+.factory-filter-bar button {
+  height: 36px;
+}
+.factory-reimbursement-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+.factory-reimbursement-kpi {
+  display: grid;
+  gap: 5px;
+  min-height: 128px;
+  padding: 18px;
+  border-top: 3px solid #17395f;
+}
+.factory-reimbursement-kpi.current {
+  border-top-color: #d9252a;
+  background: linear-gradient(145deg, #fff, #fff8f8);
+}
+.factory-reimbursement-kpi.history {
+  border-top-color: #1e7860;
+  background: linear-gradient(145deg, #fff, #f7fcf9);
+}
+.factory-reimbursement-kpi.negotiation {
+  border-top-color: #d59a2e;
+  background: linear-gradient(145deg, #fff, #fffaf0);
+}
+.factory-reimbursement-kpi span {
+  color: #6a757e;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.factory-reimbursement-kpi strong {
+  color: #182d49;
+  font-size: clamp(22px, 2.8vw, 32px);
+  letter-spacing: -0.04em;
+}
+.factory-reimbursement-kpi small {
+  color: #7b858c;
+  font-size: 10px;
+  line-height: 1.4;
+}
+.factory-reimbursement-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(290px, 0.75fr);
+  gap: 18px;
+}
+.factory-reimbursement-chart,
+.factory-reimbursement-summary {
+  padding: 20px;
+}
+.factory-reimbursement-bars {
+  display: grid;
+  gap: 13px;
+}
+.factory-reimbursement-bar-row {
+  display: grid;
+  grid-template-columns: minmax(145px, 0.7fr) minmax(110px, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+.factory-reimbursement-bar-row > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+.factory-reimbursement-bar-row strong {
+  color: #253d54;
+  font-size: 11px;
+}
+.factory-reimbursement-bar-row small {
+  color: #889198;
+  font-size: 9px;
+}
+.factory-reimbursement-bar-row b {
+  color: #263d52;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.factory-reimbursement-bar {
+  height: 9px;
+  overflow: hidden;
+  background: #edf1f3;
+}
+.factory-reimbursement-bar span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #d9252a, #e89298);
+}
+.factory-reimbursement-summary-list {
+  display: grid;
+  gap: 12px;
+}
+.factory-reimbursement-summary-list > div {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 3px 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid #e7ecef;
+}
+.factory-reimbursement-summary-list > div:last-child {
+  border-bottom: 0;
+}
+.factory-reimbursement-summary-list span {
+  color: #5f6b74;
+  font-size: 11px;
+  font-weight: 700;
+}
+.factory-reimbursement-summary-list strong {
+  color: #182d49;
+  font-size: 15px;
+}
+.factory-reimbursement-summary-list small {
+  grid-column: 1 / -1;
+  color: #89939a;
+  font-size: 9px;
 }
 .factory-margin-grid {
   display: grid;
@@ -8343,7 +8524,10 @@ button {
 }
 @media (max-width: 960px) {
   .reimbursement-kpi-grid,
-  .reimbursement-insight-grid {
+  .reimbursement-insight-grid,
+  .reimbursement-margin-segments,
+  .factory-reimbursement-kpis,
+  .factory-reimbursement-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .reimbursement-import-layout,
@@ -8353,10 +8537,16 @@ button {
   .factory-margin-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .factory-filter-bar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 @media (max-width: 720px) {
   .reimbursement-kpi-grid,
   .reimbursement-insight-grid,
+  .reimbursement-margin-segments,
+  .factory-reimbursement-kpis,
+  .factory-reimbursement-grid,
   .reimbursement-import-steps,
   .n2n3-explainer-grid,
   .reimbursement-dealer-options {
@@ -8394,6 +8584,13 @@ button {
   }
   .factory-margin-grid {
     grid-template-columns: 1fr;
+  }
+  .factory-filter-bar {
+    grid-template-columns: 1fr;
+  }
+  .factory-reimbursement-bar-row {
+    grid-template-columns: minmax(125px, 0.8fr) minmax(80px, 1fr) auto;
+    gap: 8px;
   }
   .factory-monthly-panel {
     padding: 16px;
