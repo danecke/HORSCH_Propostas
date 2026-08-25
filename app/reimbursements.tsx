@@ -143,6 +143,15 @@ function statusLabel(status: string) {
   return labels[status] ?? status;
 }
 
+const REQUEST_STEPS = ["Recebida", "Em análise", "Aprovada", "Concluída"] as const;
+
+function requestProgress(status: string) {
+  if (status === "paid") return 3;
+  if (status === "approved") return 2;
+  if (["submitted", "under_review", "rejected"].includes(status)) return 1;
+  return 0;
+}
+
 function clientClassification(client: Pick<ClientForm, "n2" | "n3">) {
   if (client.n3) return "Cliente Nível 3";
   if (client.n2) return "Cliente Nível 2";
@@ -527,24 +536,44 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
             {workflowButtons}
           </div>
           <div className="reimbursement-request-list">
-            <span className="reimbursement-request-list-label">Solicitações recentes</span>
+            <header className="reimbursement-request-list-heading">
+              <div><span className="reimbursement-request-list-label">Solicitações enviadas</span><small>Acompanhe o processo e abra somente o que precisar revisar.</small></div>
+              <strong>{data.imports.length} solicitações</strong>
+            </header>
             <div className="reimbursement-request-cards">
-              {data.imports.slice(0, 8).map((item) => (
+              {data.imports.slice(0, 12).map((item) => (
                 <article
                   key={item.id}
                   className={`reimbursement-request-card ${item.id === activeBatch?.id ? "active" : ""}`}
                 >
-                  <div className="reimbursement-request-card-info">
-                    <strong>{item.fileName}</strong>
-                    <small>{formatDate(item.createdAt)} · {item.rowCount} linhas</small>
-                    <span>{item.analysisRows} para analisar · {item.negativeMarginRows} margem negativa · {item.netReferenceRows} NET</span>
+                  <div className="reimbursement-request-identity">
+                    <span className="reimbursement-request-symbol" aria-hidden="true">{String(item.id).slice(-2).padStart(2, "0")}</span>
+                    <div className="reimbursement-request-card-info">
+                      <strong>Solicitação #{item.id}</strong>
+                      <small title={item.fileName}>{item.fileName}</small>
+                      <span>{formatDate(item.createdAt)} · {item.rowCount} linhas</span>
+                    </div>
                   </div>
+                  <div className="reimbursement-request-process" aria-label={`Etapa atual: ${statusLabel(item.status)}`}>
+                    {REQUEST_STEPS.map((step, index) => {
+                      const progress = requestProgress(item.status);
+                      return <span key={step} className={index < progress ? "done" : index === progress ? "current" : ""}><i aria-hidden="true" /><small>{step}</small></span>;
+                    })}
+                  </div>
+                  <div className="reimbursement-request-pending" aria-label="Pendências da solicitação">
+                    {item.analysisRows > 0 ? <span className="attention">{item.analysisRows} analisar</span> : <span className="clear">Sem pendências</span>}
+                    {item.negativeMarginRows > 0 && <span className="negative">{item.negativeMarginRows} margem negativa</span>}
+                    {item.netReferenceRows > 0 && <span className="net">{item.netReferenceRows} NET</span>}
+                  </div>
+                  <span className={`reimbursement-status ${statusClass(item.status)}`}>{statusLabel(item.status)}</span>
                   <button
                     type="button"
                     className="reimbursement-request-open"
+                    aria-label={`Abrir detalhes da solicitação ${item.id}`}
+                    title="Abrir detalhes"
                     onClick={() => { setActiveBatchId(item.id); setTab("sales"); }}
                   >
-                    Abrir detalhes <span aria-hidden="true">→</span>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.4 12s3.5-6 9.6-6 9.6 6 9.6 6-3.5 6-9.6 6-9.6-6-9.6-6Z" /><circle cx="12" cy="12" r="2.7" /></svg>
                   </button>
                 </article>
               ))}
