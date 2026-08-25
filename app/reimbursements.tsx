@@ -485,23 +485,29 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
           </div>
           <div className="reimbursement-workflow">
             <span className={`reimbursement-status ${statusClass(activeBatch?.status ?? "")}`}>{statusLabel(activeBatch?.status ?? "")}</span>
-            <button className="outline-button compact" disabled={!data.sales.length} onClick={() => setTab("sales")}>Abrir análise linha a linha</button>
             {workflowButtons}
           </div>
           <div className="reimbursement-request-list">
-            <span className="reimbursement-request-list-label">Solicitações recentes — clique em uma para abrir o detalhamento</span>
+            <span className="reimbursement-request-list-label">Solicitações recentes</span>
             <div className="reimbursement-request-cards">
               {data.imports.slice(0, 8).map((item) => (
-                <button
-                  type="button"
+                <article
                   key={item.id}
                   className={`reimbursement-request-card ${item.id === activeBatch?.id ? "active" : ""}`}
-                  onClick={() => { setActiveBatchId(item.id); setTab("sales"); }}
                 >
-                  <strong>{item.fileName}</strong>
-                  <small>{formatDate(item.createdAt)} · {item.rowCount} linhas</small>
-                  <span>{item.analysisRows} para analisar · {item.negativeMarginRows} margem negativa · {item.netReferenceRows} NET</span>
-                </button>
+                  <div className="reimbursement-request-card-info">
+                    <strong>{item.fileName}</strong>
+                    <small>{formatDate(item.createdAt)} · {item.rowCount} linhas</small>
+                    <span>{item.analysisRows} para analisar · {item.negativeMarginRows} margem negativa · {item.netReferenceRows} NET</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="reimbursement-request-open"
+                    onClick={() => { setActiveBatchId(item.id); setTab("sales"); }}
+                  >
+                    Abrir detalhes <span aria-hidden="true">→</span>
+                  </button>
+                </article>
               ))}
             </div>
           </div>
