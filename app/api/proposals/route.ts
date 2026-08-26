@@ -962,7 +962,18 @@ export async function PATCH(request: Request) {
     if (!dealerIsVisible(profile, record.dealer)) return forbidden();
     if (!(await isModuleEnabled(db, record.dealer.id, "proposals"))) return forbidden("O módulo Propostas não está habilitado para esta concessionária.");
     const expectedVersion = Math.trunc(Number(payload.version) || 0);
-    if (!expectedVersion || expectedVersion !== record.proposal.version) {
+    // O controle de versão continua obrigatório para os perfis operacionais.
+    // O ADM Geral possui uma exceção administrativa explícita para editar o
+    // conteúdo completo da proposta ou trocar o responsável, mesmo quando o
+    // formulário foi aberto antes de outra atualização. A gravação continua
+    // protegida pelo número atual do banco e fica registrada na auditoria.
+    const adminVersionOverride =
+      profile.role === "general_admin" &&
+      ["edit", "reassign_owner"].includes(payload.action ?? "");
+    if (
+      (!expectedVersion || expectedVersion !== record.proposal.version) &&
+      !adminVersionOverride
+    ) {
       return Response.json(
         {
           error: "Esta proposta foi atualizada por outro gestor. Recarregue os dados antes de continuar.",
@@ -972,11 +983,14 @@ export async function PATCH(request: Request) {
         { status: 409 },
       );
     }
+    const guardedVersion = adminVersionOverride
+      ? record.proposal.version
+      : expectedVersion;
     const proposalGuard = and(
       eq(proposals.id, payload.id),
-      eq(proposals.version, expectedVersion),
+      eq(proposals.version, guardedVersion),
     );
-    const nextVersion = expectedVersion + 1;
+    const nextVersion = guardedVersion + 1;
     const workflowNow = new Date().toISOString();
     async function requestLeadRollback(nextStatus: string, reason: string) {
       if (!record.proposal.sourceLeadId || !["rejected", "reproved", "cancelled", "expired"].includes(nextStatus)) {
@@ -1043,7 +1057,7 @@ export async function PATCH(request: Request) {
         actorName: profile.name,
         action: "responsible_reassigned",
         entity: "proposal",
-        details: `Responsável da proposta alterado de ${record.proposal.commercialOwner || record.proposal.commercialOwnerEmail} para ${assignedManager.name}.`,
+        details: `${adminVersionOverride ? "Alteração administrativa sobre a versão mais recente. " : ""}Responsável da proposta alterado de ${record.proposal.commercialOwner || record.proposal.commercialOwnerEmail} para ${assignedManager.name}.`,
         before: {
           commercialOwner: record.proposal.commercialOwner,
           commercialOwnerEmail: record.proposal.commercialOwnerEmail,
@@ -1059,6 +1073,7 @@ export async function PATCH(request: Request) {
         ok: true,
         status: record.proposal.status,
         version: nextVersion,
+        versionOverride: adminVersionOverride,
         commercialOwner: assignedManager.name,
         commercialOwnerEmail: normalizedManagerEmail,
       });
@@ -1308,13 +1323,26 @@ export async function PATCH(request: Request) {
       const customerName = payload.customerName?.trim() ?? "";
       const customerSaleValueCents = normalizeOptionalCents(payload.customerSaleValueCents);
       const now = new Date().toISOString();
+      const updated = await db
+        .update(proposals)
+        .set({ dealershipId: editedDealer.id, contactName: payload.contactName?.trim() || editedDealer.contactName, contactEmail: (payload.contactEmail?.trim() || editedDealer.contactEmail).toLowerCase(), commercialOwner: assignedManager.name, commercialOwnerEmail: assignedManager.email.toLowerCase(), status: "draft", validUntil, totalCents, customerName, customerSaleValueCents, counterofferCents: null, decisionNote: "", decidedByEmail: "", counterofferPaymentTerms: "", counterofferFreightTerms: "", counterofferDeliveryTerms: "", counterofferSubmittedAt: null, counterofferReviewedAt: null, counterofferReviewedByEmail: "", counterofferReviewNote: "", emailStatus: "not_requested", emailSentAt: null, emailError: "Proposta editada; reenvio necessário.", updatedAt: now, version: nextVersion })
+        .where(proposalGuard)
+        .returning({ id: proposals.id });
+      if (!updated.length) {
+        return Response.json(
+          {
+            error: "Esta proposta foi atualizada por outro gestor. Recarregue os dados antes de continuar.",
+            code: "VERSION_CONFLICT",
+          },
+          { status: 409 },
+        );
+      }
       await db.batch([
-        db.update(proposals).set({ dealershipId: editedDealer.id, contactName: payload.contactName?.trim() || editedDealer.contactName, contactEmail: (payload.contactEmail?.trim() || editedDealer.contactEmail).toLowerCase(), commercialOwner: assignedManager.name, commercialOwnerEmail: assignedManager.email.toLowerCase(), status: "draft", validUntil, totalCents, customerName, customerSaleValueCents, counterofferCents: null, decisionNote: "", decidedByEmail: "", counterofferPaymentTerms: "", counterofferFreightTerms: "", counterofferDeliveryTerms: "", counterofferSubmittedAt: null, counterofferReviewedAt: null, counterofferReviewedByEmail: "", counterofferReviewNote: "", emailStatus: "not_requested", emailSentAt: null, emailError: "Proposta editada; reenvio necessário.", updatedAt: now, version: nextVersion }).where(proposalGuard),
         db.delete(proposalItems).where(eq(proposalItems.proposalId, record.proposal.id)),
         db.insert(proposalItems).values(validItems.map((item) => ({ proposalId: record.proposal.id, ...item }))),
       ]);
-      await recordAudit(db, { proposalId: record.proposal.id, actorEmail: profile.email, actorName: profile.name, action: "edited", entity: "proposal", details: "Proposta editada; voltou para rascunho e exige novo envio.", before, after: { id: record.proposal.id, dealershipId: editedDealer.id, dealership: editedDealer.name, contactName: payload.contactName?.trim() || editedDealer.contactName, contactEmail: (payload.contactEmail?.trim() || editedDealer.contactEmail).toLowerCase(), commercialOwner: assignedManager.name, status: "draft", validUntil, totalCents, customerName, customerSaleValueCents, items: validItems } });
-      return Response.json({ ok: true, status: "draft", totalCents });
+      await recordAudit(db, { proposalId: record.proposal.id, actorEmail: profile.email, actorName: profile.name, action: "edited", entity: "proposal", details: `${adminVersionOverride ? "Edição administrativa sobre a versão mais recente. " : ""}Proposta editada; voltou para rascunho e exige novo envio.`, before, after: { id: record.proposal.id, dealershipId: editedDealer.id, dealership: editedDealer.name, contactName: payload.contactName?.trim() || editedDealer.contactName, contactEmail: (payload.contactEmail?.trim() || editedDealer.contactEmail).toLowerCase(), commercialOwner: assignedManager.name, status: "draft", validUntil, totalCents, customerName, customerSaleValueCents, items: validItems } });
+      return Response.json({ ok: true, status: "draft", totalCents, version: nextVersion, versionOverride: adminVersionOverride });
     }
 
     if (payload.action === "send") {

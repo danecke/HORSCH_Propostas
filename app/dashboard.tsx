@@ -558,6 +558,7 @@ export function Dashboard({ user }: { user: AppUser }) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | ProposalStatus>(
     "all",
@@ -6455,7 +6456,9 @@ function NewProposalModal({
             </p>
             {proposal && ["general_admin", "global_management"].includes(role) && (
               <span className="admin-edit-note">
-                Acesso administrativo: todos os tópicos e o responsável da proposta podem ser editados.
+                {role === "general_admin"
+                  ? "Acesso ADM: todos os tópicos e o responsável podem ser editados, inclusive sobre a versão atualizada por outro gestor."
+                  : "Acesso administrativo: todos os tópicos e o responsável da proposta podem ser editados."}
               </span>
             )}
           </div>
