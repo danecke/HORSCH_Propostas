@@ -4254,9 +4254,33 @@ function ManagementDashboard({ data }: { data: DashboardData }) {
           map.set(key, current);
           return map;
         }, new Map())
-        .values(),
+      .values(),
     ),
   );
+  const partQuantityRanking = (items: Proposal[]): PartAnalysisRow[] =>
+    Array.from(
+      items
+        .reduce((map, proposal) => {
+          proposal.items.forEach((item) => {
+            const key = item.partNumber || "PN não informado";
+            const current = map.get(key) ?? {
+              key,
+              value: 0,
+              count: 0,
+              quantity: 0,
+            };
+            current.value += item.quantity * item.unitPriceCents;
+            current.count += 1;
+            current.quantity += item.quantity;
+            map.set(key, current);
+          });
+          return map;
+        }, new Map<string, PartAnalysisRow>())
+        .values(),
+    )
+      .sort((a, b) => b.quantity - a.quantity)
+      .slice(0, 5);
+  const negotiationByPart = partQuantityRanking(negotiation);
   const byOwner = ranking(
     Array.from(
       closed
@@ -4303,28 +4327,7 @@ function ManagementDashboard({ data }: { data: DashboardData }) {
         .values(),
     ).reverse(),
   );
-  const byPart = Array.from(
-    closed
-      .reduce((map, proposal) => {
-        proposal.items.forEach((item) => {
-          const key = item.partNumber || "PN não informado";
-          const current = map.get(key) ?? {
-            key,
-            value: 0,
-            count: 0,
-            quantity: 0,
-          };
-          current.value += item.quantity * item.unitPriceCents;
-          current.count += 1;
-          current.quantity += item.quantity;
-          map.set(key, current);
-        });
-        return map;
-      }, new Map())
-      .values(),
-  )
-    .sort((a, b) => b.quantity - a.quantity)
-    .slice(0, 5);
+  const byPart = partQuantityRanking(closed);
   const maxMonthly = Math.max(1, ...byMonth.map((item) => item.value));
   const currentMonthLabel = currentDate.toLocaleDateString("pt-BR", {
     month: "long",
@@ -4425,29 +4428,10 @@ function ManagementDashboard({ data }: { data: DashboardData }) {
             title="PN com mais saída"
             subtitle="Quantidade total em propostas fechadas"
           />
-          <div className="pn-analysis">
-            {byPart.length ? (
-              byPart.map((item, index) => (
-                <div className="pn-row" key={item.key}>
-                  <span className="ranking-index">
-                    {String(index + 1).padStart(2, "0")}
-                  </span>
-                  <div>
-                    <strong>{item.key}</strong>
-                    <small>
-                      {item.count} proposta{item.count === 1 ? "" : "s"}
-                    </small>
-                  </div>
-                  <span>
-                    <strong>{item.quantity}</strong>
-                    <small>un.</small>
-                  </span>
-                </div>
-              ))
-            ) : (
-              <EmptyMini text="Nenhum PN fechado no período." />
-            )}
-          </div>
+          <PartQuantityRanking
+            rows={byPart}
+            emptyText="Nenhum PN fechado no período."
+          />
         </article>
         <article className="panel analysis-panel">
           <PanelHeader
@@ -4455,6 +4439,16 @@ function ManagementDashboard({ data }: { data: DashboardData }) {
             subtitle="Valor aberto por concessionária"
           />
           <AnalysisRanking rows={negotiationByDealership} countLabel="proposta" />
+        </article>
+        <article className="panel analysis-panel">
+          <PanelHeader
+            title="Quantidade em negociação por PN"
+            subtitle="Unidades abertas por peça"
+          />
+          <PartQuantityRanking
+            rows={negotiationByPart}
+            emptyText="Nenhum PN em negociação."
+          />
         </article>
       </section>
       <div className="analysis-footnote">
@@ -4493,6 +4487,38 @@ function AnalysisRanking({
     </div>
   ) : (
     <EmptyMini text="Nenhum fechamento disponível." />
+  );
+}
+
+function PartQuantityRanking({
+  rows,
+  emptyText,
+}: {
+  rows: PartAnalysisRow[];
+  emptyText: string;
+}) {
+  return rows.length ? (
+    <div className="pn-analysis">
+      {rows.map((item, index) => (
+        <div className="pn-row" key={item.key}>
+          <span className="ranking-index">
+            {String(index + 1).padStart(2, "0")}
+          </span>
+          <div>
+            <strong>{item.key}</strong>
+            <small>
+              {item.count} proposta{item.count === 1 ? "" : "s"}
+            </small>
+          </div>
+          <span>
+            <strong>{item.quantity}</strong>
+            <small>un.</small>
+          </span>
+        </div>
+      ))}
+    </div>
+  ) : (
+    <EmptyMini text={emptyText} />
   );
 }
 
