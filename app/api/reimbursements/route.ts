@@ -81,6 +81,7 @@ type ParsedSale = {
   clientName: string;
   clientCnpj: string;
   invoiceNumber: string;
+  series: string;
   state: string;
   dealershipName: string;
   dealershipCnpj: string;
@@ -162,6 +163,30 @@ function normalizePartNumber(value: unknown) {
   return /^\d+$/.test(normalized)
     ? normalized.replace(/^0+(?=\d)/, "")
     : normalized;
+}
+function sanitizePinPart(value: unknown) {
+  return String(value ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("pt-BR")
+    .replace(/[^a-z0-9]/g, "");
+}
+function reimbursementPin(input: {
+  dealershipName: unknown;
+  state: unknown;
+  invoiceNumber: unknown;
+  series: unknown;
+  partNumber: unknown;
+}) {
+  return [
+    input.dealershipName,
+    input.state,
+    input.invoiceNumber,
+    input.series,
+    input.partNumber,
+  ]
+    .map(sanitizePinPart)
+    .join("");
 }
 function normalizeDocument(value: unknown) {
   return String(value ?? "").replace(/\D/g, "");
@@ -396,6 +421,7 @@ function parseSales(bytes: Uint8Array, fileName: string): ParsedSale[] {
       /documento/,
     ]),
     nf: headerIndex(headers, [/^nf$/, /nota.*fiscal/, /invoice/]),
+    series: headerIndex(headers, [/^serie$/, /serie.*nf/, /s[ée]rie/]),
     state: headerIndex(headers, [/estado/, /^uf$/]),
     dealership: headerIndex(headers, [/concession/, /dealer/]),
     dealershipCnpj: headerIndex(headers, [
@@ -414,6 +440,7 @@ function parseSales(bytes: Uint8Array, fileName: string): ParsedSale[] {
     client: "Cliente",
     document: "CPF/CNPJ",
     nf: "NF",
+    series: "Série",
     state: "Estado",
     dealership: "Concessionário",
     dealershipCnpj: "CNPJ do Concessionário",
@@ -449,6 +476,8 @@ function parseSales(bytes: Uint8Array, fileName: string): ParsedSale[] {
       clientName: String(row[indexes.client] ?? "").trim(),
       clientCnpj: normalizeDocument(row[indexes.document]),
       invoiceNumber: String(row[indexes.nf] ?? "").trim(),
+      series:
+        indexes.series >= 0 ? String(row[indexes.series] ?? "").trim() : "",
       state: stateCode(row[indexes.state]),
       dealershipName:
         indexes.dealership >= 0
@@ -510,22 +539,62 @@ function parseJson<T>(value: string, fallback: T): T {
 function dateNow() {
   return new Date().toISOString();
 }
+type PriceLookup = {
+  item: typeof priceListItems.$inferSelect | null;
+  net: number | null;
+  n3: number | null;
+  scope: "state" | "national" | "not_found";
+};
+function positivePrice(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
 function priceForState(
   item: typeof priceListItems.$inferSelect,
   state: string,
-) {
+): Omit<PriceLookup, "item"> {
   const statePrices = parseJson<
     Record<string, { netPriceCents?: number; n3?: number }>
   >(item.statePricesJson, {});
   const stateKey =
     Object.keys(statePrices).find((key) => stateCode(key) === state) ?? state;
-  const selected = statePrices[stateKey] ?? {};
-  const net = selected.netPriceCents ?? item.netPriceCents ?? null;
-  const n3 = selected.n3 ?? null;
+  const regional = statePrices[stateKey] ?? {};
+  const nationalKey = Object.keys(statePrices).find((key) =>
+    ["nacional", "padrao", "default", "brasil", "br"].includes(
+      sanitizePinPart(key),
+    ),
+  );
+  const national = nationalKey ? statePrices[nationalKey] ?? {} : {};
+  const regionalNet = positivePrice(regional.netPriceCents);
+  const regionalN3 = positivePrice(regional.n3);
+  const nationalNet = positivePrice(national.netPriceCents);
+  const nationalN3 = positivePrice(national.n3);
+  const fallbackNet = positivePrice(item.netPriceCents);
+  const hasRegionalPrice = regionalNet !== null || regionalN3 !== null;
+  const hasNationalPrice = nationalNet !== null || nationalN3 !== null;
   return {
-    net: typeof net === "number" && net > 0 ? net : null,
-    n3: typeof n3 === "number" && n3 > 0 ? n3 : null,
+    net: regionalNet ?? nationalNet ?? fallbackNet,
+    n3: regionalN3 ?? nationalN3,
+    scope: hasRegionalPrice
+      ? "state"
+      : hasNationalPrice || fallbackNet !== null
+        ? "national"
+        : "not_found",
   };
+}
+function lookupPrice(
+  items: Array<typeof priceListItems.$inferSelect>,
+  partNumber: unknown,
+  state: string,
+): PriceLookup {
+  const item = items.find(
+    (candidate) =>
+      normalizePartNumber(candidate.partNumber) ===
+      normalizePartNumber(partNumber),
+  );
+  if (!item)
+    return { item: null, net: null, n3: null, scope: "not_found" };
+  return { item, ...priceForState(item, state) };
 }
 function isAllowedDealer(
   profile: AccessProfile,
@@ -1422,9 +1491,6 @@ export async function POST(request: Request) {
           .from(priceListItems)
           .where(eq(priceListItems.importId, activePriceList.id))
       : [];
-    const priceByPn = new Map(
-      priceItems.map((item) => [normalizePartNumber(item.partNumber), item]),
-    );
     const clients = await db
       .select()
       .from(reimbursementClients)
@@ -1448,15 +1514,28 @@ export async function POST(request: Request) {
         allDealers.find(
           (item) => normalize(item.name) === normalize(row.dealershipName),
         );
-      const key = `${dealer?.id ?? 0}|${normalize(row.invoiceNumber)}|${normalizePartNumber(row.partNumber)}`;
+      const key = reimbursementPin({
+        dealershipName: dealer?.name ?? row.dealershipName,
+        state: row.state,
+        invoiceNumber: row.invoiceNumber,
+        series: row.series,
+        partNumber: row.partNumber,
+      });
       seen.set(key, (seen.get(key) ?? 0) + 1);
     }
-   const existing = new Set(
-      oldSales.flatMap((row) => [
-        row.duplicateKey,
-        `${row.dealershipId ?? 0}|${normalize(row.invoiceNumber)}|${normalizePartNumber(row.partNumber)}`,
-      ]).filter(Boolean),
-   );
+    const existing = new Set(
+      oldSales
+        .map((row) =>
+          reimbursementPin({
+            dealershipName: row.dealershipName,
+            state: row.state,
+            invoiceNumber: row.invoiceNumber,
+            series: "",
+            partNumber: row.partNumber,
+          }),
+        )
+        .filter(Boolean),
+    );
     const allowedDealerIds = new Set(allDealers.map((dealer) => dealer.id));
     const now = dateNow();
     const rowsToInsert: Array<typeof reimbursementSales.$inferInsert> = [];
@@ -1525,11 +1604,9 @@ export async function POST(request: Request) {
           normalizeDocument(item.cnpj) === row.clientCnpj &&
           item.state === row.state,
       );
-      const priceItem = priceByPn.get(normalizePartNumber(row.partNumber));
-      const price =
-        priceItem && row.state
-          ? priceForState(priceItem, row.state)
-          : { net: null, n3: null };
+      const priceLookup = lookupPrice(priceItems, row.partNumber, row.state);
+      const priceItem = priceLookup.item;
+      const price = priceLookup;
       const costTotal = row.quantity * row.costUnitCents;
       const liquidTotal = row.quantity * row.saleNetUnitCents;
       const marginBps = liquidTotal
@@ -1537,7 +1614,13 @@ export async function POST(request: Request) {
         : costTotal > 0
           ? -10000
           : 0;
-      const key = `${dealerId ?? 0}|${normalize(row.invoiceNumber)}|${normalizePartNumber(row.partNumber)}`;
+      const key = reimbursementPin({
+        dealershipName: dealer?.name ?? row.dealershipName,
+        state: row.state,
+        invoiceNumber: row.invoiceNumber,
+        series: row.series,
+        partNumber: row.partNumber,
+      });
       const duplicate = Boolean(
         row.invoiceNumber && ((seen.get(key) ?? 0) > 1 || existing.has(key)),
       );
@@ -1642,7 +1725,11 @@ export async function POST(request: Request) {
         expectedN3Cents: price.n3,
         priceDifferenceCents: difference,
         duplicateKey: key,
-        baseSource,
+        baseSource: hasNetPrice
+          ? price.scope === "state"
+            ? "NET_PRICE_REGIONAL"
+            : "NET_PRICE_NACIONAL"
+          : baseSource,
         baseStatus: hasNetPrice ? "" : "MANUAL_REQUIRED",
         reasonCode,
         historicalMarginBps,
@@ -1964,20 +2051,21 @@ export async function PATCH(request: Request) {
               .from(priceListItems)
               .where(eq(priceListItems.importId, priceListId))
           : [];
-        const priceItem = priceItems.find(
-          (item) =>
-            normalizePartNumber(item.partNumber) ===
-            normalizePartNumber(partNumber),
-        );
-        const referencePrice = priceItem
-          ? priceForState(priceItem, state)
-          : { net: null, n3: null };
+        const priceLookup = lookupPrice(priceItems, partNumber, state);
+        const priceItem = priceLookup.item;
+        const referencePrice = priceLookup;
         const netPrice = manualNet && manualNet > 0 ? manualNet : referencePrice.net;
         const costTotal = quantityValue * costUnit;
         const liquidTotal = quantityValue * saleNetUnit;
         const marginBps = calculatedMarginBps(liquidTotal, costTotal);
         const calculationBase = (netPrice ?? costUnit) * quantityValue;
-        const duplicateKey = `${dealer.id}|${normalize(invoiceNumber)}|${normalizePartNumber(partNumber)}`;
+        const duplicateKey = reimbursementPin({
+          dealershipName: dealer.name,
+          state,
+          invoiceNumber,
+          series: "",
+          partNumber,
+        });
         const allImportSales = await lineDb
           .select()
           .from(reimbursementSales)
@@ -1985,8 +2073,13 @@ export async function PATCH(request: Request) {
         const duplicate = allImportSales.some(
           (item) =>
             item.id !== sale.id &&
-            `${item.dealershipId ?? 0}|${normalize(item.invoiceNumber)}|${normalizePartNumber(item.partNumber)}` ===
-              duplicateKey,
+            reimbursementPin({
+              dealershipName: item.dealershipName,
+              state: item.state,
+              invoiceNumber: item.invoiceNumber,
+              series: "",
+              partNumber: item.partNumber,
+            }) === duplicateKey,
         );
         const program = client?.n3 ? "N3" : client?.n2 ? "N2" : "";
         const difference =
@@ -2099,7 +2192,9 @@ export async function PATCH(request: Request) {
               manualNet && manualNet > 0
                 ? "NET_PRICE_MANUAL"
                 : netPrice
-                  ? "NET_PRICE_VIGENTE"
+                  ? referencePrice.scope === "state"
+                    ? "NET_PRICE_REGIONAL"
+                    : "NET_PRICE_NACIONAL"
                   : "CUSTO_MEDIO_EXCEPCIONAL",
             baseStatus: netPrice ? "" : "MANUAL_REQUIRED",
             reasonCode,

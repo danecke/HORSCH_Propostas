@@ -146,6 +146,14 @@ function stateFromHeader(header: string) {
   const match = header.toUpperCase().trim().match(/(?:^|\s)([A-Z]{2})$/);
   return match && STATES.includes(match[1]) ? match[1] : "";
 }
+function priceScopeFromHeader(header: string) {
+  const state = stateFromHeader(header);
+  if (state) return state;
+  const normalized = normalizeHeader(header);
+  return /(?:padrao|nacional|default|brasil)/.test(normalized)
+    ? "NACIONAL"
+    : "";
+}
 
 function readSharedStrings(files: Record<string, Uint8Array>) {
   const xml = files["xl/sharedStrings.xml"] ? decode(files["xl/sharedStrings.xml"]) : "";
@@ -205,7 +213,7 @@ function parseWorkbook(bytes: Uint8Array) {
   if (pnIndex < 0 || descriptionIndex < 0 || netIndex < 0) throw new Error("A planilha deve conter as colunas PN, Descrição e Netprice 26.");
 
   const stateColumns = headers.flatMap(([index, value]) => {
-    const state = stateFromHeader(value);
+    const state = priceScopeFromHeader(value);
     if (!state || index < 8) return [];
     const normalized = normalizeHeader(value);
     const tier: "netPriceCents" | PriceTier = normalized.startsWith("netprice") ? "netPriceCents" : /(?:\bn2\b|nivel\s*2)/.test(normalized) ? "n2" : /(?:\bn3\b|nivel\s*3)/.test(normalized) ? "n3" : "final";

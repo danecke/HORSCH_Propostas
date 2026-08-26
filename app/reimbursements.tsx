@@ -208,6 +208,16 @@ function signedBRL(cents: number | null) {
   return `${cents > 0 ? "+" : ""}${formatBRL(cents)}`;
 }
 
+function baseSourceLabel(source: string) {
+  return ({
+    NET_PRICE_REGIONAL: "Preço regional · PN/UF",
+    NET_PRICE_NACIONAL: "Preço padrão/nacional",
+    NET_PRICE_MANUAL: "NET informado manualmente",
+    NET_PRICE_VIGENTE: "NET vigente",
+    CUSTO_MEDIO_EXCEPCIONAL: "Custo médio excepcional",
+  } as Record<string, string>)[source] ?? source;
+}
+
 export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAccess; dealerships: Dealer[] }) {
   const [tab, setTab] = useState<"overview" | "sales" | "import" | "clients">("overview");
   const [data, setData] = useState<DashboardData | null>(null);
@@ -835,6 +845,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
               <li>A análise é fragmentada por linha: uma pendência não bloqueia a conferência das demais linhas da solicitação.</li>
               <li>O PN é conferido sem considerar zeros à esquerda; 00180123 e 180123 consultam o mesmo cadastro.</li>
               <li>O cliente é localizado pelo CPF/CNPJ e UF na base de clientes N2/N3.</li>
+              <li>Preço: primeiro cruza PN + UF; sem valor regional, utiliza Padrão/Nacional quando disponível.</li>
               <li>N2: margem menor ou igual a 20% e reembolso de 4% sobre a base.</li>
               <li>{isAdmin ? "N3: NF unitária compatível com N3 do PN/UF, com tolerância configurada em " + (data?.n3TolerancePercent ?? (toleranceDraft || "—")) + "%, e reembolso de 7%." : "N3: NF unitária compatível com o valor N3 vigente do PN/UF e reembolso de 7%."}</li>
               <li>Base: Net Price vigente × quantidade; sem Net Price, custo médio líquido × quantidade.</li>
@@ -916,7 +927,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
                   )}
                   <small><strong>{workflowLabel(sale.workflowStatus)}</strong></small>
                   <small>{sale.analysisReason || (sale.expectedN3Cents !== null ? `N3 ${formatBRL(sale.expectedN3Cents)} · Δ ${signedBRL(sale.priceDifferenceCents)}` : "Linha sem pendências")}</small>
-                  <small>Base {formatBRL(sale.calculationBaseCents)} · {sale.needsNetReference ? "NET necessário" : sale.netPriceUsedCents === null ? "Custo médio" : `NET ${formatBRL(sale.netPriceUsedCents)}`}</small>
+                  <small>Base {formatBRL(sale.calculationBaseCents)} · {sale.needsNetReference ? "NET necessário" : sale.netPriceUsedCents === null ? "Custo médio" : `${baseSourceLabel(sale.baseSource)} · ${formatBRL(sale.netPriceUsedCents)}`}</small>
                 </div>
                 <div className="reimbursement-sale-decision" role="cell">
                   <div className="reimbursement-decision-actions">
