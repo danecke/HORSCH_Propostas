@@ -191,6 +191,26 @@ function reimbursementPin(input: {
 function normalizeDocument(value: unknown) {
   return String(value ?? "").replace(/\D/g, "");
 }
+function lookupReimbursementClient(
+  clients: Array<typeof reimbursementClients.$inferSelect>,
+  document: unknown,
+  operationState: unknown,
+) {
+  const wantedDocument = normalizeDocument(document);
+  if (!wantedDocument) return undefined;
+  const matches = clients.filter(
+    (item) => normalizeDocument(item.cnpj) === wantedDocument,
+  );
+  if (!matches.length) return undefined;
+
+  const wantedState = stateCode(operationState);
+  return (
+    matches.find((item) => stateCode(item.state) === wantedState) ??
+    matches.find((item) => item.n3) ??
+    matches.find((item) => item.n2) ??
+    matches[0]
+  );
+}
 function isValidDocument(value: string) {
   return value.length === 11 || value.length === 14;
 }
@@ -643,10 +663,10 @@ function evaluatePendingSale(input: {
   importSales: Array<typeof reimbursementSales.$inferSelect>;
 }) {
   const { sale, priceTable, clients, activePriceListId, n3ToleranceBps, duplicate, importSales } = input;
-  const client = clients.find(
-    (item) =>
-      normalizeDocument(item.cnpj) === normalizeDocument(sale.clientCnpj) &&
-      item.state === sale.state,
+  const client = lookupReimbursementClient(
+    clients,
+    sale.clientCnpj,
+    sale.state,
   );
   const price = lookupPrice(priceTable, sale.partNumber, sale.state);
   const program = client?.n3 ? "N3" : client?.n2 ? "N2" : "";
@@ -1758,10 +1778,10 @@ export async function POST(request: Request) {
         continue;
       }
       importDealerId = importDealerId ?? dealerId;
-      const client = clients.find(
-        (item) =>
-          normalizeDocument(item.cnpj) === row.clientCnpj &&
-          item.state === row.state,
+      const client = lookupReimbursementClient(
+        clients,
+        row.clientCnpj,
+        row.state,
       );
       const priceLookup = lookupPrice(priceTable, row.partNumber, row.state);
       const priceItem = priceLookup.item;
@@ -2314,10 +2334,7 @@ export async function PATCH(request: Request) {
           .select()
           .from(reimbursementClients)
           .where(eq(reimbursementClients.status, "active"));
-        const client = clients.find(
-          (item) =>
-            normalizeDocument(item.cnpj) === clientCnpj && item.state === state,
-        );
+        const client = lookupReimbursementClient(clients, clientCnpj, state);
         const [activePriceList] = await lineDb
           .select()
           .from(priceListImports)
