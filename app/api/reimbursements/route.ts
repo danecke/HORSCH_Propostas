@@ -545,74 +545,110 @@ type PriceLookup = {
   n3: number | null;
   scope: "state" | "national" | "not_found";
 };
+type PriceTableRow = {
+  item: typeof priceListItems.$inferSelect;
+  state: string;
+  net: number | null;
+  n3: number | null;
+};
+type PriceTable = {
+  rows: PriceTableRow[];
+  byPartNumber: Map<string, PriceTableRow[]>;
+};
 function positivePrice(value: unknown) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : null;
 }
-function priceForState(
-  item: typeof priceListItems.$inferSelect,
+function priceRegion(value: unknown) {
+  const state = stateCode(value);
+  if (state) return state;
+  return ["nacional", "padrao", "default", "brasil", "br"].includes(
+    sanitizePinPart(value),
+  )
+    ? "NACIONAL"
+    : "";
+}
+function buildPriceTable(items: Array<typeof priceListItems.$inferSelect>): PriceTable {
+  const rows: PriceTableRow[] = [];
+  for (const item of items) {
+    const statePrices = parseJson<
+      Record<string, { netPriceCents?: number; final?: number | null; n3?: number | null }>
+    >(item.statePricesJson, {});
+    const parsedRows = Object.entries(statePrices)
+      .map(([region, prices]) => ({
+        item,
+        state: priceRegion(region),
+        net: positivePrice(prices.netPriceCents),
+        n3:
+          positivePrice(prices.n3) ??
+          (positivePrice(prices.final) === null
+            ? null
+            : Math.round((positivePrice(prices.final) ?? 0) * 0.8)),
+      }))
+      .filter((row) => row.state && (row.net !== null || row.n3 !== null));
+    rows.push(...parsedRows);
+    if (!parsedRows.length && positivePrice(item.netPriceCents) !== null) {
+      rows.push({
+        item,
+        state: "NACIONAL",
+        net: positivePrice(item.netPriceCents),
+        n3: null,
+      });
+    }
+  }
+  const byPartNumber = new Map<string, PriceTableRow[]>();
+  for (const row of rows) {
+    const key = normalizePartNumber(row.item.partNumber);
+    const current = byPartNumber.get(key) ?? [];
+    current.push(row);
+    byPartNumber.set(key, current);
+  }
+  return { rows, byPartNumber };
+}
+function lookupPrice(
+  table: PriceTable,
+  partNumber: unknown,
   state: string,
-): Omit<PriceLookup, "item"> {
-  const statePrices = parseJson<
-    Record<string, { netPriceCents?: number; n3?: number }>
-  >(item.statePricesJson, {});
-  const stateKey =
-    Object.keys(statePrices).find((key) => stateCode(key) === state) ?? state;
-  const regional = statePrices[stateKey] ?? {};
-  const nationalKey = Object.keys(statePrices).find((key) =>
-    ["nacional", "padrao", "default", "brasil", "br"].includes(
-      sanitizePinPart(key),
-    ),
+): PriceLookup {
+  const rows = table.byPartNumber.get(normalizePartNumber(partNumber)) ?? [];
+  if (!rows.length)
+    return { item: null, net: null, n3: null, scope: "not_found" };
+  const wantedState = stateCode(state);
+  const regional = rows.find((row) => row.state === wantedState);
+  const national = rows.find((row) => row.state === "NACIONAL");
+  const selected = regional ?? national ?? rows[0];
+  const hasRegionalPrice = Boolean(
+    regional && (regional.net !== null || regional.n3 !== null),
   );
-  const national = nationalKey ? statePrices[nationalKey] ?? {} : {};
-  const regionalNet = positivePrice(regional.netPriceCents);
-  const regionalN3 = positivePrice(regional.n3);
-  const nationalNet = positivePrice(national.netPriceCents);
-  const nationalN3 = positivePrice(national.n3);
-  const fallbackNet = positivePrice(item.netPriceCents);
-  const hasRegionalPrice = regionalNet !== null || regionalN3 !== null;
-  const hasNationalPrice = nationalNet !== null || nationalN3 !== null;
+  const fallbackNet = positivePrice(selected.item.netPriceCents);
   return {
-    net: regionalNet ?? nationalNet ?? fallbackNet,
-    n3: regionalN3 ?? nationalN3,
+    item: selected.item,
+    net: regional?.net ?? national?.net ?? fallbackNet,
+    n3: regional?.n3 ?? national?.n3 ?? null,
     scope: hasRegionalPrice
       ? "state"
-      : hasNationalPrice || fallbackNet !== null
+      : national || fallbackNet !== null
         ? "national"
         : "not_found",
   };
 }
-function lookupPrice(
-  items: Array<typeof priceListItems.$inferSelect>,
-  partNumber: unknown,
-  state: string,
-): PriceLookup {
-  const item = items.find(
-    (candidate) =>
-      normalizePartNumber(candidate.partNumber) ===
-      normalizePartNumber(partNumber),
-  );
-  if (!item)
-    return { item: null, net: null, n3: null, scope: "not_found" };
-  return { item, ...priceForState(item, state) };
-}
 
 function evaluatePendingSale(input: {
   sale: typeof reimbursementSales.$inferSelect;
-  priceItems: Array<typeof priceListItems.$inferSelect>;
+  priceTable: PriceTable;
   clients: Array<typeof reimbursementClients.$inferSelect>;
   activePriceListId: number;
   n3ToleranceBps: number;
   duplicate: boolean;
   importSales: Array<typeof reimbursementSales.$inferSelect>;
 }) {
-  const { sale, priceItems, clients, activePriceListId, n3ToleranceBps, duplicate, importSales } = input;
+  const { sale, priceTable, clients, activePriceListId, n3ToleranceBps, duplicate, importSales } = input;
   const client = clients.find(
     (item) =>
       normalizeDocument(item.cnpj) === normalizeDocument(sale.clientCnpj) &&
       item.state === sale.state,
   );
-  const price = lookupPrice(priceItems, sale.partNumber, sale.state);
+  const price = lookupPrice(priceTable, sale.partNumber, sale.state);
   const program = client?.n3 ? "N3" : client?.n2 ? "N2" : "";
   const costTotal = sale.quantity * sale.costAvgUnitCents;
   const liquidTotal = sale.quantity * sale.saleNetUnitCents;
@@ -1613,6 +1649,7 @@ export async function POST(request: Request) {
           .from(priceListItems)
           .where(eq(priceListItems.importId, activePriceList.id))
       : [];
+    const priceTable = buildPriceTable(priceItems);
     const clients = await db
       .select()
       .from(reimbursementClients)
@@ -1726,7 +1763,7 @@ export async function POST(request: Request) {
           normalizeDocument(item.cnpj) === row.clientCnpj &&
           item.state === row.state,
       );
-      const priceLookup = lookupPrice(priceItems, row.partNumber, row.state);
+      const priceLookup = lookupPrice(priceTable, row.partNumber, row.state);
       const priceItem = priceLookup.item;
       const price = priceLookup;
       const costTotal = row.quantity * row.costUnitCents;
@@ -2083,6 +2120,7 @@ export async function PATCH(request: Request) {
         .select()
         .from(priceListItems)
         .where(eq(priceListItems.importId, activePriceList.id));
+      const priceTable = buildPriceTable(priceItems);
       const clients = await db
         .select()
         .from(reimbursementClients)
@@ -2119,7 +2157,7 @@ export async function PATCH(request: Request) {
         });
         const evaluation = evaluatePendingSale({
           sale: line,
-          priceItems,
+          priceTable,
           clients,
           activePriceListId: activePriceList.id,
           n3ToleranceBps,
@@ -2293,7 +2331,8 @@ export async function PATCH(request: Request) {
               .from(priceListItems)
               .where(eq(priceListItems.importId, priceListId))
           : [];
-        const priceLookup = lookupPrice(priceItems, partNumber, state);
+        const priceTable = buildPriceTable(priceItems);
+        const priceLookup = lookupPrice(priceTable, partNumber, state);
         const priceItem = priceLookup.item;
         const referencePrice = priceLookup;
         const netPrice = manualNet && manualNet > 0 ? manualNet : referencePrice.net;

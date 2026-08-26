@@ -143,8 +143,45 @@ function normalizeStatePrices(statePrices: ParsedPriceRow["statePrices"]) {
 }
 
 function stateFromHeader(header: string) {
-  const match = header.toUpperCase().trim().match(/(?:^|\s)([A-Z]{2})$/);
-  return match && STATES.includes(match[1]) ? match[1] : "";
+  const normalized = normalizeHeader(header)
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  const code = normalized
+    .split(" ")
+    .map((token) => token.toUpperCase())
+    .find((token) => STATES.includes(token));
+  if (code) return code;
+  const stateNames: Record<string, string> = {
+    acre: "AC",
+    alagoas: "AL",
+    amapa: "AP",
+    amazonas: "AM",
+    bahia: "BA",
+    ceara: "CE",
+    "distrito federal": "DF",
+    "espirito santo": "ES",
+    goias: "GO",
+    maranhao: "MA",
+    "mato grosso": "MT",
+    "mato grosso do sul": "MS",
+    "minas gerais": "MG",
+    para: "PA",
+    paraiba: "PB",
+    parana: "PR",
+    pernambuco: "PE",
+    piaui: "PI",
+    "rio de janeiro": "RJ",
+    "rio grande do norte": "RN",
+    "rio grande do sul": "RS",
+    rondonia: "RO",
+    roraima: "RR",
+    "santa catarina": "SC",
+    "sao paulo": "SP",
+    sergipe: "SE",
+    tocantins: "TO",
+    paraguai: "PY",
+  };
+  return Object.entries(stateNames).find(([name]) => normalized.includes(name))?.[1] ?? "";
 }
 function priceScopeFromHeader(header: string) {
   const state = stateFromHeader(header);
@@ -214,7 +251,7 @@ function parseWorkbook(bytes: Uint8Array) {
 
   const stateColumns = headers.flatMap(([index, value]) => {
     const state = priceScopeFromHeader(value);
-    if (!state || index < 8) return [];
+    if (!state) return [];
     const normalized = normalizeHeader(value);
     const tier: "netPriceCents" | PriceTier = normalized.startsWith("netprice") ? "netPriceCents" : /(?:\bn2\b|nivel\s*2)/.test(normalized) ? "n2" : /(?:\bn3\b|nivel\s*3)/.test(normalized) ? "n3" : "final";
     return [{ index, state, tier }];
