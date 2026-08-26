@@ -6460,8 +6460,8 @@ function NewProposalModal({
             {proposal && ["general_admin", "global_management"].includes(role) && (
               <span className="admin-edit-note">
                 {role === "general_admin"
-                  ? "Acesso ADM: todos os tópicos e o responsável podem ser editados, inclusive sobre a versão atualizada por outro gestor."
-                  : "Acesso administrativo: todos os tópicos e o responsável da proposta podem ser editados."}
+                  ? "Acesso ADM: todos os tópicos, o responsável e o status podem ser alterados, inclusive sobre a versão atualizada por outro gestor."
+                  : "Acesso administrativo: todos os tópicos, o responsável e o status da proposta podem ser alterados."}
               </span>
             )}
           </div>
@@ -8166,7 +8166,9 @@ function ProposalPreview({
                 )}
               </div>
             )}
-            {!isWorkflow && !decisionOpen && canManageStatus && (
+            {!decisionOpen &&
+              canManageStatus &&
+              (!isWorkflow || me.permissions.manageAnyProposalStatus) && (
               <label>
                 Status
                 <select

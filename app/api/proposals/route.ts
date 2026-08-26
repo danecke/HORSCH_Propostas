@@ -969,7 +969,8 @@ export async function PATCH(request: Request) {
     // protegida pelo número atual do banco e fica registrada na auditoria.
     const adminVersionOverride =
       profile.role === "general_admin" &&
-      ["edit", "reassign_owner"].includes(payload.action ?? "");
+      (["edit", "reassign_owner"].includes(payload.action ?? "") ||
+        Boolean(payload.status));
     if (
       (!expectedVersion || expectedVersion !== record.proposal.version) &&
       !adminVersionOverride
