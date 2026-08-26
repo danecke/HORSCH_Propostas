@@ -596,6 +596,128 @@ function lookupPrice(
     return { item: null, net: null, n3: null, scope: "not_found" };
   return { item, ...priceForState(item, state) };
 }
+
+function evaluatePendingSale(input: {
+  sale: typeof reimbursementSales.$inferSelect;
+  priceItems: Array<typeof priceListItems.$inferSelect>;
+  clients: Array<typeof reimbursementClients.$inferSelect>;
+  activePriceListId: number;
+  n3ToleranceBps: number;
+  duplicate: boolean;
+  importSales: Array<typeof reimbursementSales.$inferSelect>;
+}) {
+  const { sale, priceItems, clients, activePriceListId, n3ToleranceBps, duplicate, importSales } = input;
+  const client = clients.find(
+    (item) =>
+      normalizeDocument(item.cnpj) === normalizeDocument(sale.clientCnpj) &&
+      item.state === sale.state,
+  );
+  const price = lookupPrice(priceItems, sale.partNumber, sale.state);
+  const program = client?.n3 ? "N3" : client?.n2 ? "N2" : "";
+  const costTotal = sale.quantity * sale.costAvgUnitCents;
+  const liquidTotal = sale.quantity * sale.saleNetUnitCents;
+  const marginBps = calculatedMarginBps(liquidTotal, costTotal);
+  const hasNetPrice = price.net !== null;
+  const calculationBase = (price.net ?? sale.costAvgUnitCents) * sale.quantity;
+  const difference =
+    price.n3 === null ? null : sale.invoiceUnitCents - price.n3;
+  const toleranceCents =
+    price.n3 === null
+      ? 0
+      : Math.round((price.n3 * n3ToleranceBps) / 10000);
+  let status: SaleStatus = "Não Elegível";
+  let reimbursement = 0;
+  let negotiation = 0;
+  let reasonCode = "";
+  if (duplicate) {
+    status = "NF Duplicada";
+    reasonCode = "NF_DUPLICADA";
+  } else if (!client || !sale.state || !price.item) {
+    status = "Produto/Estado/Cliente sem Cadastro";
+    reasonCode = "CADASTRO_AUSENTE";
+  } else if (!hasNetPrice) {
+    status = "Aprovação Manual - Base de Cálculo";
+    reasonCode = "NET_PRICE_AUSENTE";
+  } else if (program === "N3") {
+    if (
+      price.n3 === null ||
+      Math.abs(sale.invoiceUnitCents - price.n3) > toleranceCents
+    ) {
+      status = "Divergência de Preço";
+      reasonCode = "DIVERGENCIA_PRECO_N3";
+    } else {
+      status = marginBps < 0 ? "N3 com Negociação" : "N3 Elegível";
+      reimbursement = marginBps < 0 ? 0 : Math.round(calculationBase * 0.07);
+      negotiation = marginBps < 0 ? Math.max(0, costTotal - liquidTotal) : 0;
+    }
+  } else if (program === "N2") {
+    if (marginBps < 0) {
+      reasonCode = "MARGEM_NEGATIVA_N2";
+    } else if (marginBps <= 2000) {
+      status = "N2 Elegível";
+      reimbursement = Math.round(calculationBase * 0.04);
+    }
+  }
+  const historicalRows = importSales.filter(
+    (item) =>
+      item.id !== sale.id &&
+      item.dealershipId === sale.dealershipId &&
+      normalizePartNumber(item.partNumber) === normalizePartNumber(sale.partNumber) &&
+      item.liquidTotalCents > 0,
+  );
+  const historicalMarginBps = historicalRows.length
+    ? Math.round(
+        historicalRows.reduce((sum, item) => sum + item.marginBps, 0) /
+          historicalRows.length,
+      )
+    : null;
+  const marginVariationBps =
+    historicalMarginBps === null ? null : marginBps - historicalMarginBps;
+  if (
+    status.endsWith("Elegível") &&
+    historicalMarginBps !== null &&
+    Math.abs(marginVariationBps ?? 0) > 1000
+  ) {
+    status = "Pendente Justificativa";
+    reasonCode = "VARIACAO_MARGEM";
+    reimbursement = 0;
+  }
+  const workflow = intelligentWorkflow({
+    hasNetPrice,
+    hasClient: Boolean(client),
+    marginBps,
+    status,
+  });
+  return {
+    dealershipId: sale.dealershipId,
+    dealershipName: sale.dealershipName,
+    clientId: client?.id ?? null,
+    priceListImportId: activePriceListId,
+    marginBps,
+    costTotalCents: costTotal,
+    liquidTotalCents: liquidTotal,
+    netPriceUsedCents: price.net,
+    calculationBaseCents: calculationBase,
+    reimbursementCents: reimbursement,
+    reimbursementProgram: program,
+    status,
+    negotiationCents: Math.max(0, negotiation),
+    expectedN3Cents: price.n3,
+    priceDifferenceCents: difference,
+    baseSource: hasNetPrice
+      ? price.scope === "state"
+        ? "NET_PRICE_REGIONAL"
+        : "NET_PRICE_NACIONAL"
+      : "CUSTO_MEDIO_EXCEPCIONAL",
+    baseStatus: hasNetPrice ? "" : "MANUAL_REQUIRED",
+    reasonCode,
+    historicalMarginBps,
+    marginVariationBps,
+    workflowRoute: workflow.route,
+    workflowStatus: workflow.status,
+    autoCheckJson: JSON.stringify(workflow.checks),
+  };
+}
 function isAllowedDealer(
   profile: AccessProfile,
   dealer: typeof dealerships.$inferSelect,
@@ -1919,6 +2041,126 @@ export async function PATCH(request: Request) {
         after: { settingKey: "n3_tolerance_bps", numericValue },
       });
       return Response.json({ ok: true, n3TolerancePercent: tolerancePercent });
+    }
+    if (body.action === "revalidate_lines") {
+      if (!isManager(profile))
+        return errorResponse(
+          "Somente Gestão Global, ADM e Gestor Fábrica podem reanalisar a solicitação.",
+          403,
+        );
+      const importId = Math.trunc(Number(body.id) || 0);
+      if (!importId) return errorResponse("Informe a solicitação.");
+      const db = await ensureReimbursementStorage();
+      const [batch] = await db
+        .select()
+        .from(reimbursementImports)
+        .where(eq(reimbursementImports.id, importId))
+        .limit(1);
+      if (!batch)
+        return errorResponse("Solicitação de reembolso não encontrada.", 404);
+      const dealers = await visibleDealers(db, profile);
+      const lines = await db
+        .select()
+        .from(reimbursementSales)
+        .where(eq(reimbursementSales.importId, importId));
+      if (
+        lines.some(
+          (line) =>
+            line.dealershipId !== null &&
+            !dealers.some((dealer) => dealer.id === line.dealershipId),
+        )
+      )
+        return errorResponse("Solicitação fora do escopo do usuário.", 403);
+      const [activePriceList] = await db
+        .select()
+        .from(priceListImports)
+        .where(eq(priceListImports.isActive, true))
+        .orderBy(desc(priceListImports.importedAt))
+        .limit(1);
+      if (!activePriceList)
+        return errorResponse("Não há uma Lista de Preços ativa para reanalisar a solicitação.");
+      const priceItems = await db
+        .select()
+        .from(priceListItems)
+        .where(eq(priceListItems.importId, activePriceList.id));
+      const clients = await db
+        .select()
+        .from(reimbursementClients)
+        .where(eq(reimbursementClients.status, "active"));
+      const reprocessableWorkflowStatuses = new Set([
+        "awaiting_global",
+        "awaiting_dealer_consent",
+        "blocked_negative_margin",
+      ]);
+      const pendingLines = lines.filter(
+        (line) =>
+          line.status !== "Rejeitada" &&
+          reprocessableWorkflowStatuses.has(line.workflowStatus),
+      );
+      const pinCounts = new Map<string, number>();
+      for (const line of pendingLines) {
+        const pin = reimbursementPin({
+          dealershipName: line.dealershipName,
+          state: line.state,
+          invoiceNumber: line.invoiceNumber,
+          series: "",
+          partNumber: line.partNumber,
+        });
+        pinCounts.set(pin, (pinCounts.get(pin) ?? 0) + 1);
+      }
+      const before = pendingLines.map(serializeSale);
+      for (const line of pendingLines) {
+        const pin = reimbursementPin({
+          dealershipName: line.dealershipName,
+          state: line.state,
+          invoiceNumber: line.invoiceNumber,
+          series: "",
+          partNumber: line.partNumber,
+        });
+        const evaluation = evaluatePendingSale({
+          sale: line,
+          priceItems,
+          clients,
+          activePriceListId: activePriceList.id,
+          n3ToleranceBps,
+          duplicate: (pinCounts.get(pin) ?? 0) > 1,
+          importSales: lines,
+        });
+        await db
+          .update(reimbursementSales)
+          .set({ ...evaluation, duplicateKey: pin })
+          .where(eq(reimbursementSales.id, line.id));
+      }
+      await refreshImportTotals(db, importId);
+      const afterLines = await db
+        .select()
+        .from(reimbursementSales)
+        .where(eq(reimbursementSales.importId, importId));
+      const now = dateNow();
+      const note = `Reanálise da solicitação ${importId} com a Lista de Preços ativa ${activePriceList.id}; ${pendingLines.length} linha(s) recalculada(s) por PN + UF.`;
+      await db.insert(reimbursementApprovals).values({
+        importId,
+        action: "revalidate_lines",
+        note,
+        actorEmail: profile.email,
+        actorName: profile.name,
+        createdAt: now,
+      });
+      await recordAudit(db, {
+        actorEmail: profile.email,
+        actorName: profile.name,
+        action: "reimbursement_lines_revalidated",
+        entity: "reimbursement_import",
+        details: note,
+        before,
+        after: afterLines.filter((line) => pendingLines.some((item) => item.id === line.id)).map(serializeSale),
+      });
+      return Response.json({
+        ok: true,
+        importId,
+        updatedLines: pendingLines.length,
+        priceListImportId: activePriceList.id,
+      });
     }
     if (body.lineId) {
       const lineId = Math.trunc(Number(body.lineId));

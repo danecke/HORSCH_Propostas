@@ -445,6 +445,35 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
     }
   }
 
+  async function revalidateActiveBatch() {
+    if (!activeBatch) return;
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch("/api/reimbursements", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: activeBatch.id, action: "revalidate_lines" }),
+      });
+      const payload = await response.json() as { error?: string; updatedLines?: number };
+      if (!response.ok)
+        throw new Error(payload.error || "Não foi possível reanalisar a solicitação.");
+      setMessage(
+        `${payload.updatedLines ?? 0} linha(s) reanalisada(s) com a Lista de Preços ativa, cruzando PN + UF.`,
+      );
+      await load();
+    } catch (revalidationError) {
+      setError(
+        revalidationError instanceof Error
+          ? revalidationError.message
+          : "Não foi possível reanalisar a solicitação.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function runLineAction(sale: Sale, action: string) {
     let note = "";
     let netPriceCents: number | undefined;
@@ -669,6 +698,7 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
           </div>
           <div className="reimbursement-workflow">
             <span className={`reimbursement-status ${statusClass(activeBatch?.status ?? "")}`}>{statusLabel(activeBatch?.status ?? "")}</span>
+            {canReview && activeBatch && <button className="outline-button compact" disabled={busy} onClick={() => void revalidateActiveBatch()} title="Atualiza somente linhas pendentes usando a Lista de Preços ativa">Reanalisar solicitação</button>}
             {workflowButtons}
           </div>
           <div className="reimbursement-request-list">
