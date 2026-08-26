@@ -88,6 +88,8 @@ export const proposals = sqliteTable(
     emailStatus: text("email_status").notNull().default("not_requested"),
     emailSentAt: text("email_sent_at"),
     emailError: text("email_error").notNull().default(""),
+    version: integer("version").notNull().default(1),
+    sourceLeadId: text("source_lead_id").notNull().default(""),
     createdByEmail: text("created_by_email").notNull(),
     createdByName: text("created_by_name").notNull().default(""),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -97,6 +99,7 @@ export const proposals = sqliteTable(
     index("proposals_dealership_idx").on(table.dealershipId),
     index("proposals_status_idx").on(table.status),
     index("proposals_created_at_idx").on(table.createdAt),
+    index("proposals_source_lead_idx").on(table.sourceLeadId),
   ],
 );
 
@@ -263,6 +266,7 @@ export const quoteRequests = sqliteTable("quote_requests", {
   decidedByEmail: text("decided_by_email").notNull().default(""),
   factoryActionAt: text("factory_action_at"),
   horschOrderNumber: text("horsch_order_number").notNull().default(""),
+  sourceLeadId: text("source_lead_id").notNull().default(""),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [
@@ -270,6 +274,7 @@ export const quoteRequests = sqliteTable("quote_requests", {
   index("quote_requests_status_idx").on(table.status),
   index("quote_requests_part_number_idx").on(table.partNumber),
   index("quote_requests_updated_at_idx").on(table.updatedAt),
+  index("quote_requests_source_lead_idx").on(table.sourceLeadId),
 ]);
 
 export const quotePriceListControl = sqliteTable("quote_price_list_control", {
@@ -393,6 +398,10 @@ export const leads = sqliteTable("leads", {
   sellerName: text("seller_name").notNull().default(""),
   sellerEmail: text("seller_email").notNull().default(""),
   lostReason: text("lost_reason").notNull().default(""),
+  convertedEntityType: text("converted_entity_type").notNull().default(""),
+  convertedEntityId: text("converted_entity_id").notNull().default(""),
+  rollbackPending: integer("rollback_pending", { mode: "boolean" }).notNull().default(false),
+  rollbackReason: text("rollback_reason").notNull().default(""),
   closedAt: text("closed_at"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -401,6 +410,7 @@ export const leads = sqliteTable("leads", {
   index("leads_stage_idx").on(table.stage),
   index("leads_temperature_idx").on(table.temperature),
   index("leads_seller_idx").on(table.sellerEmail),
+  index("leads_rollback_pending_idx").on(table.rollbackPending),
   index("leads_updated_at_idx").on(table.updatedAt),
 ]);
 
@@ -506,6 +516,16 @@ export const reimbursementSales = sqliteTable("reimbursement_sales", {
   marginVariationBps: integer("margin_variation_bps"),
   justification: text("justification").notNull().default(""),
   justificationStatus: text("justification_status").notNull().default(""),
+  workflowRoute: text("workflow_route").notNull().default("exception"),
+  workflowStatus: text("workflow_status").notNull().default("awaiting_global"),
+  autoCheckJson: text("auto_check_json").notNull().default("{}"),
+  globalDecisionByEmail: text("global_decision_by_email").notNull().default(""),
+  globalDecisionAt: text("global_decision_at"),
+  dealerConsentByEmail: text("dealer_consent_by_email").notNull().default(""),
+  dealerConsentAt: text("dealer_consent_at"),
+  settledByEmail: text("settled_by_email").notNull().default(""),
+  settledAt: text("settled_at"),
+  settlementDocumentNumber: text("settlement_document_number").notNull().default(""),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [
   index("reimbursement_sales_import_idx").on(table.importId),
@@ -513,6 +533,7 @@ export const reimbursementSales = sqliteTable("reimbursement_sales", {
   index("reimbursement_sales_pn_idx").on(table.partNumber),
   index("reimbursement_sales_status_idx").on(table.status),
   index("reimbursement_sales_invoice_idx").on(table.invoiceNumber),
+  index("reimbursement_sales_workflow_status_idx").on(table.workflowStatus),
 ]);
 
 export const reimbursementApprovals = sqliteTable("reimbursement_approvals", {

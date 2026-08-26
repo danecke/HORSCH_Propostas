@@ -66,6 +66,7 @@ const STATUS_VALUES = [
   "Aprovação Manual - Base de Cálculo",
   "Devolvida para correção",
   "Rejeitada",
+  "Recusado pela Fábrica",
 ] as const;
 type SaleStatus = (typeof STATUS_VALUES)[number];
 type ReimbursementSegment = "N2" | "N3" | "normal";
@@ -122,6 +123,28 @@ function calculatedMarginBps(salesCents: number, costCents: number) {
     ? Math.round(((salesCents - costCents) / salesCents) * 10000)
     : 0;
 }
+
+function intelligentWorkflow(input: {
+  hasNetPrice: boolean;
+  hasClient: boolean;
+  marginBps: number;
+  status: string;
+}) {
+  const checks = {
+    netPriceFound: input.hasNetPrice,
+    clientRegistered: input.hasClient,
+    marginPositive: input.marginBps > 0,
+    marginWithinN2Range: input.marginBps > 0 && input.marginBps <= 2000,
+    eligibilityConfirmed: ["N2 Elegível", "N3 Elegível"].includes(input.status),
+  };
+  if (input.marginBps < 0) {
+    return { route: "blocked", status: "blocked_negative_margin", checks };
+  }
+  const passed = Object.values(checks).every(Boolean);
+  return passed
+    ? { route: "fast_track", status: "awaiting_dealer_consent", checks }
+    : { route: "exception", status: "awaiting_global", checks };
+}
 function isValidUploadId(value: unknown) {
   return typeof value === "string" && /^[a-f0-9-]{36}$/i.test(value);
 }
@@ -154,6 +177,15 @@ function safeFileName(value: string) {
       .replace(/[^a-zA-Z0-9._-]+/g, "-")
       .replace(/^-+|-+$/g, "") || "vendas-reembolso.xlsx"
   ).slice(0, 140);
+}
+function htmlEscape(value: unknown) {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[character] || character);
 }
 function cents(value: unknown) {
   if (value === null || value === undefined || String(value).trim() === "")
@@ -627,6 +659,8 @@ function lineIndicators(row: typeof reimbursementSales.$inferSelect) {
     };
   }
   const reasons: string[] = [];
+  if (row.workflowStatus === "awaiting_global") reasons.push("Validação do Gestor Global");
+  if (row.workflowStatus === "blocked_negative_margin") reasons.push("Bloqueio por margem negativa");
   if (negativeMargin) reasons.push("Margem negativa");
   if (needsNetReference) reasons.push("Definir NET de referência");
   if (row.status === "Divergência de Preço") reasons.push("Conferir preço N3");
@@ -698,6 +732,15 @@ export async function GET(request: Request) {
     const n3ToleranceBps = await getN3ToleranceBps(db);
     const dealers = await visibleDealers(db, profile);
     const dealerIds = dealers.map((dealer) => dealer.id);
+    const params = new URL(request.url).searchParams;
+    const settlementDocumentId = Math.trunc(Number(params.get("settlementDocument") ?? 0));
+    if (settlementDocumentId) {
+      const [sale] = await db.select().from(reimbursementSales).where(eq(reimbursementSales.id, settlementDocumentId)).limit(1);
+      if (!sale || !sale.dealershipId || !dealerIds.includes(sale.dealershipId)) return errorResponse("Documento fora do escopo.", 403);
+      if (sale.workflowStatus !== "settled") return errorResponse("O reembolso ainda não foi liquidado.", 409);
+      const document = `<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>${htmlEscape(sale.settlementDocumentNumber)}</title><style>body{font:15px Arial;color:#21302d;max-width:760px;margin:48px auto;padding:0 24px}header{border-bottom:3px solid #d6df2a;padding-bottom:20px}h1{font-size:25px}dl{display:grid;grid-template-columns:190px 1fr;gap:12px;margin-top:28px}dt{color:#66736f}dd{margin:0;font-weight:700}.value{font-size:22px;color:#476018}</style><header><small>HORSCH Brasil</small><h1>Carta de Crédito / Liquidação N2/N3</h1><strong>${htmlEscape(sale.settlementDocumentNumber)}</strong></header><dl><dt>Concessionária</dt><dd>${htmlEscape(sale.dealershipName)}</dd><dt>Cliente</dt><dd>${htmlEscape(sale.clientName)}</dd><dt>CPF/CNPJ</dt><dd>${htmlEscape(sale.clientCnpj)}</dd><dt>Nota fiscal</dt><dd>${htmlEscape(sale.invoiceNumber)}</dd><dt>Part Number</dt><dd>${htmlEscape(sale.partNumber)}</dd><dt>Programa</dt><dd>${htmlEscape(sale.reimbursementProgram)}</dd><dt>Reembolso</dt><dd class="value">${(sale.reimbursementCents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</dd><dt>Liquidado em</dt><dd>${htmlEscape(sale.settledAt)}</dd></dl></html>`;
+      return new Response(document, { headers: { "Content-Type": "text/html; charset=utf-8", "Content-Disposition": `attachment; filename="${safeFileName(sale.settlementDocumentNumber || `liquidacao-${sale.id}`)}.html"`, "Cache-Control": "no-store" } });
+    }
     const imports = dealerIds.length
       ? await db
           .select()
@@ -713,7 +756,6 @@ export async function GET(request: Request) {
           .orderBy(desc(reimbursementImports.createdAt))
           .limit(40)
       : [];
-    const params = new URL(request.url).searchParams;
     const requestedImportId = Number(params.get("batchId") ?? 0);
     const activeImportId =
       requestedImportId && imports.some((item) => item.id === requestedImportId)
@@ -1597,6 +1639,9 @@ export async function POST(request: Request) {
         marginVariationBps,
         justification: "",
         justificationStatus: "",
+        workflowRoute: intelligentWorkflow({ hasNetPrice, hasClient: Boolean(client), marginBps, status }).route,
+        workflowStatus: intelligentWorkflow({ hasNetPrice, hasClient: Boolean(client), marginBps, status }).status,
+        autoCheckJson: JSON.stringify(intelligentWorkflow({ hasNetPrice, hasClient: Boolean(client), marginBps, status }).checks),
         createdAt: now,
       });
     }
@@ -1796,7 +1841,40 @@ export async function PATCH(request: Request) {
         return errorResponse("Linha fora do escopo.", 403);
       const action = String(body.action ?? "");
       const note = String(body.note ?? "").trim();
-      if (action === "adjust_line") {
+      if (action === "global_approve" || action === "global_reject") {
+        if (!managers) return errorResponse("Somente ADM e Gestão Global podem decidir uma exceção.", 403);
+        if (sale.workflowStatus !== "awaiting_global") return errorResponse("Esta linha não aguarda validação global.", 409);
+        if (action === "global_reject" && note.length < 5) return errorResponse("Documente o motivo da recusa.");
+        await lineDb.update(reimbursementSales).set({
+          workflowStatus: action === "global_approve" ? "awaiting_dealer_consent" : "factory_rejected",
+          status: action === "global_approve" ? sale.status : "Recusado pela Fábrica",
+          reimbursementCents: action === "global_approve" ? sale.reimbursementCents : 0,
+          negotiationCents: action === "global_approve" ? sale.negotiationCents : 0,
+          justification: note,
+          justificationStatus: action === "global_approve" ? "approved" : "rejected",
+          globalDecisionByEmail: profile.email,
+          globalDecisionAt: dateNow(),
+          reasonCode: action === "global_approve" ? sale.reasonCode : "RECUSADO_FABRICA",
+        }).where(eq(reimbursementSales.id, lineId));
+      } else if (action === "dealer_consent") {
+        if (profile.role !== "dealer_manager") return errorResponse("Somente o Gestor da Concessionária pode dar o consentimento.", 403);
+        if (sale.workflowStatus !== "awaiting_dealer_consent") return errorResponse("Esta linha não aguarda consentimento da concessionária.", 409);
+        await lineDb.update(reimbursementSales).set({
+          workflowStatus: "awaiting_factory_settlement",
+          dealerConsentByEmail: profile.email,
+          dealerConsentAt: dateNow(),
+        }).where(eq(reimbursementSales.id, lineId));
+      } else if (action === "factory_settle") {
+        if (!["general_admin", "factory_manager"].includes(profile.role)) return errorResponse("Somente a Fábrica pode liquidar o reembolso.", 403);
+        if (sale.workflowStatus !== "awaiting_factory_settlement") return errorResponse("Esta linha ainda não está pronta para liquidação.", 409);
+        const documentNumber = `CC-${new Date().getUTCFullYear()}-${String(lineId).padStart(6, "0")}`;
+        await lineDb.update(reimbursementSales).set({
+          workflowStatus: "settled",
+          settledByEmail: profile.email,
+          settledAt: dateNow(),
+          settlementDocumentNumber: documentNumber,
+        }).where(eq(reimbursementSales.id, lineId));
+      } else if (action === "adjust_line") {
         if (!managers)
           return errorResponse(
             "Somente ADM e Gestão Global podem ajustar uma linha.",
@@ -1971,6 +2049,12 @@ export async function PATCH(request: Request) {
           reasonCode = "VARIACAO_MARGEM";
           reimbursement = 0;
         }
+        const workflow = intelligentWorkflow({
+          hasNetPrice: netPrice !== null,
+          hasClient: Boolean(client),
+          marginBps,
+          status,
+        });
         const before = serializeSale(sale);
         const [updated] = await lineDb
           .update(reimbursementSales)
@@ -2013,6 +2097,16 @@ export async function PATCH(request: Request) {
             marginVariationBps,
             justification: note,
             justificationStatus: "adjusted",
+            workflowRoute: workflow.route,
+            workflowStatus: workflow.status,
+            autoCheckJson: JSON.stringify(workflow.checks),
+            globalDecisionByEmail: "",
+            globalDecisionAt: null,
+            dealerConsentByEmail: "",
+            dealerConsentAt: null,
+            settledByEmail: "",
+            settledAt: null,
+            settlementDocumentNumber: "",
           })
           .where(eq(reimbursementSales.id, lineId))
           .returning();

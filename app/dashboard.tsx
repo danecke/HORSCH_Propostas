@@ -34,7 +34,8 @@ type ProposalStatus =
   | "awaiting_order"
   | "awaiting_order_number"
   | "order_generated"
-  | "reproved";
+  | "reproved"
+  | "cancelled";
 
 type ProposalItem = {
   id: number;
@@ -65,6 +66,8 @@ type ProposalDocument = {
 
 type Proposal = {
   id: string;
+  version: number;
+  sourceLeadId: string;
   dealershipId: number;
   dealership: string;
   city: string;
@@ -130,7 +133,14 @@ type QuoteStatus =
   | "awaiting_cost_review"
   | "closed"
   | "awaiting_order"
-  | "order_generated";
+  | "order_generated"
+  | "completed_approved"
+  | "completed_lost"
+  | "returned"
+  | "approved"
+  | "rejected"
+  | "order_pending"
+  | "order_input";
 type QuotePriority = "machine_stopped" | "urgent" | "normal";
 const QUOTE_PRIORITY_LABELS: Record<QuotePriority, string> = {
   machine_stopped: "Máquina parada",
@@ -286,7 +296,19 @@ type DashboardData = {
   dealerships: Dealership[];
   users: AccessUser[];
   proposalResponsibles: AccessUser[];
+  actionCenter: ActionCenterItem[];
   me: CurrentAccess;
+};
+
+type ActionCenterItem = {
+  id: string;
+  module: "quotes" | "proposals" | "reimbursements";
+  title: string;
+  subtitle: string;
+  statusLabel: string;
+  createdAt: string;
+  ageHours: number;
+  sla: "green" | "yellow" | "red";
 };
 
 type AuditEntry = {
@@ -328,6 +350,7 @@ const STATUS_LABELS: Record<ProposalStatus, string> = {
   awaiting_order_number: "Aguardando Número do Pedido",
   order_generated: "Pedido Gerado",
   reproved: "Reprovada",
+  cancelled: "Cancelada",
 };
 
 const STATUS_ORDER: ProposalStatus[] = [
@@ -344,6 +367,7 @@ const STATUS_ORDER: ProposalStatus[] = [
   "awaiting_order_number",
   "order_generated",
   "reproved",
+  "cancelled",
 ];
 
 type IconName =
@@ -605,10 +629,17 @@ export function Dashboard({ user }: { user: AppUser }) {
         ? ((await leadResponse.json()) as LeadModuleData & { error?: string })
         : null;
       const safeLeadPayload = leadResponse?.ok ? leadPayload : null;
+      const actionCenterResponse = await fetch("/api/action-center", {
+        cache: "no-store",
+      });
+      const actionCenterPayload = actionCenterResponse.ok
+        ? ((await actionCenterResponse.json()) as { items?: ActionCenterItem[] })
+        : { items: [] };
       setData({
         ...payload,
         proposalRequests: safeRequestPayload.requests ?? [],
         quotes: safeQuotePayload.quotes ?? [],
+        actionCenter: actionCenterPayload.items ?? [],
       });
       setLeadData(safeLeadPayload);
     } catch (loadError) {
@@ -921,6 +952,13 @@ export function Dashboard({ user }: { user: AppUser }) {
             ← Voltar
           </button>
         )}
+        {view === "overview" &&
+          ["general_admin", "global_management", "factory_manager", "dealer_manager"].includes(data.me.role) && (
+            <ActionCenter
+              items={data.actionCenter}
+              onOpen={(module) => setView(module)}
+            />
+          )}
         {view === "leads" && leadsEnabled && leadData ? (
           <HorschLeadsView
             data={leadData}
@@ -1465,15 +1503,38 @@ function buildQuoteInsights(quotes: Quote[]) {
 }
 
 function isQuoteApproved(status: QuoteStatus) {
-  return ["approved", "order_pending", "order_input"].includes(status);
+  return ["completed_approved", "order_generated"].includes(status);
+}
+
+async function resolveLeadRollback(payload: {
+  leadRollbackRequired?: boolean;
+  leadId?: string;
+}) {
+  if (!payload.leadRollbackRequired || !payload.leadId) return;
+  const returnToContact = window.confirm(
+    "A negociação vinculada ao Lead foi perdida ou cancelada. Clique em OK para devolver o Lead a Em contato, ou em Cancelar para encerrá-lo como Perdido.",
+  );
+  const rollbackReason = returnToContact
+    ? "Negociação encerrada; Lead devolvido para nova tratativa."
+    : window.prompt("Informe o motivo para encerrar o Lead como Perdido:", "Negociação não convertida.") || "Negociação não convertida.";
+  await fetch("/api/leads", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: payload.leadId,
+      action: "resolve_rollback",
+      decision: returnToContact ? "contacted" : "lost",
+      rollbackReason,
+    }),
+  });
 }
 
 function quoteRecommendation(insight: QuoteInsight) {
-  if (insight.approvalCount > 10) {
+  if (insight.approvalCount >= 10) {
     return {
       label: "Precisa entrar na lista",
       tone: "positive",
-      reason: `O PN alcançou ${insight.approvalCount} aprovações para pedido, acima do limite de 10.`,
+      reason: `O PN alcançou ${insight.approvalCount} cotações concluídas e aprovadas, atingindo o gatilho de 10.`,
     };
   }
   if (insight.rejected >= 2 && insight.approvedQuantity === 0) {
@@ -1488,7 +1549,7 @@ function quoteRecommendation(insight: QuoteInsight) {
       label: "Validar demanda",
       tone: "attention",
       reason:
-        "O item se repete, mas ainda precisa superar 10 aprovações para entrar na lista.",
+        "O item se repete, mas ainda precisa atingir 10 cotações concluídas e aprovadas para entrar na lista.",
     };
   }
   return {
@@ -1636,7 +1697,11 @@ function QuoteAnalysisView({
         action: "toggle_price_list",
       }),
     });
-    const payload = (await response.json()) as { error?: string };
+    const payload = (await response.json()) as {
+      error?: string;
+      leadRollbackRequired?: boolean;
+      leadId?: string;
+    };
     setUpdatingPart("");
     if (!response.ok) return;
     await onChanged();
@@ -1665,7 +1730,11 @@ function QuoteAnalysisView({
         ...fields,
       }),
     });
-    const payload = (await response.json()) as { error?: string };
+    const payload = (await response.json()) as {
+      error?: string;
+      leadRollbackRequired?: boolean;
+      leadId?: string;
+    };
     setUpdatingPart("");
     if (!response.ok)
       return (
@@ -1731,7 +1800,7 @@ function QuoteAnalysisView({
         <MetricCard
           label="Precisam entrar na lista"
           value={String(priorityCount)}
-          meta="Mais de 10 aprovações"
+          meta="10 cotações aprovadas"
           icon="check"
           tone="green"
         />
@@ -1771,7 +1840,7 @@ function QuoteAnalysisView({
         <div>
           <span className="eyebrow">Critério objetivo</span>
           <strong>
-            Indicar inclusão quando um PN superar 10 aprovações para pedidos.
+            Indicar inclusão quando um PN atingir 10 cotações concluídas e aprovadas.
           </strong>
           <p>
             A decisão usa a quantidade de cotações aprovadas para pedido,
@@ -2075,7 +2144,7 @@ function QuoteAnalysisDetail({
                 <span className="eyebrow">Aprovação obrigatória</span>
                 <h3>Conferir e incluir na lista de preços</h3>
                 <p>
-                  O PN superou 10 aprovações. Revise os dados antes de publicar
+                  O PN atingiu 10 cotações aprovadas. Revise os dados antes de publicar
                   para todos os usuários.
                 </p>
               </div>
@@ -2855,10 +2924,10 @@ function QuoteHistoryView({
     });
   }, [dealership, quotes, search, status]);
   const orderCount = quotes.filter(
-    (quote) => quote.status === "order_generated",
+    (quote) => ["completed_approved", "order_generated"].includes(quote.status),
   ).length;
   const closedCount = quotes.filter(
-    (quote) => quote.status === "closed",
+    (quote) => ["completed_lost", "closed"].includes(quote.status),
   ).length;
   return (
     <section className="quote-history-view">
@@ -2916,8 +2985,8 @@ function QuoteHistoryView({
             }
           >
             <option value="all">Todos os status</option>
-            <option value="order_generated">Pedido Gerado</option>
-            <option value="closed">Encerrada</option>
+            <option value="completed_approved">Concluída - Aprovada</option>
+            <option value="completed_lost">Concluída - Perdida</option>
           </select>
         </label>
         <label className="field">
@@ -2963,14 +3032,14 @@ function QuoteHistoryView({
 }
 function QuoteMetrics({ quotes }: { quotes: Quote[] }) {
   const orders = quotes.filter(
-    (quote) => quote.status === "order_generated",
+    (quote) => ["completed_approved", "order_generated"].includes(quote.status),
   ).length;
-  const rejected = quotes.filter((quote) => quote.status === "closed").length;
+  const rejected = quotes.filter((quote) => ["completed_lost", "closed"].includes(quote.status)).length;
   const decided = quotes.filter((quote) =>
-    ["awaiting_order", "closed", "order_generated"].includes(quote.status),
+    ["awaiting_order", "completed_lost", "closed", "completed_approved", "order_generated"].includes(quote.status),
   ).length;
   const approved = quotes.filter((quote) =>
-    ["awaiting_order", "order_generated"].includes(quote.status),
+    ["awaiting_order", "completed_approved", "order_generated"].includes(quote.status),
   ).length;
   const conversion = quotes.length
     ? Math.round((orders / quotes.length) * 100)
@@ -3087,12 +3156,17 @@ function QuoteCard({
         actionNote: note,
       }),
     });
-    const payload = (await response.json()) as { error?: string };
+    const payload = (await response.json()) as {
+      error?: string;
+      leadRollbackRequired?: boolean;
+      leadId?: string;
+    };
     if (!response.ok) {
       setError(payload.error || "Não foi possível atualizar a cotação.");
       setSaving(false);
       return;
     }
+    await resolveLeadRollback(payload);
     setSaving(false);
     await onChanged();
   }
@@ -3949,6 +4023,51 @@ function ProposalModuleTabs({
         </button>
       )}
     </div>
+  );
+}
+
+function ActionCenter({
+  items,
+  onOpen,
+}: {
+  items: ActionCenterItem[];
+  onOpen: (module: ActionCenterItem["module"]) => void;
+}) {
+  return (
+    <section className="panel action-center">
+      <header className="panel-header action-center-header">
+        <div>
+          <span className="eyebrow">Fila única de trabalho</span>
+          <h2>Central de Pendências</h2>
+          <p>Cotações, propostas e reembolsos que aguardam sua atuação.</p>
+        </div>
+        <div className="action-center-legend" aria-label="Legenda de SLA">
+          <span className="sla-dot green">até 24h</span>
+          <span className="sla-dot yellow">25h a 71h</span>
+          <span className="sla-dot red">72h+</span>
+        </div>
+      </header>
+      {items.length ? (
+        <div className="action-center-list">
+          {items.slice(0, 12).map((item) => (
+            <article className="action-center-row" key={`${item.module}-${item.id}`}>
+              <span className={`action-center-sla ${item.sla}`} aria-hidden="true" />
+              <div>
+                <strong>{item.title}</strong>
+                <small>{item.subtitle}</small>
+              </div>
+              <span className="action-center-status">{item.statusLabel}</span>
+              <time>{item.ageHours < 1 ? "agora" : `${item.ageHours}h`}</time>
+              <button className="icon-button" type="button" onClick={() => onOpen(item.module)} aria-label={`Abrir ${item.title}`} title="Abrir pendência">
+                <Icon name="eye" size={18} />
+              </button>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <div className="empty-state compact"><strong>Nenhuma ação pendente</strong><span>Sua fila está em dia.</span></div>
+      )}
+    </section>
   );
 }
 
@@ -6103,7 +6222,9 @@ function NewProposalModal({
       method: proposal ? "PATCH" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        ...(proposal ? { id: proposal.id, action: "edit" } : {}),
+        ...(proposal
+          ? { id: proposal.id, action: "edit", version: proposal.version }
+          : {}),
         dealershipId: selectedDealer?.id ?? null,
         dealership,
         city,
@@ -7444,6 +7565,7 @@ function ProposalPreview({
   onDeleted: () => Promise<void>;
 }) {
   const [status, setStatus] = useState<ProposalStatus>(proposal.status);
+  const [version, setVersion] = useState(proposal.version);
   const [counterItems, setCounterItems] = useState(() =>
     proposal.items.map((item) => ({
       id: item.id,
@@ -7641,11 +7763,13 @@ function ProposalPreview({
     const response = await fetch("/api/proposals", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: proposal.id, action, ...fields }),
+      body: JSON.stringify({ id: proposal.id, version, action, ...fields }),
     });
     const payload = (await response.json()) as {
       error?: string;
       status?: ProposalStatus;
+      leadRollbackRequired?: boolean;
+      leadId?: string;
     };
     if (!response.ok || !payload.status) {
       setError(payload.error || "Não foi possível concluir esta etapa.");
@@ -7653,6 +7777,8 @@ function ProposalPreview({
       return false;
     }
     setStatus(payload.status);
+    setVersion((current) => current + 1);
+    await resolveLeadRollback(payload);
     if (action === "view_pdf") setPdfViewed(true);
     await onUpdated(payload.status);
     setUpdating(false);
@@ -7679,7 +7805,7 @@ function ProposalPreview({
     const response = await fetch("/api/proposals", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: proposal.id, action: "send" }),
+      body: JSON.stringify({ id: proposal.id, version, action: "send" }),
     });
     const payload = (await response.json()) as {
       error?: string;
@@ -7694,6 +7820,7 @@ function ProposalPreview({
       return;
     }
     if (payload.delivery?.status === "sent") {
+      setVersion((current) => current + 1);
       setEmailStatus("sent");
       setStatus("sent");
       await onUpdated("sent");
@@ -7716,6 +7843,7 @@ function ProposalPreview({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         id: proposal.id,
+        version,
         status: nextStatus,
         counterofferCents: cents,
         decisionNote: note,
@@ -7736,6 +7864,8 @@ function ProposalPreview({
       error?: string;
       status?: ProposalStatus;
       counterofferCents?: number | null;
+      leadRollbackRequired?: boolean;
+      leadId?: string;
     };
     if (!response.ok) {
       setError(payload.error || "Não foi possível atualizar a proposta.");
@@ -7743,7 +7873,9 @@ function ProposalPreview({
       return;
     }
     const resolvedStatus = payload.status ?? nextStatus;
+    setVersion((current) => current + 1);
     setStatus(resolvedStatus);
+    await resolveLeadRollback(payload);
     await onUpdated(resolvedStatus, payload.counterofferCents ?? cents);
     setUpdating(false);
   }
@@ -7758,6 +7890,7 @@ function ProposalPreview({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         id: proposal.id,
+        version,
         action,
         counterofferReviewNote: reviewNote,
       }),
@@ -7773,6 +7906,7 @@ function ProposalPreview({
       return;
     }
     setStatus(payload.status);
+    setVersion((current) => current + 1);
     await onUpdated(
       payload.status,
       payload.counterofferCents ?? proposal.counterofferCents,

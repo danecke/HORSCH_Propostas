@@ -106,3 +106,12 @@ The timeout defaults can be overridden for a controlled canary with `SITES_INSTA
 
 - [vinext Documentation](https://github.com/cloudflare/vinext)
 - [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+
+## Regras estruturais do portal HORSCH
+
+- Leads convertidos mantêm vínculo com a cotação ou proposta de origem. Se a negociação for perdida ou cancelada, o sistema abre um rollback para retornar o Lead a **Em contato** ou encerrá-lo como **Perdido**, com auditoria.
+- O gatilho da Lista de Preços pertence exclusivamente a Cotações: são necessárias 10 cotações em **Concluída - Aprovada**. Propostas não alimentam esse contador.
+- Propostas usam controle de versão no banco. Toda alteração exige a versão mais recente e conflitos retornam HTTP 409, impedindo sobrescrita concorrente.
+- A Central de Pendências agrega ações de Cotações, Propostas e Reembolsos. O SLA visual é verde até 24h, amarelo entre 25h e 71h e vermelho a partir de 72h.
+- Reembolsos N2/N3 usam tolerância N3 padrão de 5%, configurável apenas pelo ADM. O check automático valida Net Price, cadastro de cliente e margem positiva de até 20%.
+- Linhas aprovadas automaticamente seguem pela via rápida para consentimento da concessionária; exceções passam pela Gestão Global. Margem negativa bloqueia a linha. Após consentimento, a Fábrica liquida e disponibiliza o documento para download.

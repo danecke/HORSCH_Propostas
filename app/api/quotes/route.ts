@@ -2,6 +2,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import {
   dealerships,
+  leads,
   priceListImports,
   priceListItems,
   quoteCatalog,
@@ -56,6 +57,8 @@ function statusLabel(status: string) {
         closed: "Encerrada",
         awaiting_order: "Aguardando Pedido",
         order_generated: "Pedido Gerado",
+        completed_approved: "Concluída - Aprovada",
+        completed_lost: "Concluída - Perdida",
       } as Record<string, string>
     )[status] || status
   );
@@ -69,7 +72,7 @@ function canManagePriceList(
   return ["general_admin", "global_management"].includes(profile.role);
 }
 function isApprovedForOrder(status: string) {
-  return ["awaiting_order", "order_generated"].includes(status);
+  return ["awaiting_order", "order_generated", "completed_approved"].includes(status);
 }
 function canSee(
   profile: NonNullable<Awaited<ReturnType<typeof getAccessProfile>>>,
@@ -427,6 +430,7 @@ export async function POST(request: Request) {
       partNumber?: string;
       quantity?: number;
       priority?: string;
+      leadId?: string;
     };
     const partNumber = payload.partNumber?.trim();
     if (!partNumber)
@@ -488,6 +492,18 @@ export async function POST(request: Request) {
     );
     const now = new Date().toISOString();
     const id = "COT-" + Date.now().toString(36).toUpperCase();
+    const candidateLeads = await db
+      .select()
+      .from(leads)
+      .where(eq(leads.dealershipId, dealer.id))
+      .orderBy(desc(leads.updatedAt));
+    const requestedLeadId = String(payload.leadId ?? "").trim();
+    const linkedLead = candidateLeads.find((lead) =>
+      requestedLeadId
+        ? lead.id === requestedLeadId
+        : ["proposal", "negotiation", "won"].includes(lead.stage) &&
+          partNumberKey(lead.partNumbers).includes(partNumberKey(partNumber)),
+    );
     const status = autoReturned
       ? "awaiting_dealer_acceptance"
       : "awaiting_quote";
@@ -520,11 +536,21 @@ export async function POST(request: Request) {
       netPriceCents: catalog?.netPriceCents || null,
       catalogImportedAt: catalog?.importedAt || null,
       actionNote,
+      sourceLeadId: linkedLead?.id ?? "",
       returnedAt: autoReturned ? now : null,
       requestedAt: now,
       createdAt: now,
       updatedAt: now,
     });
+    if (linkedLead) {
+      await db.update(leads).set({
+        convertedEntityType: "quote",
+        convertedEntityId: id,
+        rollbackPending: false,
+        rollbackReason: "",
+        updatedAt: now,
+      }).where(eq(leads.id, linkedLead.id));
+    }
     await recordAudit(db, {
       actorEmail: profile.email,
       actorName: profile.name,
@@ -643,10 +669,12 @@ export async function PATCH(request: Request) {
           .select({ status: quoteRequests.status })
           .from(quoteRequests)
           .where(eq(quoteRequests.partNumber, record.quote.partNumber))
-      ).filter((quote) => quote.status === "order_generated").length;
-      if (generatedOrders <= 10)
+      ).filter((quote) =>
+        ["completed_approved", "order_generated"].includes(quote.status),
+      ).length;
+      if (generatedOrders < 10)
         return Response.json(
-          { error: "O PN ainda não atingiu mais de 10 pedidos gerados." },
+          { error: "O PN ainda não atingiu 10 cotações concluídas e aprovadas." },
           { status: 409 },
         );
       const payloadEvent = {
@@ -722,10 +750,10 @@ export async function PATCH(request: Request) {
       const approvalCount = samePartQuotes.filter((quote) =>
         isApprovedForOrder(quote.status),
       ).length;
-      if (approvalCount <= 10)
+      if (approvalCount < 10)
         return Response.json(
           {
-            error: `O PN ${partNumber} possui ${approvalCount} aprovações. A inclusão automática exige mais de 10.`,
+            error: `O PN ${partNumber} possui ${approvalCount} aprovações. A inclusão automática exige 10.`,
           },
           { status: 409 },
         );
@@ -1018,7 +1046,7 @@ export async function PATCH(request: Request) {
       } else {
         patch = {
           ...patch,
-          status: "closed",
+          status: "completed_lost",
           actionOwnerRole: "",
           actionOwnerEmail: "",
           decidedAt: now,
@@ -1037,7 +1065,7 @@ export async function PATCH(request: Request) {
         );
       patch = {
         ...patch,
-        status: "order_generated",
+        status: "completed_approved",
         actionOwnerRole: "",
         actionOwnerEmail: "",
         horschOrderNumber,
@@ -1055,6 +1083,15 @@ export async function PATCH(request: Request) {
       .update(quoteRequests)
       .set(patch)
       .where(eq(quoteRequests.id, payload.id));
+    const leadRollbackRequired =
+      patch.status === "completed_lost" && Boolean(record.quote.sourceLeadId);
+    if (leadRollbackRequired) {
+      await db.update(leads).set({
+        rollbackPending: true,
+        rollbackReason: `Cotação ${record.quote.id} concluída como perdida.`,
+        updatedAt: now,
+      }).where(eq(leads.id, record.quote.sourceLeadId));
+    }
     await recordAudit(db, {
       actorEmail: profile.email,
       actorName: profile.name,
@@ -1065,7 +1102,12 @@ export async function PATCH(request: Request) {
       before: { status: record.quote.status },
       after: patch,
     });
-    return Response.json({ ok: true, status: patch.status });
+    return Response.json({
+      ok: true,
+      status: patch.status,
+      leadRollbackRequired,
+      leadId: leadRollbackRequired ? record.quote.sourceLeadId : undefined,
+    });
   } catch (error) {
     return Response.json({ error: errorMessage(error) }, { status: 500 });
   }

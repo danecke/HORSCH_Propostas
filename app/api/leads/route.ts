@@ -39,7 +39,7 @@ function normalizeTemperature(value: unknown): Temperature {
   return TEMPERATURES.includes(String(value) as Temperature) ? String(value) as Temperature : "warm";
 }
 
-const STAGE_LABELS: Record<Stage, string> = { new: "Novo", contacted: "Contato", qualified: "Qualificado", proposal: "Proposta", negotiation: "Negociação", won: "Lead convertido", lost: "Perdido" };
+const STAGE_LABELS: Record<Stage, string> = { new: "Novo", contacted: "Em contato", qualified: "Qualificado", proposal: "Proposta", negotiation: "Negociação", won: "Lead convertido", lost: "Perdido" };
 
 function extractPartNumbers(value: string) {
   return [...new Set((value.match(/\b[A-Z0-9][A-Z0-9._\/-]{3,}\b/gi) ?? []).filter((token) => /\d/.test(token)).map((token) => token.trim().toUpperCase()))];
@@ -218,11 +218,46 @@ export async function PATCH(request: Request) {
     const [row] = await db.select({ lead: leads, dealership: dealerships }).from(leads).innerJoin(dealerships, eq(leads.dealershipId, dealerships.id)).where(eq(leads.id, id)).limit(1);
     if (!row || !profileHasDealership(profile, row.lead.dealershipId)) return forbidden("Este lead está fora do escopo da sua concessionária.");
     if (!(await isModuleEnabled(db, row.lead.dealershipId, "leads"))) return forbidden("O módulo Horsch Leads não está habilitado para sua concessionária.");
+    if (payload.action === "resolve_rollback") {
+      const decision = String(payload.decision ?? "");
+      if (!row.lead.rollbackPending)
+        return Response.json({ error: "Este lead não possui rollback pendente." }, { status: 409 });
+      if (!['contacted', 'lost'].includes(decision))
+        return Response.json({ error: "Escolha retornar para Em contato ou encerrar como Perdido." }, { status: 400 });
+      const rollbackReason = String(payload.rollbackReason ?? "").trim();
+      if (decision === "lost" && rollbackReason.length < 5)
+        return Response.json({ error: "Informe o motivo da perda do lead." }, { status: 400 });
+      const now = new Date().toISOString();
+      await db.update(leads).set({
+        stage: decision,
+        rollbackPending: false,
+        rollbackReason,
+        lostReason: decision === "lost" ? rollbackReason : "",
+        closedAt: decision === "lost" ? now : null,
+        updatedAt: now,
+      }).where(eq(leads.id, id));
+      await recordAudit(db, {
+        actorEmail: profile.email,
+        actorName: profile.name,
+        action: "lead_conversion_rollback_resolved",
+        entity: "lead",
+        details: `Rollback do Lead ${id}: ${decision === "contacted" ? "retornado para Em contato" : "encerrado como Perdido"}.`,
+        before: { stage: row.lead.stage, rollbackPending: row.lead.rollbackPending },
+        after: { stage: decision, rollbackPending: false, rollbackReason },
+      });
+      return Response.json({ ok: true, stage: decision });
+    }
     const values = payloadValues(payload, row.lead);
     const error = validateLead(values);
     if (error) return Response.json({ error }, { status: 400 });
     const now = new Date().toISOString();
-    await db.update(leads).set({ ...values, closedAt: ["won", "lost"].includes(values.stage) ? (row.lead.closedAt || now) : null, updatedAt: now }).where(eq(leads.id, id));
+    await db.update(leads).set({
+      ...values,
+      rollbackPending: row.lead.rollbackPending && !["contacted", "lost"].includes(values.stage),
+      rollbackReason: ["contacted", "lost"].includes(values.stage) ? "" : row.lead.rollbackReason,
+      closedAt: ["won", "lost"].includes(values.stage) ? (row.lead.closedAt || now) : null,
+      updatedAt: now,
+    }).where(eq(leads.id, id));
     await recordAudit(db, { actorEmail: profile.email, actorName: profile.name, action: "lead_updated", entity: "lead", details: `Lead ${id} atualizado.`, before: { stage: row.lead.stage, temperature: row.lead.temperature, lostReason: row.lead.lostReason }, after: { stage: values.stage, temperature: values.temperature, invoiceNumber: values.invoiceNumber, invoiceValueCents: values.invoiceValueCents, lostReason: values.lostReason } });
     return Response.json({ ok: true, id });
   } catch (error) {

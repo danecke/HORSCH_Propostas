@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, lt } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { dealershipModuleAccess, dealerships, proposalDocuments, proposalItems, proposals, userDealerships, users } from "../../../db/schema";
+import { dealershipModuleAccess, dealerships, leads, proposalDocuments, proposalItems, proposals, userDealerships, users } from "../../../db/schema";
 import { recordAudit } from "../../../lib/audit";
 import {
   canCreateProposal,
@@ -36,6 +36,7 @@ const VALID_STATUSES = new Set([
   "awaiting_order_number",
   "order_generated",
   "reproved",
+  "cancelled",
 ]);
 
 const EXPIRABLE_STATUSES = ["draft", "sent", "counteroffer"];
@@ -86,6 +87,7 @@ type ProposalInput = {
   customerSaleValueCents?: number | null;
   requestedNetPriceCents?: number | null;
   status?: string;
+  leadId?: string;
   items?: ItemInput[];
 };
 
@@ -598,6 +600,23 @@ export async function POST(request: Request) {
       const id = await proposalNumber(db);
       const now = new Date().toISOString();
       const issueDate = currentBusinessDate(new Date());
+      let sourceLeadId = payload.leadId?.trim() ?? "";
+      if (!sourceLeadId) {
+        const candidateLeads = await db.select().from(leads).where(eq(leads.dealershipId, dealer.id)).orderBy(desc(leads.updatedAt));
+        const requestedPn = requestItem.partNumber.toLowerCase();
+        const requestedCustomer = payload.customerName?.trim().toLowerCase() ?? "";
+        sourceLeadId = candidateLeads.find((lead) =>
+          ["proposal", "negotiation", "won"].includes(lead.stage) &&
+          lead.partNumbers.toLowerCase().split(/[,;\s]+/).includes(requestedPn) &&
+          (!requestedCustomer || lead.customerName.trim().toLowerCase() === requestedCustomer)
+        )?.id ?? "";
+      }
+      if (sourceLeadId) {
+        const [sourceLead] = await db.select().from(leads).where(eq(leads.id, sourceLeadId)).limit(1);
+        if (!sourceLead || sourceLead.dealershipId !== dealer.id) {
+          return Response.json({ error: "O Lead informado não pertence à concessionária selecionada." }, { status: 400 });
+        }
+      }
       await db.insert(proposals).values({
         id,
         dealershipId: dealer.id,
@@ -626,12 +645,17 @@ export async function POST(request: Request) {
         offerInvoiceUnitPriceCents: null,
         offerValidUntil: null,
         emailStatus: "not_requested",
+        sourceLeadId,
+        version: 1,
         createdByEmail: profile.email,
         createdByName: profile.name,
         createdAt: now,
         updatedAt: now,
       });
       await db.insert(proposalItems).values({ proposalId: id, ...requestItem });
+      if (sourceLeadId) {
+        await db.update(leads).set({ convertedEntityType: "proposal", convertedEntityId: id, rollbackPending: false, rollbackReason: "", updatedAt: now }).where(eq(leads.id, sourceLeadId));
+      }
       await recordAudit(db, {
         proposalId: id,
         actorEmail: profile.email,
@@ -792,6 +816,23 @@ export async function POST(request: Request) {
       (sum, item) => sum + item.quantity * item.unitPriceCents,
       0,
     );
+    let sourceLeadId = payload.leadId?.trim() ?? "";
+    if (!sourceLeadId) {
+      const candidateLeads = await db.select().from(leads).where(eq(leads.dealershipId, dealer.id)).orderBy(desc(leads.updatedAt));
+      const requestedPns = new Set(validItems.map((item) => item.partNumber.toLowerCase()));
+      const requestedCustomer = payload.customerName?.trim().toLowerCase() ?? "";
+      sourceLeadId = candidateLeads.find((lead) =>
+        ["proposal", "negotiation", "won"].includes(lead.stage) &&
+        lead.partNumbers.toLowerCase().split(/[,;\s]+/).some((partNumber) => requestedPns.has(partNumber)) &&
+        (!requestedCustomer || lead.customerName.trim().toLowerCase() === requestedCustomer)
+      )?.id ?? "";
+    }
+    if (sourceLeadId) {
+      const [sourceLead] = await db.select().from(leads).where(eq(leads.id, sourceLeadId)).limit(1);
+      if (!sourceLead || sourceLead.dealershipId !== dealer.id) {
+        return Response.json({ error: "O Lead informado não pertence à concessionária selecionada." }, { status: 400 });
+      }
+    }
     await db.insert(proposals).values({
       id,
       dealershipId: dealer.id,
@@ -805,6 +846,8 @@ export async function POST(request: Request) {
       totalCents,
       customerName: payload.customerName?.trim() ?? "",
       customerSaleValueCents: normalizeOptionalCents(payload.customerSaleValueCents),
+      sourceLeadId,
+      version: 1,
       emailStatus: requestedStatus === "sent" ? "processing" : "not_requested",
       createdByEmail: profile.email,
       createdByName: profile.name,
@@ -822,6 +865,9 @@ export async function POST(request: Request) {
         invoiceUnitPriceCents: item.invoiceUnitPriceCents,
       })),
     );
+    if (sourceLeadId) {
+      await db.update(leads).set({ convertedEntityType: "proposal", convertedEntityId: id, rollbackPending: false, rollbackReason: "", updatedAt: now.toISOString() }).where(eq(leads.id, sourceLeadId));
+    }
     await recordAudit(db, {
       proposalId: id,
       actorEmail: profile.email,
@@ -869,6 +915,7 @@ export async function PATCH(request: Request) {
   try {
     const payload = (await request.json()) as {
       id?: string;
+      version?: number;
       action?: "send" | "edit" | "accept_counteroffer" | "return_counteroffer" | "claim" | "offer" | "view_pdf" | "accept_request" | "reject_request" | "record_order" | "submit_order_number";
       status?: string;
       dealershipId?: number | null;
@@ -912,7 +959,34 @@ export async function PATCH(request: Request) {
     }
     if (!dealerIsVisible(profile, record.dealer)) return forbidden();
     if (!(await isModuleEnabled(db, record.dealer.id, "proposals"))) return forbidden("O módulo Propostas não está habilitado para esta concessionária.");
+    const expectedVersion = Math.trunc(Number(payload.version) || 0);
+    if (!expectedVersion || expectedVersion !== record.proposal.version) {
+      return Response.json(
+        {
+          error: "Esta proposta foi atualizada por outro gestor. Recarregue os dados antes de continuar.",
+          code: "VERSION_CONFLICT",
+          currentVersion: record.proposal.version,
+        },
+        { status: 409 },
+      );
+    }
+    const proposalGuard = and(
+      eq(proposals.id, payload.id),
+      eq(proposals.version, expectedVersion),
+    );
+    const nextVersion = expectedVersion + 1;
     const workflowNow = new Date().toISOString();
+    async function requestLeadRollback(nextStatus: string, reason: string) {
+      if (!record.proposal.sourceLeadId || !["rejected", "reproved", "cancelled", "expired"].includes(nextStatus)) {
+        return false;
+      }
+      await db.update(leads).set({
+        rollbackPending: true,
+        rollbackReason: reason,
+        updatedAt: workflowNow,
+      }).where(eq(leads.id, record.proposal.sourceLeadId));
+      return true;
+    }
 
     if (payload.action === "claim") {
       if (!["general_admin", "global_management"].includes(profile.role)) {
@@ -928,7 +1002,8 @@ export async function PATCH(request: Request) {
         commercialOwner: profile.name,
         commercialOwnerEmail: profile.email,
         updatedAt: workflowNow,
-      }).where(eq(proposals.id, payload.id));
+        version: nextVersion,
+      }).where(proposalGuard);
       await recordAudit(db, {
         proposalId: payload.id,
         actorEmail: profile.email,
@@ -992,7 +1067,8 @@ export async function PATCH(request: Request) {
           offerInvoiceUnitPriceCents,
           offerValidUntil,
           updatedAt: workflowNow,
-        }).where(eq(proposals.id, payload.id)),
+          version: nextVersion,
+        }).where(proposalGuard),
       ]);
       await recordAudit(db, {
         proposalId: payload.id,
@@ -1011,7 +1087,7 @@ export async function PATCH(request: Request) {
       if (profile.role !== "dealer_manager" || record.proposal.status !== "awaiting_dealer_acceptance") {
         return Response.json({ error: "O PDF só pode ser visualizado pelo Gestor do Concessionário na etapa de aceite." }, { status: 403 });
       }
-      await db.update(proposals).set({ pdfVisualized: true, updatedAt: workflowNow }).where(eq(proposals.id, payload.id));
+      await db.update(proposals).set({ pdfVisualized: true, updatedAt: workflowNow, version: nextVersion }).where(proposalGuard);
       await recordAudit(db, {
         proposalId: payload.id,
         actorEmail: profile.email,
@@ -1039,7 +1115,8 @@ export async function PATCH(request: Request) {
         decisionNote: payload.action === "reject_request" ? rejectionReason : "Oferta oficial aceita pelo concessionário.",
         decidedByEmail: profile.email,
         updatedAt: workflowNow,
-      }).where(eq(proposals.id, payload.id));
+        version: nextVersion,
+      }).where(proposalGuard);
       await recordAudit(db, {
         proposalId: payload.id,
         actorEmail: profile.email,
@@ -1050,7 +1127,8 @@ export async function PATCH(request: Request) {
         before: { status: record.proposal.status, pdfVisualized: record.proposal.pdfVisualized },
         after: { status: nextStatus, rejectionReason },
       });
-      return Response.json({ ok: true, status: nextStatus });
+      const leadRollbackRequired = await requestLeadRollback(nextStatus, rejectionReason || "Proposta comercial encerrada sem conversão.");
+      return Response.json({ ok: true, status: nextStatus, version: nextVersion, leadRollbackRequired, leadId: record.proposal.sourceLeadId || undefined });
     }
 
     if (payload.action === "record_order") {
@@ -1065,7 +1143,7 @@ export async function PATCH(request: Request) {
       }
       const erpOrderNumber = payload.erpOrderNumber?.trim() ?? "";
       if (!erpOrderNumber) return Response.json({ error: "Informe o número do pedido HORSCH." }, { status: 400 });
-      await db.update(proposals).set({ status: "order_generated", erpOrderNumber, updatedAt: workflowNow }).where(eq(proposals.id, payload.id));
+      await db.update(proposals).set({ status: "order_generated", erpOrderNumber, updatedAt: workflowNow, version: nextVersion }).where(proposalGuard);
       await recordAudit(db, {
         proposalId: payload.id,
         actorEmail: profile.email,
@@ -1091,7 +1169,7 @@ export async function PATCH(request: Request) {
       }
       const erpOrderNumber = payload.erpOrderNumber?.trim() ?? "";
       if (!erpOrderNumber) return Response.json({ error: "Informe o número do pedido HORSCH." }, { status: 400 });
-      await db.update(proposals).set({ status: "order_generated", erpOrderNumber, updatedAt: workflowNow }).where(eq(proposals.id, payload.id));
+      await db.update(proposals).set({ status: "order_generated", erpOrderNumber, updatedAt: workflowNow, version: nextVersion }).where(proposalGuard);
       await recordAudit(db, {
         proposalId: payload.id,
         actorEmail: profile.email,
@@ -1155,7 +1233,7 @@ export async function PATCH(request: Request) {
       const customerSaleValueCents = normalizeOptionalCents(payload.customerSaleValueCents);
       const now = new Date().toISOString();
       await db.batch([
-        db.update(proposals).set({ dealershipId: editedDealer.id, contactName: payload.contactName?.trim() || editedDealer.contactName, contactEmail: (payload.contactEmail?.trim() || editedDealer.contactEmail).toLowerCase(), commercialOwner: assignedManager.name, commercialOwnerEmail: assignedManager.email.toLowerCase(), status: "draft", validUntil, totalCents, customerName, customerSaleValueCents, counterofferCents: null, decisionNote: "", decidedByEmail: "", counterofferPaymentTerms: "", counterofferFreightTerms: "", counterofferDeliveryTerms: "", counterofferSubmittedAt: null, counterofferReviewedAt: null, counterofferReviewedByEmail: "", counterofferReviewNote: "", emailStatus: "not_requested", emailSentAt: null, emailError: "Proposta editada; reenvio necessário.", updatedAt: now }).where(eq(proposals.id, record.proposal.id)),
+        db.update(proposals).set({ dealershipId: editedDealer.id, contactName: payload.contactName?.trim() || editedDealer.contactName, contactEmail: (payload.contactEmail?.trim() || editedDealer.contactEmail).toLowerCase(), commercialOwner: assignedManager.name, commercialOwnerEmail: assignedManager.email.toLowerCase(), status: "draft", validUntil, totalCents, customerName, customerSaleValueCents, counterofferCents: null, decisionNote: "", decidedByEmail: "", counterofferPaymentTerms: "", counterofferFreightTerms: "", counterofferDeliveryTerms: "", counterofferSubmittedAt: null, counterofferReviewedAt: null, counterofferReviewedByEmail: "", counterofferReviewNote: "", emailStatus: "not_requested", emailSentAt: null, emailError: "Proposta editada; reenvio necessário.", updatedAt: now, version: nextVersion }).where(proposalGuard),
         db.delete(proposalItems).where(eq(proposalItems.proposalId, record.proposal.id)),
         db.insert(proposalItems).values(validItems.map((item) => ({ proposalId: record.proposal.id, ...item }))),
       ]);
@@ -1192,8 +1270,8 @@ export async function PATCH(request: Request) {
       });
       await db
         .update(proposals)
-        .set(deliveryDatabasePatch(delivery))
-        .where(eq(proposals.id, payload.id));
+        .set({ ...deliveryDatabasePatch(delivery), version: nextVersion })
+        .where(proposalGuard);
       await recordAudit(db, { proposalId: payload.id, actorEmail: profile.email, actorName: profile.name, action: "sent", entity: "proposal", details: delivery.status === "sent" ? `Proposta enviada por e-mail para ${recipientEmail}.` : "Tentativa de envio registrada; e-mail não confirmado.", before: { status: record.proposal.status, emailStatus: record.proposal.emailStatus }, after: { status: delivery.status === "sent" ? "sent" : "draft", emailStatus: delivery.status } });
       return Response.json({
         ok: delivery.status === "sent",
@@ -1225,8 +1303,9 @@ export async function PATCH(request: Request) {
           counterofferReviewedByEmail: profile.email,
           counterofferReviewNote: payload.counterofferReviewNote?.trim() ?? "",
           updatedAt: new Date().toISOString(),
+          version: nextVersion,
         })
-        .where(eq(proposals.id, payload.id));
+        .where(proposalGuard);
       return Response.json({
         ok: true,
         status: accepted ? "approved" : "sent",
@@ -1352,8 +1431,9 @@ export async function PATCH(request: Request) {
           counterofferReviewedByEmail: "",
           counterofferReviewNote: "",
           updatedAt: new Date().toISOString(),
+          version: nextVersion,
         })
-        .where(eq(proposals.id, payload.id));
+        .where(proposalGuard);
       return Response.json({ ok: true, status: "counteroffer", counterofferCents });
     }
 
@@ -1378,10 +1458,15 @@ export async function PATCH(request: Request) {
             : record.proposal.rejectionReason,
         decidedByEmail: profile.role === "dealer_manager" ? profile.email : "",
         updatedAt: new Date().toISOString(),
+        version: nextVersion,
       })
-      .where(eq(proposals.id, payload.id));
+      .where(proposalGuard);
     await recordAudit(db, { proposalId: payload.id, actorEmail: profile.email, actorName: profile.name, action: "status_changed", entity: "proposal", details: `${isStatusOverride ? "Status alterado administrativamente" : "Status alterado"} para ${resolvedStatus}.`, before: { status: record.proposal.status }, after: { status: resolvedStatus, decisionNote: payload.decisionNote?.trim() ?? record.proposal.decisionNote } });
-    return Response.json({ ok: true, status: resolvedStatus, counterofferCents });
+    const leadRollbackRequired = await requestLeadRollback(
+      resolvedStatus,
+      payload.decisionNote?.trim() || "Proposta comercial perdida ou cancelada.",
+    );
+    return Response.json({ ok: true, status: resolvedStatus, counterofferCents, version: nextVersion, leadRollbackRequired, leadId: record.proposal.sourceLeadId || undefined });
   } catch (error) {
     return Response.json({ error: apiError(error) }, { status: 500 });
   }

@@ -54,6 +54,10 @@ type Sale = {
   expectedN3Cents: number | null;
   priceDifferenceCents: number | null;
   duplicateKey: string; baseSource: string; baseStatus: string; reasonCode: string; historicalMarginBps: number | null; marginVariationBps: number | null; justification: string; justificationStatus: string;
+  workflowRoute: "fast_track" | "exception" | "blocked";
+  workflowStatus: "awaiting_global" | "awaiting_dealer_consent" | "awaiting_factory_settlement" | "blocked_negative_margin" | "factory_rejected" | "settled";
+  autoCheckJson: string;
+  settlementDocumentNumber: string;
   needsAnalysis: boolean;
   negativeMargin: boolean;
   needsNetReference: boolean;
@@ -148,6 +152,17 @@ function formatDate(value: string) {
 function formatMonth(value: string) {
   if (!/^\d{4}-\d{2}$/.test(value)) return value || "Sem referência";
   return new Date(`${value}-01T12:00:00Z`).toLocaleDateString("pt-BR", { month: "short", year: "numeric", timeZone: "UTC" });
+}
+
+function workflowLabel(status: Sale["workflowStatus"]) {
+  return ({
+    awaiting_global: "Validação global",
+    awaiting_dealer_consent: "Consentimento da concessionária",
+    awaiting_factory_settlement: "Liquidação pela fábrica",
+    blocked_negative_margin: "Bloqueado · margem negativa",
+    factory_rejected: "Recusado pela Fábrica",
+    settled: "Liquidado",
+  } as const)[status] || status;
 }
 
 function formatPercent(basisPoints: number) {
@@ -427,7 +442,8 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
     if (action === "question_line") note = window.prompt("O que deve ser questionado nesta linha?") ?? "";
     if (action === "return_line") note = window.prompt("Informe o motivo da devolução:") ?? "";
     if (action === "reject_line") note = window.prompt("Documente o motivo da rejeição desta linha:") ?? "";
-    if (["submit_justification", "question_line", "return_line", "reject_line"].includes(action) && note.trim().length < 5) {
+    if (action === "global_reject") note = window.prompt("Documente o motivo da recusa pela Fábrica:") ?? "";
+    if (["submit_justification", "question_line", "return_line", "reject_line", "global_reject"].includes(action) && note.trim().length < 5) {
       setError("Informe uma observação válida para esta decisão.");
       return;
     }
@@ -861,42 +877,56 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
             <span><strong>{data.summary.netReferenceRecords}</strong> precisam de NET de referência</span>
           </div>
 
-          <div className="reimbursement-table-wrap wide">
-            <table className="reimbursement-table reimbursement-detail-table">
-              <thead><tr><th>PN</th><th>Descrição</th><th>Cliente / CPF-CNPJ</th><th>NF / UF</th><th>Concessionário</th><th>Qtd.</th><th>Custo total</th><th>Valor líquido</th><th>Margem</th><th>Análise da linha</th><th>Base usada</th><th>Reembolso</th><th>Status / validação</th><th>Ações</th></tr></thead>
-              <tbody>
-                {data.sales.map((sale) => (
-                  <tr key={sale.id}>
-                    <td><strong>{sale.partNumber}</strong></td>
-                    <td>{sale.description || "—"}</td>
-                    <td>{sale.clientName || "—"}<small>{sale.clientCnpj || "CPF/CNPJ não informado"}</small></td>
-                    <td>{sale.invoiceNumber || "—"}<small>{sale.state || "UF não informada"}</small></td>
-                    <td>{sale.dealershipName || "—"}</td>
-                    <td>{sale.quantity}</td>
-                    <td>{formatBRL(sale.costTotalCents)}</td>
-                    <td>{formatBRL(sale.liquidTotalCents)}</td>
-                    <td><strong className={sale.negativeMargin ? "negative-value" : ""}>{formatPercent(sale.marginBps)}%</strong>{sale.negativeMargin && <small>Margem negativa</small>}</td>
-                    <td><span className={`reimbursement-analysis-flag ${sale.needsAnalysis ? "attention" : "clear"}`}>{sale.needsAnalysis ? "Analisar" : "Sem ação"}</span><small>{sale.analysisReason || "Linha validada"}</small></td>
-                    <td><strong>{formatBRL(sale.calculationBaseCents)}</strong><small>{sale.needsNetReference ? "NET de referência necessário" : sale.netPriceUsedCents === null ? "Custo médio (fallback)" : `Net Price: ${formatBRL(sale.netPriceUsedCents)}`}</small></td>
-                    <td><strong>{formatBRL(sale.reimbursementCents)}</strong><small>{sale.reimbursementProgram || "Sem programa"}</small></td>
-                    <td><span className={`reimbursement-status ${statusClass(sale.status)}`}>{sale.status}</span>{sale.expectedN3Cents !== null && <small>N3 ref.: {formatBRL(sale.expectedN3Cents)} · Δ {signedBRL(sale.priceDifferenceCents)}</small>}</td>
-                    <td>
-                      <div className="reimbursement-decision-actions">
-                        {canManageClients && (
-                          <>
-                            <button className="reimbursement-line-action accept" disabled={busy} onClick={() => void runLineAction(sale, "accept_line")}><span>✓</span>Aceitar</button>
-                            <button className="reimbursement-line-action adjust" disabled={busy} onClick={() => openLineAdjustment(sale)}><span>✎</span>Ajustar</button>
-                            <button className="reimbursement-line-action reject" disabled={busy} onClick={() => void runLineAction(sale, "reject_line")}><span>×</span>Rejeitar</button>
-                          </>
-                        )}
-                        {sale.status === "Pendente Justificativa" && dealerScoped && <button className="outline-button compact" onClick={() => void runLineAction(sale, "submit_justification")}>Enviar justificativa</button>}
-                      </div>
-                      <small>{sale.justification ? `Último registro: ${sale.justification}` : `${formatBRL(sale.negotiationCents)} em negociação`}</small>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="reimbursement-sales-list" role="table" aria-label="Itens da solicitação">
+            <div className="reimbursement-sales-list-head" role="row">
+              <span role="columnheader">Item</span>
+              <span role="columnheader">Cliente e operação</span>
+              <span role="columnheader">Valores da venda</span>
+              <span role="columnheader">Análise e reembolso</span>
+              <span role="columnheader">Decisão</span>
+            </div>
+            {data.sales.map((sale) => (
+              <article className={`reimbursement-sale-row ${sale.needsAnalysis ? "attention" : ""}`} role="row" key={sale.id}>
+                <div className="reimbursement-sale-product" role="cell">
+                  <div><span className="reimbursement-sale-index">#{sale.id}</span><strong>{sale.partNumber}</strong></div>
+                  <p>{sale.description || "Sem descrição"}</p>
+                  <small>{sale.dealershipName || "Concessionária não informada"}</small>
+                </div>
+                <div className="reimbursement-sale-operation" role="cell">
+                  <strong>{sale.clientName || "Cliente não informado"}</strong>
+                  <small>{sale.clientCnpj || "CPF/CNPJ não informado"}</small>
+                  <div><span>NF {sale.invoiceNumber || "—"}</span><span>{sale.state || "UF —"}</span><span>{sale.quantity} un.</span></div>
+                </div>
+                <div className="reimbursement-sale-values" role="cell">
+                  <div><span>Valor líquido</span><strong>{formatBRL(sale.liquidTotalCents)}</strong></div>
+                  <div><span>Custo total</span><b>{formatBRL(sale.costTotalCents)}</b></div>
+                  <div><span>Margem</span><b className={sale.negativeMargin ? "negative-value" : ""}>{formatPercent(sale.marginBps)}%</b></div>
+                </div>
+                <div className="reimbursement-sale-analysis" role="cell">
+                  <div className="reimbursement-sale-analysis-top"><span className={`reimbursement-analysis-flag ${sale.workflowRoute === "fast_track" ? "clear" : "attention"}`}>{sale.workflowRoute === "fast_track" ? "Via rápida" : sale.workflowRoute === "blocked" ? "Bloqueada" : "Exceção"}</span><span className={`reimbursement-status ${statusClass(sale.status)}`}>{sale.status}</span></div>
+                  <div className="reimbursement-sale-reimbursement"><span>Reembolso</span><strong>{formatBRL(sale.reimbursementCents)}</strong><small>{sale.reimbursementProgram || "Sem programa"}</small></div>
+                  <small><strong>{workflowLabel(sale.workflowStatus)}</strong></small>
+                  <small>{sale.analysisReason || (sale.expectedN3Cents !== null ? `N3 ${formatBRL(sale.expectedN3Cents)} · Δ ${signedBRL(sale.priceDifferenceCents)}` : "Linha sem pendências")}</small>
+                  <small>Base {formatBRL(sale.calculationBaseCents)} · {sale.needsNetReference ? "NET necessário" : sale.netPriceUsedCents === null ? "Custo médio" : `NET ${formatBRL(sale.netPriceUsedCents)}`}</small>
+                </div>
+                <div className="reimbursement-sale-decision" role="cell">
+                  <div className="reimbursement-decision-actions">
+                    {canManageClients && (
+                      <>
+                        {sale.workflowStatus === "awaiting_global" && <button className="reimbursement-line-action accept" disabled={busy} onClick={() => void runLineAction(sale, "global_approve")}><span>✓</span>Aprovar exceção</button>}
+                        <button className="reimbursement-line-action adjust" disabled={busy} onClick={() => openLineAdjustment(sale)}><span>✎</span>Ajustar</button>
+                        {sale.workflowStatus === "awaiting_global" && <button className="reimbursement-line-action reject" disabled={busy} onClick={() => void runLineAction(sale, "global_reject")}><span>×</span>Recusar</button>}
+                      </>
+                    )}
+                    {me.role === "dealer_manager" && sale.workflowStatus === "awaiting_dealer_consent" && <button className="reimbursement-line-action accept" disabled={busy} onClick={() => void runLineAction(sale, "dealer_consent")}><span>✓</span>De acordo</button>}
+                    {["general_admin", "factory_manager"].includes(me.role) && sale.workflowStatus === "awaiting_factory_settlement" && <button className="reimbursement-line-action accept" disabled={busy} onClick={() => void runLineAction(sale, "factory_settle")}><span>✓</span>Liquidar</button>}
+                    {sale.workflowStatus === "settled" && <a className="outline-button compact" href={`/api/reimbursements?settlementDocument=${sale.id}`} download>Baixar documento</a>}
+                    {sale.status === "Pendente Justificativa" && dealerScoped && <button className="outline-button compact" onClick={() => void runLineAction(sale, "submit_justification")}>Enviar justificativa</button>}
+                  </div>
+                  <small title={sale.justification}>{sale.justification ? `Registro: ${sale.justification}` : sale.negotiationCents ? `${formatBRL(sale.negotiationCents)} em negociação` : "Aguardando decisão"}</small>
+                </div>
+              </article>
+            ))}
             {!data.sales.length && <div className="empty-mini">Nenhuma venda encontrada para os filtros.</div>}
           </div>
         </section>
@@ -1078,7 +1108,7 @@ function ExecutiveOverview({ data, isFactoryView, dealerships, factoryFilters, o
         <small>Valores atualizados conforme os filtros selecionados</small>
       </section>
 
-      <section className="reimbursement-kpi-grid">
+      <section className={`reimbursement-kpi-grid ${isFactoryView ? "factory-view" : "dealer-view"}`}>
         <article className="reimbursement-kpi primary"><div className="reimbursement-kpi-top"><span>Valor líquido vendido</span><i>R$</i></div><strong>{formatBRL(overviewSummary.salesCents)}</strong><small>{overviewSummary.processedRows} registros no filtro atual</small></article>
         <article className="reimbursement-kpi accent"><div className="reimbursement-kpi-top"><span>Reembolso projetado</span><i>↗</i></div><strong>{formatBRL(overviewSummary.reimbursementN2Cents + overviewSummary.reimbursementN3Cents)}</strong><small>N2 + N3 elegíveis</small></article>
         {isFactoryView && <article className="reimbursement-kpi margin"><div className="reimbursement-kpi-top"><span>Margem consolidada</span><i>%</i></div><strong>{formatPercent(overviewSummary.marginBps)}%</strong><small>Vendas líquidas versus custo</small></article>}

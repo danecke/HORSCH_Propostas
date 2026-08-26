@@ -24,6 +24,10 @@ export type Lead = {
   sellerName: string;
   sellerEmail: string;
   lostReason: string;
+  rollbackPending: boolean;
+  rollbackReason: string;
+  convertedEntityType: string;
+  convertedEntityId: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -37,7 +41,7 @@ type MachineModel = { id: number; name: string; active: boolean };
 
 type CurrentAccess = { email: string; name: string; role: string; dealershipId: number | null; dealershipIds: number[] };
 
-const STAGE_LABELS: Record<LeadStage, string> = { new: "Novo", contacted: "Contato", qualified: "Qualificado", proposal: "Proposta", negotiation: "Negociação", won: "Lead convertido", lost: "Perdido" };
+const STAGE_LABELS: Record<LeadStage, string> = { new: "Novo", contacted: "Em contato", qualified: "Qualificado", proposal: "Proposta", negotiation: "Negociação", won: "Lead convertido", lost: "Perdido" };
 const TEMPERATURE_LABELS: Record<LeadTemperature, string> = { cold: "Frio", warm: "Morno", hot: "Quente" };
 const STAGE_ORDER: LeadStage[] = ["new", "contacted", "qualified", "proposal", "negotiation", "won", "lost"];
 const FALLBACK_MACHINE_MODELS = ["Joker", "Terrano", "Tiger", "Pronto", "Cruiser", "Maestro", "Avatar", "Leeb", "Finer", "Transformer", "Sprinter", "Focus", "Partner", "Express", "Cultro"];
@@ -132,7 +136,7 @@ function LeadMetric({ label, value, meta, tone }: { label: string; value: string
 }
 
 function LeadCard({ lead, onEdit }: { lead: Lead; onEdit: () => void }) {
-  return <article className="lead-card"><header><div><span className="eyebrow">{lead.id}</span><h3>{lead.customerName}</h3><p>{lead.dealership} · Atualizado em {date(lead.updatedAt)}</p></div><span className={stageClass(lead.stage)}>{STAGE_LABELS[lead.stage]}</span></header><div className="lead-card-grid"><div><span>Contato</span><strong>{lead.phone || lead.email || "—"}</strong><small>{lead.email && lead.phone ? lead.email : ""}</small></div><div><span>Máquinas</span><strong>{lead.machineDomain || "—"}</strong></div><div><span>PNs</span><strong>{lead.partNumbers || "—"}</strong><small>{lead.partsOfInterest || ""}</small></div><div><span>Temperatura</span><strong className={`lead-temperature ${lead.temperature}`}>{TEMPERATURE_LABELS[lead.temperature]}</strong></div><div><span>Valor negociado</span><strong>{money(lead.negotiatedValueCents)}</strong></div><div><span>{lead.stage === "lost" ? "Motivo da negativa" : "Vendedor"}</span><strong>{lead.stage === "lost" ? (lead.lostReason || "—") : (lead.sellerName || "—")}</strong><small>{lead.stage === "won" ? `NF ${lead.invoiceNumber || "não informada"} · ${money(lead.invoiceValueCents)}` : lead.stage === "lost" ? "Negócio não convertido" : "Responsável comercial"}</small></div></div><footer><span>{lead.stage === "won" ? "Lead convertido com NF conferida." : lead.stage === "lost" ? "Motivo da negativa registrado." : "Atualize o status conforme o avanço do lead."}</span><button className="outline-button compact" type="button" onClick={onEdit}>Editar</button></footer></article>;
+  return <article className="lead-card"><header><div><span className="eyebrow">{lead.id}</span><h3>{lead.customerName}</h3><p>{lead.dealership} · Atualizado em {date(lead.updatedAt)}</p></div><span className={stageClass(lead.stage)}>{lead.rollbackPending ? "Rollback pendente" : STAGE_LABELS[lead.stage]}</span></header><div className="lead-card-grid"><div><span>Contato</span><strong>{lead.phone || lead.email || "—"}</strong><small>{lead.email && lead.phone ? lead.email : ""}</small></div><div><span>Máquinas</span><strong>{lead.machineDomain || "—"}</strong></div><div><span>PNs</span><strong>{lead.partNumbers || "—"}</strong><small>{lead.partsOfInterest || ""}</small></div><div><span>Temperatura</span><strong className={`lead-temperature ${lead.temperature}`}>{TEMPERATURE_LABELS[lead.temperature]}</strong></div><div><span>Valor negociado</span><strong>{money(lead.negotiatedValueCents)}</strong></div><div><span>{lead.stage === "lost" ? "Motivo da negativa" : "Vendedor"}</span><strong>{lead.stage === "lost" ? (lead.lostReason || "—") : (lead.sellerName || "—")}</strong><small>{lead.stage === "won" ? `NF ${lead.invoiceNumber || "não informada"} · ${money(lead.invoiceValueCents)}` : lead.stage === "lost" ? "Negócio não convertido" : "Responsável comercial"}</small></div></div><footer><span>{lead.rollbackPending ? (lead.rollbackReason || "Defina se o Lead volta para Em contato ou será encerrado.") : lead.stage === "won" ? "Lead convertido com NF conferida." : lead.stage === "lost" ? "Motivo da negativa registrado." : "Atualize o status conforme o avanço do lead."}</span><button className="outline-button compact" type="button" onClick={onEdit}>Editar</button></footer></article>;
 }
 
 function LeadInsights({ data }: { data: LeadModuleData }) {
