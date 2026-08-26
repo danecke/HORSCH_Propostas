@@ -1200,14 +1200,14 @@ export async function PATCH(request: Request) {
       linkedDealerDecisionOwner ||
       proposalActionOwnerEmail(record.proposal, record.dealer, allUsers) === normalizedProfileEmail;
     const actionRequired = Boolean(payload.action || payload.status);
-    const canEditAnyProposal = ["general_admin", "global_management"].includes(profile.role);
+    const canEditAnyProposal = rolePermissions(profile.role).editAnyProposal;
     const isGlobalEdit = payload.action === "edit" && canEditAnyProposal;
     if (actionRequired && !isActionOwner && !expiredEdit && !isGlobalEdit && !isStatusOverride) {
       return Response.json({ error: "Esta ação está disponível somente para o responsável atual da proposta." }, { status: 403 });
     }
 
     if (payload.action === "edit") {
-      if (!["general_admin", "global_management", "factory_manager"].includes(profile.role)) return Response.json({ error: "Somente ADM Geral, Gestão Global ou Gestor Fábrica podem editar propostas." }, { status: 403 });
+      if (!canEditAnyProposal && profile.role !== "factory_manager") return Response.json({ error: "Somente o ADM, a Gestão Global ou o Gestor Fábrica responsável podem editar propostas." }, { status: 403 });
       if (record.proposal.status === "expired" && !["general_admin", "global_management"].includes(profile.role)) return Response.json({ error: "Propostas expiradas podem ser reabertas somente pela Gestão Global ou níveis superiores." }, { status: 403 });
       const editedDealershipId = Math.trunc(Number(payload.dealershipId) || record.dealer.id);
       const [editedDealer] = await db.select().from(dealerships).where(eq(dealerships.id, editedDealershipId)).limit(1);

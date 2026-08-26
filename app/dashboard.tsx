@@ -280,6 +280,7 @@ type CurrentAccess = {
     assignLowerPermission: boolean;
     restoreLowerPassword: boolean;
     decideProposal: boolean;
+    editAnyProposal: boolean;
     manageAnyProposalStatus: boolean;
     deleteAnyProposal: boolean;
     deleteOwnDraft: boolean;
@@ -6450,6 +6451,11 @@ function NewProposalModal({
                 ? "As alterações ficarão registradas no histórico e a proposta voltará para rascunho."
                 : "Responsáveis e destinatários são definidos pela carteira selecionada."}
             </p>
+            {proposal && role === "general_admin" && (
+              <span className="admin-edit-note">
+                Acesso ADM: todos os tópicos e etapas da proposta podem ser editados.
+              </span>
+            )}
           </div>
           <button
             type="button"
@@ -7801,8 +7807,9 @@ function ProposalPreview({
     (me.permissions.deleteOwnDraft &&
       status === "draft" &&
       proposal.createdByEmail === me.email);
+  const canEditAnyProposal = me.permissions.editAnyProposal;
   const canEdit =
-    ["general_admin", "global_management"].includes(me.role) ||
+    canEditAnyProposal ||
     (proposal.isActionOwner &&
       ["general_admin", "global_management", "factory_manager"].includes(
         me.role,
@@ -8105,7 +8112,7 @@ function ProposalPreview({
                 Excluir
               </button>
             )}
-            {((!isWorkflow && canEdit) || canEditAcceptedProposal) && (
+            {((!isWorkflow && canEdit) || canEditAcceptedProposal || canEditAnyProposal) && (
               <button
                 type="button"
                 className="outline-button dark"

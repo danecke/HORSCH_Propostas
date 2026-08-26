@@ -12318,6 +12318,16 @@ body {
   font-size: 11px;
   line-height: 1.5;
 }
+.admin-edit-note {
+  display: inline-flex;
+  margin-top: 9px;
+  padding: 6px 8px;
+  color: #8b5b0e;
+  background: #fff6dc;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.35;
+}
 @media (max-width: 1100px) {
   .action-center-module-columns { grid-template-columns: minmax(0, 1fr); }
   .action-center-module-card { width: 100%; }
