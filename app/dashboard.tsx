@@ -679,6 +679,9 @@ export function Dashboard({ user }: { user: AppUser }) {
         !term ||
         [proposal.id, proposal.dealership, proposal.commercialOwner].some(
           (value) => value.toLocaleLowerCase("pt-BR").includes(term),
+        ) ||
+        proposal.items.some((item) =>
+          item.partNumber.toLocaleLowerCase("pt-BR").includes(term),
         );
       return matchesStatus && matchesTerm;
     });
@@ -4830,7 +4833,7 @@ function ProposalsView({
             <input
               value={search}
               onChange={(event) => onSearch(event.target.value)}
-              placeholder="Buscar proposta, concessionária ou responsável"
+              placeholder="Buscar proposta, PN, concessionária ou responsável"
             />
           </label>
           <select
