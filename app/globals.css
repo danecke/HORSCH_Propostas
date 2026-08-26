@@ -2297,6 +2297,14 @@ button {
 .preview-actions select {
   min-height: 39px;
 }
+.owner-reassignment-control {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.owner-reassignment-control select {
+  max-width: 260px;
+}
 .delete-confirmation {
   margin: 18px auto 0;
   padding: 24px;

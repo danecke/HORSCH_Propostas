@@ -1292,6 +1292,7 @@ export function Dashboard({ user }: { user: AppUser }) {
         <ProposalPreview
           proposal={preview}
           me={data.me}
+          proposalResponsibles={proposalResponsibles}
           onClose={() => setPreview(null)}
           onEdit={() => {
             setEditProposal(preview);
@@ -6247,7 +6248,8 @@ function NewProposalModal({
       false,
   );
   const [factoryManagerEmail, setFactoryManagerEmail] = useState(
-    proposal?.factoryManagerEmail ||
+    proposal?.commercialOwnerEmail ||
+      proposal?.factoryManagerEmail ||
       (PROPOSAL_RESPONSIBLE_ROLES.includes(role) ? userEmail : ""),
   );
   const [validUntil, setValidUntil] = useState(
@@ -6451,9 +6453,9 @@ function NewProposalModal({
                 ? "As alterações ficarão registradas no histórico e a proposta voltará para rascunho."
                 : "Responsáveis e destinatários são definidos pela carteira selecionada."}
             </p>
-            {proposal && role === "general_admin" && (
+            {proposal && ["general_admin", "global_management"].includes(role) && (
               <span className="admin-edit-note">
-                Acesso ADM: todos os tópicos e etapas da proposta podem ser editados.
+                Acesso administrativo: todos os tópicos e o responsável da proposta podem ser editados.
               </span>
             )}
           </div>
@@ -7680,6 +7682,7 @@ function ProposalPreviewLegacy({
 function ProposalPreview({
   proposal,
   me,
+  proposalResponsibles,
   onClose,
   onEdit,
   onUpdated,
@@ -7687,6 +7690,7 @@ function ProposalPreview({
 }: {
   proposal: Proposal;
   me: CurrentAccess;
+  proposalResponsibles: AccessUser[];
   onClose: () => void;
   onEdit: () => void;
   onUpdated: (
@@ -7768,6 +7772,13 @@ function ProposalPreview({
   const [erpOrderNumber, setErpOrderNumber] = useState(
     proposal.erpOrderNumber || "",
   );
+  const [commercialOwner, setCommercialOwner] = useState(proposal.commercialOwner);
+  const [commercialOwnerEmail, setCommercialOwnerEmail] = useState(
+    proposal.commercialOwnerEmail || proposal.factoryManagerEmail || proposal.createdByEmail,
+  );
+  const [selectedResponsibleEmail, setSelectedResponsibleEmail] = useState(
+    proposal.commercialOwnerEmail || proposal.factoryManagerEmail || proposal.createdByEmail,
+  );
 
   const decisionOpen =
     proposal.isActionOwner &&
@@ -7808,6 +7819,12 @@ function ProposalPreview({
       status === "draft" &&
       proposal.createdByEmail === me.email);
   const canEditAnyProposal = me.permissions.editAnyProposal;
+  const canReassignOwner = ["general_admin", "global_management"].includes(me.role);
+  const availableProposalResponsibles = proposalResponsibles.filter((manager) =>
+    status === "in_analysis"
+      ? ["general_admin", "global_management"].includes(manager.role)
+      : true,
+  );
   const canEdit =
     canEditAnyProposal ||
     (proposal.isActionOwner &&
@@ -7966,6 +7983,40 @@ function ProposalPreview({
     setSendingEmail(false);
   }
 
+  async function reassignOwner() {
+    if (!selectedResponsibleEmail || selectedResponsibleEmail === commercialOwnerEmail) return;
+    setUpdating(true);
+    setError("");
+    const response = await fetch("/api/proposals", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: proposal.id,
+        version,
+        action: "reassign_owner",
+        factoryManagerEmail: selectedResponsibleEmail,
+      }),
+    });
+    const payload = (await response.json()) as {
+      error?: string;
+      status?: ProposalStatus;
+      version?: number;
+      commercialOwner?: string;
+      commercialOwnerEmail?: string;
+    };
+    if (!response.ok || !payload.commercialOwner || !payload.commercialOwnerEmail) {
+      setError(payload.error || "Não foi possível trocar o responsável da proposta.");
+      setUpdating(false);
+      return;
+    }
+    setCommercialOwner(payload.commercialOwner);
+    setCommercialOwnerEmail(payload.commercialOwnerEmail);
+    setSelectedResponsibleEmail(payload.commercialOwnerEmail);
+    setVersion(payload.version ?? version + 1);
+    await onUpdated(payload.status ?? status);
+    setUpdating(false);
+  }
+
   async function updateStatus(nextStatus: ProposalStatus) {
     setUpdating(true);
     setError("");
@@ -8080,6 +8131,35 @@ function ProposalPreview({
             </span>
           </div>
           <div className="preview-actions">
+            {canReassignOwner && (
+              <div className="owner-reassignment-control">
+                <label>
+                  Responsável
+                  <select
+                    value={selectedResponsibleEmail}
+                    disabled={updating}
+                    onChange={(event) => setSelectedResponsibleEmail(event.target.value)}
+                    aria-label="Novo responsável da proposta"
+                  >
+                    {availableProposalResponsibles.map((manager) => (
+                      <option key={manager.email} value={manager.email}>
+                        {manager.name} · {manager.roleLabel}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {selectedResponsibleEmail !== commercialOwnerEmail && (
+                  <button
+                    type="button"
+                    className="outline-button dark compact"
+                    disabled={updating}
+                    onClick={() => void reassignOwner()}
+                  >
+                    {updating ? "Salvando..." : "Aplicar"}
+                  </button>
+                )}
+              </div>
+            )}
             {!isWorkflow && !decisionOpen && canManageStatus && (
               <label>
                 Status
@@ -8891,10 +8971,8 @@ function ProposalPreview({
             </div>
             <div>
               <span>Responsável HORSCH</span>
-              <strong>{proposal.commercialOwner}</strong>
-              <small>
-                {proposal.factoryManagerEmail || proposal.createdByEmail}
-              </small>
+              <strong>{commercialOwner}</strong>
+              <small>{commercialOwnerEmail}</small>
             </div>
           </section>
           {(proposal.customerName || proposal.customerSaleValueCents) && (
@@ -9079,7 +9157,7 @@ function ProposalPreview({
           </section>
           <section className="document-signatures">
             <div>
-              <span className="signature-name">{proposal.commercialOwner}</span>
+              <span className="signature-name">{commercialOwner}</span>
               <small>Responsável Comercial HORSCH</small>
             </div>
             <div>
@@ -9120,6 +9198,8 @@ const AUDIT_FIELD_LABELS: Record<string, string> = {
   contactName: "Responsável da concessionária",
   contactEmail: "E-mail do responsável",
   commercialOwner: "Responsável HORSCH",
+  commercialOwnerEmail: "E-mail do responsável HORSCH",
+  claimedByEmail: "Responsável pela análise",
   status: "Status",
   validUntil: "Validade da proposta",
   totalCents: "Valor total da proposta",

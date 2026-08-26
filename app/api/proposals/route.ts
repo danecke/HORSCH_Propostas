@@ -354,6 +354,8 @@ export async function GET() {
     const allRows = await db
       .select({
         id: proposals.id,
+        version: proposals.version,
+        sourceLeadId: proposals.sourceLeadId,
         dealershipId: proposals.dealershipId,
         dealership: dealerships.name,
         city: dealerships.city,
@@ -363,7 +365,7 @@ export async function GET() {
         contactName: proposals.contactName,
         contactEmail: proposals.contactEmail,
         dealershipContactEmail: dealerships.contactEmail,
-        factoryManagerEmail: dealerships.factoryManagerEmail,
+        factoryManagerEmail: proposals.commercialOwnerEmail,
         commercialOwner: proposals.commercialOwner,
         commercialOwnerEmail: proposals.commercialOwnerEmail,
         status: proposals.status,
@@ -916,7 +918,7 @@ export async function PATCH(request: Request) {
     const payload = (await request.json()) as {
       id?: string;
       version?: number;
-      action?: "send" | "edit" | "accept_counteroffer" | "return_counteroffer" | "claim" | "offer" | "view_pdf" | "accept_request" | "reject_request" | "record_order" | "submit_order_number";
+      action?: "send" | "edit" | "reassign_owner" | "accept_counteroffer" | "return_counteroffer" | "claim" | "offer" | "view_pdf" | "accept_request" | "reject_request" | "record_order" | "submit_order_number";
       status?: string;
       dealershipId?: number | null;
       contactName?: string;
@@ -986,6 +988,80 @@ export async function PATCH(request: Request) {
         updatedAt: workflowNow,
       }).where(eq(leads.id, record.proposal.sourceLeadId));
       return true;
+    }
+
+    if (payload.action === "reassign_owner") {
+      if (!["general_admin", "global_management"].includes(profile.role)) {
+        return Response.json(
+          { error: "Somente o ADM ou a Gestão Global podem trocar o responsável da proposta." },
+          { status: 403 },
+        );
+      }
+      const requestedManagerEmail = payload.factoryManagerEmail?.trim().toLowerCase() ?? "";
+      const allUsers = await db.select().from(users).orderBy(users.name, users.email);
+      const assignedManager = allUsers.find((candidate) => {
+        const role = normalizeUserRole(candidate.email, candidate.role);
+        return candidate.active && candidate.email.toLowerCase() === requestedManagerEmail && role && canBeProposalResponsible(role);
+      });
+      if (!assignedManager) {
+        return Response.json(
+          { error: "Selecione um responsável HORSCH ativo com nível ADM Geral, Gestão Global ou Gestor Fábrica." },
+          { status: 400 },
+        );
+      }
+      const assignedRole = normalizeUserRole(assignedManager.email, assignedManager.role);
+      if (record.proposal.status === "in_analysis" && !["general_admin", "global_management"].includes(assignedRole ?? "")) {
+        return Response.json(
+          { error: "Durante a análise global, o responsável deve ser um ADM ou Gestor Global." },
+          { status: 400 },
+        );
+      }
+      const normalizedManagerEmail = assignedManager.email.trim().toLowerCase();
+      const updated = await db
+        .update(proposals)
+        .set({
+          commercialOwner: assignedManager.name,
+          commercialOwnerEmail: normalizedManagerEmail,
+          ...(record.proposal.status === "in_analysis" ? { claimedByEmail: normalizedManagerEmail } : {}),
+          updatedAt: workflowNow,
+          version: nextVersion,
+        })
+        .where(proposalGuard)
+        .returning({ id: proposals.id });
+      if (!updated.length) {
+        return Response.json(
+          {
+            error: "Esta proposta foi atualizada por outro gestor. Recarregue os dados antes de continuar.",
+            code: "VERSION_CONFLICT",
+          },
+          { status: 409 },
+        );
+      }
+      await recordAudit(db, {
+        proposalId: payload.id,
+        actorEmail: profile.email,
+        actorName: profile.name,
+        action: "responsible_reassigned",
+        entity: "proposal",
+        details: `Responsável da proposta alterado de ${record.proposal.commercialOwner || record.proposal.commercialOwnerEmail} para ${assignedManager.name}.`,
+        before: {
+          commercialOwner: record.proposal.commercialOwner,
+          commercialOwnerEmail: record.proposal.commercialOwnerEmail,
+          claimedByEmail: record.proposal.claimedByEmail,
+        },
+        after: {
+          commercialOwner: assignedManager.name,
+          commercialOwnerEmail: normalizedManagerEmail,
+          claimedByEmail: record.proposal.status === "in_analysis" ? normalizedManagerEmail : record.proposal.claimedByEmail,
+        },
+      });
+      return Response.json({
+        ok: true,
+        status: record.proposal.status,
+        version: nextVersion,
+        commercialOwner: assignedManager.name,
+        commercialOwnerEmail: normalizedManagerEmail,
+      });
     }
 
     if (payload.action === "claim") {
@@ -1213,7 +1289,7 @@ export async function PATCH(request: Request) {
       const [editedDealer] = await db.select().from(dealerships).where(eq(dealerships.id, editedDealershipId)).limit(1);
       if (!editedDealer || !dealerIsVisible(profile, editedDealer)) return forbidden();
       if (!(await isModuleEnabled(db, editedDealer.id, "proposals"))) return forbidden("O módulo Propostas não está habilitado para esta concessionária.");
-      const requestedManagerEmail = payload.factoryManagerEmail?.trim().toLowerCase() || editedDealer.factoryManagerEmail.toLowerCase();
+      const requestedManagerEmail = payload.factoryManagerEmail?.trim().toLowerCase() || record.proposal.commercialOwnerEmail.toLowerCase() || editedDealer.factoryManagerEmail.toLowerCase();
       const assignedManager = allUsers.find((candidate) => {
         const role = normalizeUserRole(candidate.email, candidate.role);
         return candidate.active && candidate.email.toLowerCase() === requestedManagerEmail && role && canBeProposalResponsible(role);
@@ -1261,7 +1337,7 @@ export async function PATCH(request: Request) {
         recipientEmail,
         commercialOwner: record.proposal.commercialOwner,
         commercialOwnerEmail:
-          record.dealer.factoryManagerEmail || record.proposal.createdByEmail,
+          record.proposal.commercialOwnerEmail || record.proposal.createdByEmail,
         issueDate: record.proposal.issueDate,
         validUntil: record.proposal.validUntil,
         totalCents: record.proposal.totalCents,
