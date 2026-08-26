@@ -4230,6 +4230,33 @@ function ManagementDashboard({ data }: { data: DashboardData }) {
     : 0;
   const ranking = (items: AnalysisRow[]) =>
     items.sort((a, b) => b.value - a.value).slice(0, 5);
+  const negotiationStatuses: ProposalStatus[] = [
+    "sent",
+    "counteroffer",
+    "awaiting_dealer_acceptance",
+    "awaiting_order",
+  ];
+  const negotiation = data.proposals.filter((proposal) =>
+    negotiationStatuses.includes(proposal.status),
+  );
+  const negotiationValue = negotiation.reduce(
+    (sum, proposal) => sum + proposal.totalCents,
+    0,
+  );
+  const negotiationByDealership = ranking(
+    Array.from(
+      negotiation
+        .reduce((map, proposal) => {
+          const key = proposal.dealership || "Sem concessionária";
+          const current = map.get(key) ?? { key, value: 0, count: 0 };
+          current.value += proposal.totalCents;
+          current.count += 1;
+          map.set(key, current);
+          return map;
+        }, new Map())
+        .values(),
+    ),
+  );
   const byOwner = ranking(
     Array.from(
       closed
@@ -4342,17 +4369,8 @@ function ManagementDashboard({ data }: { data: DashboardData }) {
         />
         <MetricCard
           label="Em negociação"
-          value={String(
-            data.proposals.filter((proposal) =>
-              [
-                "sent",
-                "counteroffer",
-                "awaiting_dealer_acceptance",
-                "awaiting_order",
-              ].includes(proposal.status),
-            ).length,
-          )}
-          meta="Aguardando próxima ação"
+          value={formatBRL(negotiationValue)}
+          meta={`${negotiation.length} proposta${negotiation.length === 1 ? "" : "s"} aguardando próxima ação`}
           icon="clock"
           tone="amber"
         />
@@ -4431,17 +4449,31 @@ function ManagementDashboard({ data }: { data: DashboardData }) {
             )}
           </div>
         </article>
+        <article className="panel analysis-panel">
+          <PanelHeader
+            title="Negociações em andamento"
+            subtitle="Valor aberto por concessionária"
+          />
+          <AnalysisRanking rows={negotiationByDealership} countLabel="proposta" />
+        </article>
       </section>
       <div className="analysis-footnote">
         <Icon name="grid" size={15} />
-        Análise baseada em propostas com status Aceita ou Pedido Gerado. Os
-        valores acompanham o escopo de acesso do usuário.
+        Fechamentos consideram status Aceita ou Pedido Gerado. Negociações
+        consideram propostas Enviadas, Contrapropostas, aguardando aceite ou
+        aguardando pedido. Os valores acompanham o escopo de acesso do usuário.
       </div>
     </div>
   );
 }
 
-function AnalysisRanking({ rows }: { rows: AnalysisRow[] }) {
+function AnalysisRanking({
+  rows,
+  countLabel = "fechamento",
+}: {
+  rows: AnalysisRow[];
+  countLabel?: string;
+}) {
   return rows.length ? (
     <div className="analysis-ranking">
       {rows.map((row, index) => (
@@ -4452,7 +4484,7 @@ function AnalysisRanking({ rows }: { rows: AnalysisRow[] }) {
           <div>
             <strong>{row.key}</strong>
             <small>
-              {row.count} fechamento{row.count === 1 ? "" : "s"}
+              {row.count} {countLabel}{row.count === 1 ? "" : "s"}
             </small>
           </div>
           <strong>{formatBRL(row.value)}</strong>
