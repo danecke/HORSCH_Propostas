@@ -324,6 +324,7 @@ type AuditEntry = {
   createdAt: string;
 };
 type View =
+  | "action-center"
   | "overview"
   | "proposals"
   | "quotes"
@@ -549,7 +550,7 @@ function HorschDocumentLogo() {
 }
 
 export function Dashboard({ user }: { user: AppUser }) {
-  const [view, setView] = useState<View>("overview");
+  const [view, setView] = useState<View>("action-center");
   const [proposalTab, setProposalTab] = useState<"operation" | "management">(
     "management",
   );
@@ -715,6 +716,7 @@ export function Dashboard({ user }: { user: AppUser }) {
     leadData?.moduleEnabled !== false &&
     leadData !== null;
   const reimbursementsEnabled = moduleEnabled("reimbursements");
+  const actionCenterEnabled = data.me.role !== "concession";
   const canCreate =
     data.me.permissions.createProposal &&
     proposalsEnabled &&
@@ -756,6 +758,15 @@ export function Dashboard({ user }: { user: AppUser }) {
         </div>
         <nav className="sidebar-nav" aria-label="Navegação principal">
           <span className="nav-section-label">Navegação operacional</span>
+          {!concessionOnly && (
+            <NavButton
+              active={view === "action-center"}
+              icon="grid"
+              onClick={() => setView("action-center")}
+            >
+              Central de Pendências
+            </NavButton>
+          )}
           {concessionOnly && proposalsEnabled && (
             <NavButton
               active={view === "proposals" || view === "overview"}
@@ -952,14 +963,13 @@ export function Dashboard({ user }: { user: AppUser }) {
             ← Voltar
           </button>
         )}
-        {view === "overview" &&
-          ["general_admin", "global_management", "factory_manager", "dealer_manager"].includes(data.me.role) && (
-            <ActionCenter
-              items={data.actionCenter}
-              onOpen={(module) => setView(module)}
-            />
-          )}
-        {view === "leads" && leadsEnabled && leadData ? (
+        {view === "action-center" && actionCenterEnabled ? (
+          <ActionCenterHome
+            items={data.actionCenter}
+            onOpen={(module) => setView(module)}
+            onRefresh={loadData}
+          />
+        ) : view === "leads" && leadsEnabled && leadData ? (
           <HorschLeadsView
             data={leadData}
             me={data.me}
@@ -1048,6 +1058,15 @@ export function Dashboard({ user }: { user: AppUser }) {
           />
         )}
         <nav className="mobile-nav" aria-label="Navegação móvel">
+          {!concessionOnly && (
+            <NavButton
+              active={view === "action-center"}
+              icon="grid"
+              onClick={() => setView("action-center")}
+            >
+              Pendências
+            </NavButton>
+          )}
           {concessionOnly && proposalsEnabled && (
             <NavButton
               active={view === "proposals" || view === "overview"}
@@ -4026,48 +4045,154 @@ function ProposalModuleTabs({
   );
 }
 
-function ActionCenter({
+function ActionCenterHome({
   items,
   onOpen,
+  onRefresh,
 }: {
   items: ActionCenterItem[];
   onOpen: (module: ActionCenterItem["module"]) => void;
+  onRefresh: () => Promise<void>;
 }) {
+  const moduleInfo: Array<{
+    key: ActionCenterItem["module"];
+    label: string;
+    detail: string;
+    icon: IconName;
+  }> = [
+    {
+      key: "quotes",
+      label: "Cotações",
+      detail: "Aprovações e retornos comerciais",
+      icon: "clock",
+    },
+    {
+      key: "proposals",
+      label: "Propostas",
+      detail: "Negociações aguardando decisão",
+      icon: "file",
+    },
+    {
+      key: "reimbursements",
+      label: "Reembolsos N2/N3",
+      detail: "Validações e consentimentos",
+      icon: "money",
+    },
+  ];
+  const total = items.length;
+  const overdue = items.filter((item) => item.sla === "red").length;
+  const attention = items.filter((item) => item.sla === "yellow").length;
+  const onTime = items.filter((item) => item.sla === "green").length;
+
   return (
-    <section className="panel action-center">
-      <header className="panel-header action-center-header">
+    <div className="content-frame action-center-page">
+      <header className="action-center-hero">
         <div>
-          <span className="eyebrow">Fila única de trabalho</span>
-          <h2>Central de Pendências</h2>
-          <p>Cotações, propostas e reembolsos que aguardam sua atuação.</p>
+          <span className="eyebrow">Workspace de decisões</span>
+          <h1>Central de Pendências</h1>
+          <p>
+            Sua fila de trabalho em um só lugar. Acesse cada módulo somente
+            quando houver uma decisão para tomar.
+          </p>
         </div>
-        <div className="action-center-legend" aria-label="Legenda de SLA">
-          <span className="sla-dot green">até 24h</span>
-          <span className="sla-dot yellow">25h a 71h</span>
-          <span className="sla-dot red">72h+</span>
+        <div className="action-center-hero-side">
+          <span className="action-center-live"><i /> Fila atualizada</span>
+          <button className="outline-button compact" type="button" onClick={() => void onRefresh()}>
+            Atualizar fila
+          </button>
         </div>
       </header>
-      {items.length ? (
-        <div className="action-center-list">
-          {items.slice(0, 12).map((item) => (
-            <article className="action-center-row" key={`${item.module}-${item.id}`}>
-              <span className={`action-center-sla ${item.sla}`} aria-hidden="true" />
-              <div>
-                <strong>{item.title}</strong>
-                <small>{item.subtitle}</small>
-              </div>
-              <span className="action-center-status">{item.statusLabel}</span>
-              <time>{item.ageHours < 1 ? "agora" : `${item.ageHours}h`}</time>
-              <button className="icon-button" type="button" onClick={() => onOpen(item.module)} aria-label={`Abrir ${item.title}`} title="Abrir pendência">
-                <Icon name="eye" size={18} />
-              </button>
-            </article>
-          ))}
+
+      <section className="action-center-summary" aria-label="Resumo da fila">
+        <article className="action-center-summary-card total">
+          <span>Total na fila</span>
+          <strong>{total}</strong>
+          <small>pendência{total === 1 ? "" : "s"} para sua atuação</small>
+        </article>
+        <article className="action-center-summary-card on-time">
+          <span>Dentro do prazo</span>
+          <strong>{onTime}</strong>
+          <small>até 24 horas</small>
+        </article>
+        <article className="action-center-summary-card attention">
+          <span>Requer atenção</span>
+          <strong>{attention}</strong>
+          <small>entre 25 e 71 horas</small>
+        </article>
+        <article className="action-center-summary-card overdue">
+          <span>Em atraso</span>
+          <strong>{overdue}</strong>
+          <small>72 horas ou mais</small>
+        </article>
+      </section>
+
+      <section className="action-center-module-grid" aria-label="Pendências por módulo">
+        <div className="action-center-section-heading">
+          <div>
+            <span className="eyebrow">Fila única · por contexto</span>
+            <h2>O que precisa da sua decisão</h2>
+          </div>
+          <div className="action-center-legend" aria-label="Legenda de SLA">
+            <span className="sla-dot green">até 24h</span>
+            <span className="sla-dot yellow">25h a 71h</span>
+            <span className="sla-dot red">72h+</span>
+          </div>
         </div>
-      ) : (
-        <div className="empty-state compact"><strong>Nenhuma ação pendente</strong><span>Sua fila está em dia.</span></div>
-      )}
-    </section>
+        <div className="action-center-module-columns">
+          {moduleInfo.map((module) => {
+            const moduleItems = items.filter((item) => item.module === module.key);
+            return (
+              <article className="action-center-module-card" key={module.key}>
+                <header>
+                  <span className={`action-center-module-icon ${module.key}`}>
+                    <Icon name={module.icon} size={18} />
+                  </span>
+                  <div>
+                    <strong>{module.label}</strong>
+                    <small>{module.detail}</small>
+                  </div>
+                  <b>{moduleItems.length}</b>
+                </header>
+                {moduleItems.length ? (
+                  <div className="action-center-module-list">
+                    {moduleItems.slice(0, 8).map((item) => (
+                      <div className="action-center-module-row" key={`${item.module}-${item.id}`}>
+                        <span className={`action-center-sla ${item.sla}`} aria-hidden="true" />
+                        <div>
+                          <strong>{item.title}</strong>
+                          <small>{item.subtitle}</small>
+                        </div>
+                        <div className="action-center-row-meta">
+                          <span>{item.statusLabel}</span>
+                          <time>{item.ageHours < 1 ? "agora" : `${item.ageHours}h`}</time>
+                        </div>
+                        <button className="action-center-eye" type="button" onClick={() => onOpen(item.module)} aria-label={`Abrir ${item.title}`} title="Abrir pendência">
+                          <Icon name="eye" size={17} />
+                        </button>
+                      </div>
+                    ))}
+                    {moduleItems.length > 8 && <small className="action-center-more">+ {moduleItems.length - 8} pendência(s) na fila</small>}
+                  </div>
+                ) : (
+                  <div className="action-center-module-empty">
+                    <Icon name="check" size={16} />
+                    <span>Nenhuma pendência neste módulo.</span>
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="action-center-note">
+        <span><Icon name="grid" size={18} /></span>
+        <div>
+          <strong>Uma fila, três contextos separados</strong>
+          <p>A Central organiza o trabalho sem misturar os dados. Cada ícone abre o módulo responsável pela análise completa da pendência.</p>
+        </div>
+      </section>
+    </div>
   );
 }
 
