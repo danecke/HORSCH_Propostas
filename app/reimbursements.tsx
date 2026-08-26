@@ -905,6 +905,15 @@ export function ReimbursementsView({ me, dealerships }: { me: ReimbursementAcces
                 <div className="reimbursement-sale-analysis" role="cell">
                   <div className="reimbursement-sale-analysis-top"><span className={`reimbursement-analysis-flag ${sale.workflowRoute === "fast_track" ? "clear" : "attention"}`}>{sale.workflowRoute === "fast_track" ? "Via rápida" : sale.workflowRoute === "blocked" ? "Bloqueada" : "Exceção"}</span><span className={`reimbursement-status ${statusClass(sale.status)}`}>{sale.status}</span></div>
                   <div className="reimbursement-sale-reimbursement"><span>Reembolso</span><strong>{formatBRL(sale.reimbursementCents)}</strong><small>{sale.reimbursementProgram || "Sem programa"}</small></div>
+                  {sale.reimbursementProgram === "N3" && (
+                    <div className="reimbursement-sale-reference">
+                      <span>NF N3 na lista · {sale.state || "UF —"}</span>
+                      <strong>{sale.expectedN3Cents !== null ? formatBRL(sale.expectedN3Cents) : "Não encontrada"}</strong>
+                      <small>
+                        NF informada {formatBRL(sale.invoiceUnitCents)} · {sale.priceDifferenceCents === null ? "sem referência" : `diferença ${signedBRL(sale.priceDifferenceCents)}`}
+                      </small>
+                    </div>
+                  )}
                   <small><strong>{workflowLabel(sale.workflowStatus)}</strong></small>
                   <small>{sale.analysisReason || (sale.expectedN3Cents !== null ? `N3 ${formatBRL(sale.expectedN3Cents)} · Δ ${signedBRL(sale.priceDifferenceCents)}` : "Linha sem pendências")}</small>
                   <small>Base {formatBRL(sale.calculationBaseCents)} · {sale.needsNetReference ? "NET necessário" : sale.netPriceUsedCents === null ? "Custo médio" : `NET ${formatBRL(sale.netPriceUsedCents)}`}</small>

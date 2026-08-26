@@ -17,7 +17,7 @@ const UPLOAD_CHUNK_SIZE = 1 * 1024 * 1024;
 // D1 limits bound SQL variables. Each item uses 12 bound values, so eight
 // items keep every multi-row insert below the platform limit.
 const DB_INSERT_BATCH_SIZE = 8;
-const STATES = ["BA", "MA", "PI", "TO", "RS", "SC", "PR", "SP", "MG", "MS", "MT", "DF", "RR", "PA", "GO", "PY", "RO"];
+const STATES = ["AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO", "PY"];
 type PriceTier = "final" | "n2" | "n3";
 
 type ParsedPriceRow = {
@@ -134,8 +134,10 @@ function normalizeStatePrices(statePrices: ParsedPriceRow["statePrices"]) {
     return [state, {
       ...prices,
       final: finalPriceCents,
-      n2: derivedLevelPrice(finalPriceCents, 0.9),
-      n3: derivedLevelPrice(finalPriceCents, 0.8),
+      // Prefer the explicit N2/N3 values from the price list. The derived
+      // percentage is only a fallback for legacy files without those columns.
+      n2: prices.n2 ?? derivedLevelPrice(finalPriceCents, 0.9),
+      n3: prices.n3 ?? derivedLevelPrice(finalPriceCents, 0.8),
     }];
   }));
 }
@@ -276,8 +278,8 @@ function projectItem(item: typeof priceListItems.$inferSelect, state: string) {
     origin: item.origin,
     netPriceCents: selected.netPriceCents ?? item.netPriceCents,
     finalPriceCents,
-    n2PriceCents: derivedLevelPrice(finalPriceCents, 0.9),
-    n3PriceCents: derivedLevelPrice(finalPriceCents, 0.8),
+    n2PriceCents: selected.n2 ?? derivedLevelPrice(finalPriceCents, 0.9),
+    n3PriceCents: selected.n3 ?? derivedLevelPrice(finalPriceCents, 0.8),
     state,
   };
 }

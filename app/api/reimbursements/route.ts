@@ -578,6 +578,9 @@ function exportXlsx(rows: Array<Record<string, unknown>>) {
     "Estado",
     "Concessionário",
     "Quantidade",
+    "NF unitário informado",
+    "NF N3 da lista (UF)",
+    "Diferença NF N3",
     "Custo Total",
     "Valor Líquido Total",
     "Margem %",
@@ -596,6 +599,13 @@ function exportXlsx(rows: Array<Record<string, unknown>>) {
     row.state,
     row.dealershipName,
     row.quantity,
+    moneyLabel(Number(row.invoiceUnitCents) || 0),
+    row.expectedN3Cents === null || row.expectedN3Cents === undefined
+      ? ""
+      : moneyLabel(Number(row.expectedN3Cents) || 0),
+    row.priceDifferenceCents === null || row.priceDifferenceCents === undefined
+      ? ""
+      : moneyLabel(Number(row.priceDifferenceCents) || 0),
     moneyLabel(Number(row.costTotalCents) || 0),
     moneyLabel(Number(row.liquidTotalCents) || 0),
     `${(Number(row.marginBps) / 100).toFixed(2)}%`,
