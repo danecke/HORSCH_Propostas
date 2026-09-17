@@ -51,6 +51,13 @@ export default defineConfig(async () => {
         ? { watch: { useFsEvents: false, usePolling: true } }
         : {}),
     },
+    preview: {
+      // Hosts aceitos pelo `vite preview` (homologação atrás do Traefik).
+      // Sobrescreva com PREVIEW_ALLOWED_HOSTS (csv) sem rebuild.
+      allowedHosts: process.env.PREVIEW_ALLOWED_HOSTS
+        ? process.env.PREVIEW_ALLOWED_HOSTS.split(",").map((h) => h.trim())
+        : ["propostas-hom.horsch.com.br"],
+    },
     plugins: [
       vinext(),
       sites(),
