@@ -1,3 +1,18 @@
+# ⚠️ REPOSITÓRIO ARQUIVADO — 2026-09-17
+
+Este portal ("Gestão de Propostas HORSCH", construído no OpenAI/ChatGPT
+Sites sobre Cloudflare Workers) foi **integralmente portado para o
+HORSCH Parts** (`github.com/danecke/HORSCH_Parts`, backend NestJS +
+Prisma/Postgres). Todos os módulos — Propostas Comerciais, Cotações,
+Horsch Leads, Reembolsos N2/N3, avisos de lista de preços, módulos por
+concessionária e Central de Pendências — vivem agora no Parts.
+
+O plano e as decisões do porte estão em `PLANO_INTEGRACAO.md` no
+repositório do Parts. Este repositório permanece apenas como referência
+histórica do código original e não recebe mais alterações.
+
+---
+
 # vinext-starter
 
 A clean full-stack starter running on
