@@ -1,0 +1,14 @@
+node_modules
+.git
+.wrangler
+.sites-runtime
+dist
+.next
+outputs
+work
+coverage
+.env
+.env.*
+!.env.example
+npm-debug.log*
+.DS_Store
