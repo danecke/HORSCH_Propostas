@@ -9,7 +9,7 @@ INSERT INTO `users` (
 ) VALUES (
   'admin.hom@horsch.com.br',
   'Admin Homologação',
-  'admin',
+  'general_admin',
   NULL,
   1,
   '5GGOxTVFLTVq6fEPN320wkqaBCamhaTSGi5Ld6Yb3gw=',
@@ -20,7 +20,7 @@ INSERT INTO `users` (
   CURRENT_TIMESTAMP
 )
 ON CONFLICT(`email`) DO UPDATE SET
-  `role` = 'admin',
+  `role` = 'general_admin',
   `active` = 1,
   `password_hash` = excluded.`password_hash`,
   `password_salt` = excluded.`password_salt`,

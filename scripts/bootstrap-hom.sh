@@ -53,16 +53,15 @@ for f in $(ls "${migrations_dir}"/*.sql | sort); do
   applied=$((applied + 1))
 done
 
-seed_file="$(dirname "${BASH_SOURCE[0]}")/hom-seed.sql"
-if [[ -f "${seed_file}" ]]; then
+for seed_file in $(ls "$(dirname "${BASH_SOURCE[0]}")"/hom-seed*.sql 2>/dev/null | sort); do
   seed_name="zzz_$(basename "${seed_file}")"
   already="$(sqlite3 "${db_file}" "SELECT COUNT(*) FROM _hom_migrations WHERE name='${seed_name}';")"
   if [[ "${already}" == "0" ]]; then
-    echo "==> Aplicando seed de homologação (admin.hom@horsch.com.br)"
+    echo "==> Aplicando seed de homologação: $(basename "${seed_file}")"
     { echo "BEGIN;"; cat "${seed_file}"; echo ";"; echo "COMMIT;"; } | sqlite3 "${db_file}"
     sqlite3 "${db_file}" "INSERT INTO _hom_migrations (name) VALUES ('${seed_name}');"
   fi
-fi
+done
 
 echo "==> Concluído: ${applied} migração(ões) aplicada(s)."
 sqlite3 "${db_file}" "SELECT 'Tabelas: ' || COUNT(*) FROM sqlite_master WHERE type='table';"
